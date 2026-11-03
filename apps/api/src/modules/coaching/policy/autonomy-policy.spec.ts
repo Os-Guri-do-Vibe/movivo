@@ -29,13 +29,16 @@ const policy: AutonomyPolicy = {
   onLimitExceeded: 'ESCALATE',
 };
 
-const substitute = (reason: 'PREFERENCE' | 'DISCOMFORT'): CoachingAction => ({
+const substitute = (
+  reason: 'PREFERENCE' | 'DISCOMFORT',
+  scope: 'NEXT_SESSION' | 'PLAN' = 'NEXT_SESSION',
+): CoachingAction => ({
   type: 'SUBSTITUTE_EXERCISE',
   planSessionKey: 'STR_A',
   fromExerciseId: 'agachamento_livre',
   toExerciseId: 'leg_press_45',
   reason,
-  scope: 'PLAN',
+  scope,
 });
 const volume = (percentChange: number): CoachingAction => ({
   type: 'ADJUST_WEEKLY_VOLUME',
@@ -85,15 +88,27 @@ describe('motor de políticas de autonomia', () => {
       { ...calm, uncertainty: 'HIGH' },
       'ASK',
     ],
-    ['desconforto nunca é troca automática', substitute('DISCOMFORT'), calm, 'ESCALATE'],
+    ['troca por desconforto também é autônoma', substitute('DISCOMFORT'), calm, 'EXECUTE'],
     [
       'sinal de treino ativo suspende ações de treino',
       substitute('PREFERENCE'),
       {
         ...calm,
-        activeSignals: [{ kind: 'PERSISTENT_PAIN', severity: 'ATTENTION', scope: 'TRAINING' }],
+        activeSignals: [{ kind: 'RECENT_SURGERY', severity: 'URGENT', scope: 'TRAINING' }],
       },
       'ESCALATE',
+    ],
+    [
+      'dor e lesão não suspendem: a IA ajusta com cautela e o profissional é alertado',
+      substitute('PREFERENCE'),
+      {
+        ...calm,
+        activeSignals: [
+          { kind: 'SEVERE_PAIN', severity: 'URGENT', scope: 'TRAINING' },
+          { kind: 'NEW_INJURY', severity: 'URGENT', scope: 'TRAINING' },
+        ],
+      },
+      'EXECUTE',
     ],
     [
       'sinal de nutrição não suspende treino',
@@ -207,5 +222,130 @@ describe('autonomyPolicyFrom', () => {
       highUncertainty: 'ASK',
       onLimitExceeded: 'ESCALATE',
     });
+  });
+});
+
+describe('protocolo na fila do profissional', () => {
+  const planId = '11111111-1111-4111-8111-111111111111';
+  const training: CoachingAction = { type: 'PUBLISH_TRAINING_PLAN', planId };
+  const nutrition: CoachingAction = { type: 'PUBLISH_NUTRITION_PLAN', planId };
+  const parq = { kind: 'PARQ_POSITIVE', severity: 'URGENT', scope: 'ALL' } as const;
+
+  it('nenhum nível publicado libera o protocolo direto: vai para a revisão opcional', () => {
+    // O padrão do sistema ainda traz `AUTO`; a fila é regra do produto, não parâmetro.
+    expect(evaluateAction(training, calm, policy).verdict).toBe('ASK');
+    expect(
+      evaluateAction(nutrition, calm, {
+        ...policy,
+        byAction: { PUBLISH_NUTRITION_PLAN: { level: 'AUTO', limit: 0 } },
+      }).verdict,
+    ).toBe('ASK');
+  });
+
+  it('PAR-Q de risco torna a revisão obrigatória, mesmo sem sinal ativo (depois de resolvido)', () => {
+    const verdict = evaluateAction(training, { ...calm, requiresProfessionalReview: true }, policy);
+    expect(verdict.verdict).toBe('ESCALATE');
+    expect(verdict.reasons.join(' ')).toContain('revisão obrigatória');
+  });
+
+  it('com o sinal do PAR-Q ativo o protocolo também é obrigatório', () => {
+    const context = { ...calm, activeSignals: [parq], requiresProfessionalReview: true };
+    expect(evaluateAction(training, context, policy).verdict).toBe('ESCALATE');
+    expect(evaluateAction(nutrition, context, policy).verdict).toBe('ESCALATE');
+  });
+
+  it('a estratégia (base interna do plano) não é segurada pelo PAR-Q', () => {
+    const strategy: CoachingAction = { type: 'DEFINE_STRATEGY', goalId: planId };
+    const context = { ...calm, activeSignals: [parq], requiresProfessionalReview: true };
+    expect(evaluateAction(strategy, context, { ...policy, byAction: {} }).verdict).not.toBe(
+      'BLOCK',
+    );
+    const withAuto: AutonomyPolicy = {
+      ...policy,
+      byAction: { DEFINE_STRATEGY: { level: 'AUTO', limit: 0 } },
+    };
+    expect(evaluateAction(strategy, context, withAuto).verdict).toBe('EXECUTE');
+  });
+
+  it('a emergência continua bloqueando a estratégia e o protocolo', () => {
+    const emergency = {
+      ...calm,
+      activeSignals: [{ kind: 'CHEST_PAIN', severity: 'EMERGENCY', scope: 'ALL' } as const],
+    };
+    expect(evaluateAction(training, emergency, policy).verdict).toBe('BLOCK');
+    expect(
+      evaluateAction({ type: 'DEFINE_STRATEGY', goalId: planId }, emergency, policy).verdict,
+    ).toBe('BLOCK');
+  });
+
+  it('incerteza alta não vira revisão obrigatória, só fica registrada', () => {
+    const verdict = evaluateAction(
+      training,
+      { ...calm, uncertainty: 'HIGH' },
+      {
+        ...policy,
+        highUncertainty: 'ESCALATE',
+      },
+    );
+    expect(verdict.verdict).toBe('ASK');
+    expect(verdict.reasons.join(' ')).toContain('incerteza alta');
+  });
+
+  it('pedido de revisão do aluno e sinal ativo não travam o protocolo: têm caso próprio em Alertas', () => {
+    expect(evaluateAction(training, { ...calm, reviewRequested: true }, policy).verdict).toBe(
+      'ASK',
+    );
+    const surgery = {
+      ...calm,
+      activeSignals: [{ kind: 'RECENT_SURGERY', severity: 'URGENT', scope: 'ALL' } as const],
+    };
+    expect(evaluateAction(training, surgery, policy).verdict).toBe('ASK');
+    const autoNutrition = {
+      ...policy,
+      byAction: { PUBLISH_NUTRITION_PLAN: { level: 'AUTO', limit: 0 } },
+    } satisfies AutonomyPolicy;
+    expect(evaluateAction(nutrition, surgery, autoNutrition).verdict).toBe('ASK');
+  });
+});
+
+describe('troca de exercício no protocolo', () => {
+  it('só a próxima sessão é aplicada na hora; no protocolo passa pela fila opcional', () => {
+    expect(evaluateAction(substitute('PREFERENCE'), calm, policy).verdict).toBe('EXECUTE');
+    const plan = evaluateAction(substitute('PREFERENCE', 'PLAN'), calm, policy);
+    expect(plan.verdict).toBe('ASK');
+    expect(plan.reasons.join(' ')).toContain('fila do profissional');
+  });
+
+  it('desconforto no protocolo também é autônomo (fila opcional), sem escalonar', () => {
+    expect(evaluateAction(substitute('DISCOMFORT', 'PLAN'), calm, policy).verdict).toBe('ASK');
+  });
+
+  it('aluno com PAR-Q de risco: a troca no protocolo só sai com a liberação humana', () => {
+    expect(
+      evaluateAction(
+        substitute('PREFERENCE', 'PLAN'),
+        { ...calm, requiresProfessionalReview: true },
+        policy,
+      ).verdict,
+    ).toBe('ESCALATE');
+  });
+
+  it('dor e pedido de revisão não seguram a troca no protocolo', () => {
+    const context = {
+      ...calm,
+      reviewRequested: true,
+      activeSignals: [{ kind: 'SEVERE_PAIN', severity: 'URGENT', scope: 'TRAINING' } as const],
+    };
+    expect(evaluateAction(substitute('DISCOMFORT', 'PLAN'), context, policy).verdict).toBe('ASK');
+  });
+
+  it('a emergência bloqueia a troca no protocolo', () => {
+    const emergency = {
+      ...calm,
+      activeSignals: [{ kind: 'CHEST_PAIN', severity: 'EMERGENCY', scope: 'ALL' } as const],
+    };
+    expect(evaluateAction(substitute('PREFERENCE', 'PLAN'), emergency, policy).verdict).toBe(
+      'BLOCK',
+    );
   });
 });

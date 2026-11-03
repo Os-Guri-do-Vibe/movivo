@@ -164,7 +164,7 @@ function sortValue(student: ControlCenterStudentSummary, key: SortKey): string {
  */
 export function StudentsDashboard() {
   const load = useCallback((signal?: AbortSignal) => getStudents(signal), []);
-  const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
+  const { data, error, forbidden, loading, refresh, updatedAt } = useControlCenterResource(load);
   // `form` é o rascunho editado nos campos; `applied` só muda ao clicar "Buscar" (ou
   // "Limpar filtro"/remover um chip, que sincronizam os dois) — padrão do AuditDashboard.
   const [form, setForm] = useState<StudentFilters>(EMPTY_FILTERS);
@@ -306,6 +306,7 @@ export function StudentsDashboard() {
       <SectorHeader
         title="Base de Alunos"
         icon={UsersRound}
+        updatedAt={updatedAt}
         refreshing={loading}
         onRefresh={() => void refresh()}
       />

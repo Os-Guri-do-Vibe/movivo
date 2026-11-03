@@ -26,11 +26,11 @@ import {
   users,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
-import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { buildFit } from '../src/modules/training/import/fit-fixture';
 import { ExecutionService } from '../src/modules/training/execution.service';
 import { ScheduleService } from '../src/modules/training/schedule.service';
 import { createStudent, fakeRunner } from './plan-fixtures';
+import { generatePublished } from './plan-publication';
 
 let app: INestApplication;
 let db: TenantDatabase;
@@ -42,8 +42,7 @@ const NOW = new Date('2026-11-04T15:00:00.000Z');
 
 async function studentWithPlan(): Promise<string> {
   const userId = await createStudent(db, created);
-  const result = await app.get(PlanGenerationService).generate(userId, { now: NOW });
-  expect(result.status).toBe('PUBLISHED');
+  expect(await generatePublished(app, userId, NOW)).toBe('PUBLISHED');
   return userId;
 }
 

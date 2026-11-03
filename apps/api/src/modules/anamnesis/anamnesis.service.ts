@@ -30,6 +30,7 @@ import {
   ageInYears,
   attributionInputSchema,
   normalizeAttribution,
+  type AnamnesisAnswersView,
   type AttributionInput,
   CONSENT_TEXTS,
   MIN_AGE_YEARS,
@@ -81,6 +82,18 @@ const SESSION_TTL_MS = 72 * 60 * 60 * 1000;
 const COMPLEMENTARY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** Chave de bloco de cada etapa. */
+const ANAMNESIS_STEP_TITLES: Readonly<Record<OnboardingStepNumber, string>> = {
+  1: 'Cadastro',
+  2: 'Objetivos',
+  3: 'Modalidades',
+  4: 'Rotina',
+  5: 'Preferências de treino e saúde geral',
+  6: 'Dores e limitações',
+  7: 'Alimentação',
+  8: 'Corpo',
+  9: 'PAR-Q',
+};
+
 const BLOCK_KEY: Readonly<Record<OnboardingStepNumber, string>> = {
   1: 'registration',
   2: 'goals',
@@ -673,6 +686,48 @@ export class AnamnesisService {
       nutrition: ONBOARDING_STEP_SCHEMAS[7].parse(merged(7)),
       body: row.completedSteps.includes(8) ? ONBOARDING_STEP_SCHEMAS[8].parse(merged(8)) : null,
       parq: ONBOARDING_STEP_SCHEMAS[9].parse(merged(9)),
+    };
+  }
+
+  /**
+   * Respostas da anamnese enviada mais recente do aluno, para o profissional que revisa o
+   * protocolo. Etapa que o fluxo não pede (cadastro, na complementar) ou que não passa mais no
+   * contrato atual fica de fora em vez de derrubar a tela. A leitura é auditada por quem chama.
+   */
+  async submittedAnswersOf(userId: string): Promise<AnamnesisAnswersView | null> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select()
+        .from(anamnesisSessions)
+        .where(and(eq(anamnesisSessions.userId, userId), eq(anamnesisSessions.status, 'SUBMITTED')))
+        .orderBy(desc(anamnesisSessions.submittedAt))
+        .limit(1),
+    );
+    if (!row) return null;
+    const secret = await this.readSensitive(row.sensitive);
+    const steps: AnamnesisAnswersView['steps'] = [];
+    for (const step of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
+      const key = BLOCK_KEY[step];
+      const merged = {
+        ...(row.blocks[key] as Record<string, unknown> | undefined),
+        ...(secret[key] as Record<string, unknown> | undefined),
+      };
+      if (Object.keys(merged).length === 0) continue;
+      const parsed = ONBOARDING_STEP_SCHEMAS[step].safeParse(
+        step === 3
+          ? withModalityVenues(merged)
+          : step === 4
+            ? withSessionsWithinDays(merged)
+            : merged,
+      );
+      // Etapa que não passa mais no contrato atual aparece como foi respondida.
+      const data = (parsed.success ? parsed.data : merged) as Record<string, unknown>;
+      steps.push({ step, title: ANAMNESIS_STEP_TITLES[step], data });
+    }
+    return {
+      submittedAt: row.submittedAt?.toISOString() ?? null,
+      flow: row.flow as AnamnesisAnswersView['flow'],
+      steps,
     };
   }
 

@@ -15,7 +15,8 @@ import { planReadSchema, type PlanRead } from '@movivo/shared';
 
 import { AccessLinkService } from '../../core/database/access-link.service';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
-import { nutritionPlanPdf, PLAN_PDF_KINDS, trainingPlanPdf, type PlanPdfKind } from './plan-pdf';
+import { PLAN_PDF_KINDS, type PlanPdfKind } from './plan-pdf';
+import { nutritionPlanPdf, trainingPlanPdf } from './protocol-pdf';
 import { PlanViewService } from './plan-view.service';
 
 @ApiTags('Plano')

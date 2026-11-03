@@ -7,6 +7,7 @@ const ID = '11111111-1111-4111-8111-111111111111';
 describe('allowlist de mutações do Control Center', () => {
   it.each([
     'ai/knowledge/review',
+    'ai/taco/import',
     `ai/knowledge/${ID}/retry`,
     `ai/knowledge/${ID}/archive`,
     `ai/knowledge/${ID}/delete`,
@@ -17,6 +18,9 @@ describe('allowlist de mutações do Control Center', () => {
     `exceptions/${ID}/resolve`,
     `exceptions/${ID}/request-adjustment`,
     'agents/profiles/HYROX/drafts',
+    'agents/profiles/PERSONA_FEMALE/drafts',
+    'agents/profiles/PERSONA_MALE/drafts',
+    `methodology/documents/${ID}/test/cancel`,
     `agents/profiles/documents/${ID}/update`,
     `agents/profiles/documents/${ID}/test`,
     `agents/profiles/documents/${ID}/publish`,
@@ -52,8 +56,12 @@ describe('allowlist de mutações do Control Center', () => {
     `exceptions/${ID}/delete`,
     `exceptions/${ID}/approve/extra`,
     'agents/profiles/hyrox/drafts',
+    'agents/profiles/PERSONA_OUTRA/drafts',
+    'agents/profiles/HYROX_/drafts',
     'agents/profiles/documents/not-a-uuid/publish',
     `agents/profiles/documents/${ID}/delete`,
+    `methodology/documents/${ID}/test/estimate`, // consulta (GET), nunca mutação
+    `methodology/documents/${ID}/test/cancel/extra`,
     'exceptions/not-a-uuid/approve',
     // Parecidos com os de favorito, mas não listados: a allowlist é por igualdade exata.
     'ai/exercise-catalog/favorites',

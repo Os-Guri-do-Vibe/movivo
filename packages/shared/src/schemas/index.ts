@@ -18,6 +18,7 @@ export * from './audit-search.schema';
 export * from './ad-spend.schema';
 export * from './partners.schema';
 export * from './knowledge.schema';
+export * from './taco.schema';
 export * from './exercise-catalog.schema';
 
 // Treino multimodal, Estado do Aluno, nutrição, corpo, check-in, decisões e eventos.

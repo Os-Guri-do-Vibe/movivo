@@ -10,6 +10,10 @@ import {
   type PlanSession,
 } from '@movivo/shared';
 
+import { brl } from '@/lib/meal-menu';
+
+import { MealMenu } from './meal-menu';
+
 const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'] as const;
 
 const SLOT_LABELS = {
@@ -218,6 +222,13 @@ export function PlanView({ plan }: { plan: PlanRead }) {
             {ENERGY_LABELS[nutrition.structure.strategy] ?? nutrition.structure.strategy}
           </p>
           <p className="text-body">{nutrition.structure.summary}</p>
+          {nutrition.structure.estimatedDailyCostBrl ? (
+            <p className="text-label text-muted-foreground">
+              Custo estimado do cardápio: ~{brl(nutrition.structure.estimatedDailyCostBrl)} por dia
+              (~{brl(nutrition.structure.estimatedDailyCostBrl * 30)} no mês), com preços médios de
+              supermercado; varia por região e época.
+            </p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Targets title="Dia de treino" targets={nutrition.structure.trainingDay} />
             <Targets title="Dia de descanso" targets={nutrition.structure.restDay} />
@@ -232,11 +243,7 @@ export function PlanView({ plan }: { plan: PlanRead }) {
                   </span>
                 </h3>
                 <p className="text-body text-muted-foreground">{meal.guidance}</p>
-                <ul className="mt-1 list-disc pl-5 text-body">
-                  {meal.examples.map((example) => (
-                    <li key={example}>{example}</li>
-                  ))}
-                </ul>
+                <MealMenu meal={meal} />
               </article>
             ))}
           </div>

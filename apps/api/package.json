@@ -18,6 +18,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/core/database/migrate.ts",
     "db:seed": "tsx src/core/database/seed.ts",
+    "rag:eval": "nest build && node --enable-source-maps dist/scripts/rag-eval.js",
+    "knowledge:build-defaults": "nest build && node --enable-source-maps dist/scripts/build-default-knowledge.js",
     "db:backfill-transitions": "tsx src/core/database/backfill-status-transitions.ts",
     "db:studio": "drizzle-kit studio",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""

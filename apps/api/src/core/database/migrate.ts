@@ -6,7 +6,9 @@
  *
  * Faz duas coisas, nesta ordem:
  *  1. aplica as migrações versionadas de `./drizzle`;
- *  2. reaplica os **grants mínimos** de `movivo_app` (TASK-0.4.3).
+ *  2. reaplica os **grants mínimos** de `movivo_app` (TASK-0.4.3);
+ *  3. carrega os **dados padrão** da aplicação (a TACO e os complementos, os artigos da Base de
+ *     Conhecimento, o FAQ e os guardrails L1), só o que ainda falta.
  *
  * O passo 2 é parte do runner, e não de um SQL solto na migração, porque toda
  * migração futura que criar tabela precisa que os grants sejam reconciliados —
@@ -22,6 +24,9 @@ import postgres from 'postgres';
 import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
+import { seedDefaultAiConfig } from './default-ai-config';
+import { seedDefaultArticles } from './default-articles';
+import { seedReferenceFoods } from './reference-foods';
 import { sqlIdentifier } from './sql-identifier';
 import {
   buildAiForbiddenTopicsImmutabilitySql,
@@ -111,6 +116,8 @@ const GRANTS_SQL = (role: string) => `
  *   compatibilidade, embora as PKs usem `gen_random_uuid()` do core (ver `_shared.ts`).
  * `pgcrypto` — cifra em repouso das colunas de saúde marcadas `LGPD Art. 11`
  *   (implementada na sprint de anamnese, não aqui).
+ * `unaccent` — busca textual do RAG sem acento: no WhatsApp o aluno escreve "series de costas" e
+ *   o artigo diz "séries". Extensão "trusted": o dono do banco consegue criá-la.
  *
  * ## Por que aqui e não dentro de `0000_init.sql`
  * O `drizzle-kit` não emite `CREATE EXTENSION`, então a linha teria de ser
@@ -119,7 +126,7 @@ const GRANTS_SQL = (role: string) => `
  * sobrevive a qualquer `db:generate`. Vale para bancos que não passaram pelo
  * init do container (RDS, staging, testcontainers da US-0.8).
  */
-const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
+const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto', 'unaccent'] as const;
 
 /**
  * Reconciliação do corpus RAG (US-3.3). Idempotente:
@@ -290,6 +297,23 @@ async function main(): Promise<void> {
       );
     }
     console.log(`[db:migrate] OK — RLS ENABLE+FORCE confirmada em ${rls.length} tabela(s).`);
+
+    // Dados padrão (base de alimentos): depois de grants e RLS, só insere o que ainda não existe.
+    const referenceFoods = await seedReferenceFoods(drizzle(sql), apiRoot);
+    console.log(
+      `[db:migrate] Alimentos padrão (TACO 4ª ed. + complementos): ${referenceFoods} novo(s).`,
+    );
+
+    // Dados padrão (artigos científicos do RAG): texto, trechos e vetores versionados no repositório,
+    // conferidos por hash. Só entra o que a equipe ainda não tem nem excluiu.
+    const defaultArticles = await seedDefaultArticles(sql, apiRoot);
+    console.log(`[db:migrate] Artigos padrão da Base de Conhecimento: ${defaultArticles} novo(s).`);
+
+    // Dados padrão (FAQ e guardrails L1 de segurança): base simples, sem autor, só o que falta.
+    const defaultAiConfig = await seedDefaultAiConfig(sql);
+    console.log(
+      `[db:migrate] FAQ padrão: ${defaultAiConfig.faq} novo(s); guardrails L1 padrão: ${defaultAiConfig.guardrails} novo(s).`,
+    );
   } finally {
     await sql.end({ timeout: 5 });
   }

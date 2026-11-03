@@ -62,6 +62,20 @@ export const protocolReviewSchema = z.discriminatedUnion('kind', [
     kind: z.literal('NUTRITION'),
     ...protocolBase,
     structure: nutritionPlanStructureSchema,
+    /** Alimentos que a equipe pode usar ao editar o cardápio (já sem restrição e alergia do aluno). */
+    foodOptions: z
+      .array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          category: z.string(),
+          energyKcal: z.number(),
+          proteinG: z.number(),
+          carbsG: z.number(),
+          fatG: z.number(),
+        }),
+      )
+      .optional(),
   }),
 ]);
 export type ProtocolReview = z.infer<typeof protocolReviewSchema>;

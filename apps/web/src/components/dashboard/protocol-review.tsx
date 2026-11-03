@@ -15,6 +15,8 @@ import {
   SESSION_MODALITY_LABELS,
   SESSION_PRIORITY_LABELS,
   type DailyTargets,
+  type MealItem,
+  type MealOption,
   type NutritionPlanStructure,
   type PlanSession,
   type ProtocolReview as Protocol,
@@ -23,7 +25,11 @@ import {
 } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
+import { MealMenu } from '@/components/plano/meal-menu';
+import { brl, OPTION_LETTERS } from '@/lib/meal-menu';
 import {
+  amendActiveProtocol,
+  getActiveProtocol,
   getExceptionProtocol,
   ProtocolEditError,
   requestProtocolAdjustment,
@@ -253,13 +259,15 @@ function NutritionView({ structure }: { structure: NutritionPlanStructure }) {
             </span>
           </p>
           <p className="mt-1">{meal.guidance}</p>
-          <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-            {meal.examples.map((example) => (
-              <li key={example}>{example}</li>
-            ))}
-          </ul>
+          <MealMenu meal={meal} />
         </div>
       ))}
+      {structure.estimatedDailyCostBrl ? (
+        <p className="text-xs text-muted-foreground">
+          Custo estimado do cardápio: ~{brl(structure.estimatedDailyCostBrl)} por dia (~
+          {brl(structure.estimatedDailyCostBrl * 30)} no mês), estimativa do nutricionista de IA.
+        </p>
+      ) : null}
       <div>
         <h3 className="text-label font-semibold">Orientações</h3>
         <ul className="mt-1 list-disc pl-5 text-xs">
@@ -553,11 +561,203 @@ function TargetsEditor({
   );
 }
 
+type FoodOption = NonNullable<Extract<Protocol, { kind: 'NUTRITION' }>['foodOptions']>[number];
+
+function FoodSelect({
+  value,
+  name,
+  foods,
+  onChange,
+}: {
+  value: string;
+  name: string;
+  foods: readonly FoodOption[];
+  onChange: (food: FoodOption) => void;
+}) {
+  const known = foods.some((f) => f.id === value);
+  return (
+    <select
+      aria-label="Alimento"
+      value={value}
+      onChange={(event) => {
+        const food = foods.find((f) => f.id === event.target.value);
+        if (food) onChange(food);
+      }}
+      className={field}
+    >
+      {known ? null : <option value={value}>{name}</option>}
+      {foods.map((f) => (
+        <option key={f.id} value={f.id}>
+          {f.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Uma opção de cardápio: título, custo estimado e alimentos com a quantidade e as trocas. */
+function OptionEditor({
+  index,
+  option,
+  foods,
+  onChange,
+}: {
+  index: number;
+  option: MealOption;
+  foods: readonly FoodOption[];
+  onChange: (option: MealOption) => void;
+}) {
+  const setItem = (ii: number, next: MealItem) =>
+    onChange({ ...option, items: option.items.map((it, i) => (i === ii ? next : it)) });
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
+        <TextField
+          label={`Opção ${OPTION_LETTERS[index] ?? index + 1}: título`}
+          value={option.title}
+          maxLength={80}
+          onChange={(title) => onChange({ ...option, title })}
+        />
+        <NumberField
+          label="Custo estimado (R$)"
+          value={option.estimatedCostBrl}
+          min={0}
+          max={300}
+          step={0.5}
+          onChange={(cost) => onChange({ ...option, estimatedCostBrl: cost ?? 0 })}
+        />
+      </div>
+      {option.items.map((item, ii) => (
+        <div key={ii} className="space-y-1.5 rounded-md bg-secondary/40 p-2">
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_7rem_auto]">
+            <label className="block text-xs text-muted-foreground">
+              Alimento
+              <FoodSelect
+                value={item.foodId}
+                name={item.name}
+                foods={foods}
+                onChange={(food) =>
+                  setItem(ii, { ...item, foodId: food.id, name: food.name, swaps: [] })
+                }
+              />
+            </label>
+            <NumberField
+              label="Quantidade (g)"
+              value={item.grams}
+              min={1}
+              max={1500}
+              onChange={(grams) => setItem(ii, { ...item, grams: grams ?? 1 })}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={option.items.length <= 1}
+              onClick={() =>
+                onChange({ ...option, items: option.items.filter((_, i) => i !== ii) })
+              }
+            >
+              Remover
+            </Button>
+          </div>
+          {item.unit ? (
+            <p className="text-xs text-muted-foreground">
+              Medida caseira: {item.unit.grams} g por {item.unit.singular}.
+            </p>
+          ) : null}
+          {item.swaps.map((swap, si) => (
+            <div key={si} className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+              <label className="block text-xs text-muted-foreground">
+                Troca equivalente {si + 1} (a quantidade é calculada)
+                <FoodSelect
+                  value={swap.foodId}
+                  name={swap.name}
+                  foods={foods}
+                  onChange={(food) =>
+                    setItem(ii, {
+                      ...item,
+                      swaps: item.swaps.map((sw, i) =>
+                        i === si ? { ...sw, foodId: food.id, name: food.name } : sw,
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setItem(ii, { ...item, swaps: item.swaps.filter((_, i) => i !== si) })
+                }
+              >
+                Remover troca
+              </Button>
+            </div>
+          ))}
+          {item.swaps.length < 3 && foods[0] ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setItem(ii, {
+                  ...item,
+                  swaps: [
+                    ...item.swaps,
+                    {
+                      foodId: foods[0]?.id ?? '',
+                      name: foods[0]?.name ?? '',
+                      grams: 100,
+                      energyKcal: 0,
+                    },
+                  ],
+                })
+              }
+            >
+              Adicionar troca
+            </Button>
+          ) : null}
+        </div>
+      ))}
+      {option.items.length < 8 && foods[0] ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            onChange({
+              ...option,
+              items: [
+                ...option.items,
+                {
+                  foodId: foods[0]?.id ?? '',
+                  name: foods[0]?.name ?? '',
+                  grams: 100,
+                  energyKcal: 0,
+                  proteinG: 0,
+                  carbsG: 0,
+                  fatG: 0,
+                  swaps: [],
+                },
+              ],
+            })
+          }
+        >
+          Adicionar alimento
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function NutritionEditor({
   structure,
+  foods,
   onChange,
 }: {
   structure: NutritionPlanStructure;
+  foods: readonly FoodOption[];
   onChange: (structure: NutritionPlanStructure) => void;
 }) {
   return (
@@ -604,15 +804,38 @@ function NutritionEditor({
                 onChange={(guidance) => setMeal({ ...meal, guidance })}
               />
             </div>
-            <div className="sm:col-span-2">
-              <TextField
-                label="Exemplos (um por linha, até 5)"
-                value={meal.examples.join('\n')}
-                rows={3}
-                maxLength={1100}
-                onChange={(text) => setMeal({ ...meal, examples: lines(text) })}
-              />
-            </div>
+            {meal.options ? (
+              <div className="space-y-3 sm:col-span-2">
+                {meal.options.map((option, oi) => (
+                  <OptionEditor
+                    key={oi}
+                    index={oi}
+                    option={option}
+                    foods={foods}
+                    onChange={(next) =>
+                      setMeal({
+                        ...meal,
+                        options: meal.options?.map((o, i) => (i === oi ? next : o)),
+                      })
+                    }
+                  />
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Os nutrientes, os totais e a quantidade das trocas são recalculados pelo servidor
+                  ao salvar.
+                </p>
+              </div>
+            ) : (
+              <div className="sm:col-span-2">
+                <TextField
+                  label="Exemplos (um por linha, até 5)"
+                  value={meal.examples.join('\n')}
+                  rows={3}
+                  maxLength={1100}
+                  onChange={(text) => setMeal({ ...meal, examples: lines(text) })}
+                />
+              </div>
+            )}
           </fieldset>
         );
       })}
@@ -627,18 +850,29 @@ function NutritionEditor({
   );
 }
 
+/**
+ * Com `caseId` é o protocolo em revisão de um caso da fila; com `amend` é o protocolo que o
+ * aluno já usa (a edição vira a versão seguinte e o aluno recebe o protocolo atualizado).
+ */
 export function ProtocolReview({
   caseId,
+  amend,
   canAct,
   onChanged,
 }: {
-  caseId: string;
+  caseId?: string;
+  amend?: { studentId: string; kind: 'TRAINING' | 'NUTRITION' };
   canAct: boolean;
   onChanged: () => Promise<void>;
 }) {
+  const amendStudentId = amend?.studentId;
+  const amendKind = amend?.kind;
   const load = useCallback(
-    (signal?: AbortSignal) => getExceptionProtocol(caseId, signal),
-    [caseId],
+    (signal?: AbortSignal) =>
+      amendStudentId && amendKind
+        ? getActiveProtocol(amendStudentId, amendKind, signal)
+        : getExceptionProtocol(caseId ?? '', signal),
+    [caseId, amendStudentId, amendKind],
   );
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   const [draft, setDraft] = useState<Protocol | null>(null);
@@ -673,7 +907,8 @@ export function ProtocolReview({
     setSaving(true);
     setIssues([]);
     try {
-      await saveExceptionProtocol(caseId, parsed.data);
+      if (amend) await amendActiveProtocol(amend.studentId, parsed.data);
+      else await saveExceptionProtocol(caseId ?? '', parsed.data);
       setDraft(null);
       await Promise.all([refresh(), onChanged()]);
     } catch (err) {
@@ -695,7 +930,7 @@ export function ProtocolReview({
         </h2>
         {editable && !draft ? (
           <Button type="button" variant="outline" onClick={() => setDraft(data)}>
-            Editar à mão
+            {amend ? 'Emendar protocolo' : 'Editar à mão'}
           </Button>
         ) : null}
       </div>
@@ -714,6 +949,7 @@ export function ProtocolReview({
           ) : (
             <NutritionEditor
               structure={draft.structure}
+              foods={draft.foodOptions ?? []}
               onChange={(structure) => setDraft({ ...draft, structure })}
             />
           )
@@ -754,7 +990,14 @@ export function ProtocolReview({
         </div>
       ) : null}
 
-      {editable && !draft ? (
+      {amend && draft ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Ao salvar, vira a próxima versão do protocolo do aluno (a agenda é mantida) e ele recebe o
+          protocolo atualizado no WhatsApp.
+        </p>
+      ) : null}
+
+      {editable && !draft && !amend ? (
         <div className="mt-6 border-t border-border pt-4">
           <h3 className="text-label font-semibold">Pedir ajuste aos agentes</h3>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -777,7 +1020,7 @@ export function ProtocolReview({
               confirmLabel="Pedir ajuste"
               confirmDisabled={instruction.trim().length < 3}
               onConfirm={async () => {
-                await requestProtocolAdjustment(caseId, instruction.trim());
+                await requestProtocolAdjustment(caseId ?? '', instruction.trim());
                 setInstruction('');
                 await onChanged();
               }}

@@ -694,6 +694,48 @@
       "when": 1793489540939,
       "tag": "0098_personas",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1793561353333,
+      "tag": "0099_metodologia_padrao_v1",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1793570123000,
+      "tag": "0100_fichas_agentes_padrao_v1",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793650200000,
+      "tag": "0101_artigos_padrao_autor_opcional",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793650300000,
+      "tag": "0102_faq_guardrails_padrao_autor_opcional",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793650400000,
+      "tag": "0103_fila_revisao_obrigatoria_opcional",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1793650500000,
+      "tag": "0104_assinatura_do_protocolo",
+      "breakpoints": true
     }
   ]
 }

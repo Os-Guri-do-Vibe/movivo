@@ -11,6 +11,10 @@ export default async function AgentsPage() {
   return (
     <AgentsPanel
       canWriteTiers={hasAllCapabilities(session.capabilities, 'control_center.agents.tiers.write')}
+      canWriteProfiles={hasAllCapabilities(
+        session.capabilities,
+        'control_center.agents.profiles.write',
+      )}
     />
   );
 }

@@ -6,7 +6,7 @@
  *                    → modelo explica (hipóteses) e propõe ≤ 2 ações autorizadas pelos sinais
  *                    → cada ação: proposta → política → execução na mesma transação.
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -21,6 +21,7 @@ import type {
 
 import type { AgentContextSources } from '../../core/agents/agent-context';
 import { AgentRunner, AgentTaskError } from '../../core/agents/agent-runner';
+import { KnowledgeRetrievalService } from '../../core/knowledge/knowledge-retrieval.service';
 import { nutritionPlans, weeklyReviews } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DecisionExecutor } from '../coaching/decision/decision-executor.service';
@@ -35,6 +36,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { collectWeeks } from './review-data';
+import { collectEvidence } from './review-evidence';
 import {
   allowedActions,
   computeSignals,
@@ -80,6 +82,8 @@ export class WeeklyReviewService {
     private readonly store: ConversationStore,
     private readonly queues: QueueManager,
     private readonly logger: PinoLogger,
+    /** Busca nos artigos (RAG): sem ela, ou desligada, a leitura segue só pelos números. */
+    @Optional() private readonly retrieval: KnowledgeRetrievalService | null = null,
   ) {
     this.logger.setContext(WeeklyReviewService.name);
   }
@@ -232,8 +236,12 @@ export class WeeklyReviewService {
     ): Promise<FollowUpAnalysis | null> => {
       if (!kinds.some((kind) => area.has(kind))) return null;
       try {
-        return (await this.runner.run(task, input, { userId, sources: this.sources(userId, now) }))
-          .output;
+        // A evidência vem de rótulos fixos dos sinais (nunca de texto do aluno) e só embasa a leitura.
+        const evidence = await collectEvidence(this.retrieval, input.signals, area);
+        const withEvidence: AnalystInput = evidence.length > 0 ? { ...input, evidence } : input;
+        return (
+          await this.runner.run(task, withEvidence, { userId, sources: this.sources(userId, now) })
+        ).output;
       } catch (error) {
         if (!(error instanceof AgentTaskError)) throw error;
         this.logger.warn({ userId, taskId: task.id }, 'analista sem leitura válida; revisão segue');

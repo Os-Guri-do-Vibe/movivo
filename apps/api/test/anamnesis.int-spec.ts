@@ -424,7 +424,7 @@ describe('ANAMNESE em 9 etapas — fluxo completo', () => {
 });
 
 describe('ANAMNESE — PAR-Q de risco', () => {
-  it('vira PENDING_REVIEW, sinal de segurança ativo e caso prioritário na fila', async () => {
+  it('vira PENDING_REVIEW e sinal de segurança ativo, sem caso próprio em Alertas', async () => {
     const { token } = await service.start({});
     const b1 = await completeStep1(token);
     await completeSteps(service, token, ['Q2']);
@@ -438,9 +438,10 @@ describe('ANAMNESE — PAR-Q de risco', () => {
     const [signal] = await adminClient<Array<{ kind: string; status: string }>>`
       SELECT kind, status FROM safety_events WHERE user_id = ${user.id}`;
     expect(signal).toMatchObject({ kind: 'PARQ_POSITIVE', status: 'ACTIVE' });
-    const [exception] = await adminClient<Array<{ kind: string }>>`
+    // A revisão do PAR-Q é o protocolo (Fila do Profissional, obrigatório): não há caso SAFETY.
+    const exceptions = await adminClient<Array<{ kind: string }>>`
       SELECT kind FROM exception_cases WHERE user_id = ${user.id}`;
-    expect(exception?.kind).toBe('SAFETY');
+    expect(exceptions.filter((e) => e.kind === 'SAFETY')).toEqual([]);
   });
 });
 

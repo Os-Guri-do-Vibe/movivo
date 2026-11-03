@@ -24,10 +24,17 @@ import {
   decisionExecutions,
   exceptionCases,
   safetyEvents,
+  users,
 } from '../../../core/database/schema';
 import type { TenantTransaction } from '../../../core/database/tenant-database.service';
 import { DomainEventRecorder } from '../../domain-events/domain-event-recorder';
-import { evaluateAction } from '../policy/autonomy-policy';
+import {
+  evaluateAction,
+  hasAutoRelease,
+  isPlanPublication,
+  isProtocolChange,
+} from '../policy/autonomy-policy';
+import { reviewWindowMs } from '../policy/protocol-review-window';
 import { PublishedPolicies } from '../policy/published-policies';
 
 /** Quanto tempo uma proposta pendente de resposta humana continua válida. */
@@ -85,6 +92,11 @@ export class DecisionPipeline {
       )
       .limit(1);
 
+    const [student] = await tx
+      .select({ requiresProfessionalReview: users.requiresProfessionalReview })
+      .from(users)
+      .where(eq(users.id, userId));
+
     const policy = await this.policies.autonomy();
     const verdict = evaluateAction(
       proposal.action,
@@ -97,6 +109,7 @@ export class DecisionPipeline {
         uncertainty: proposal.uncertainty,
         reviewRequested: reviewCase !== undefined,
         sessionPlannedMinutes: input.sessionPlannedMinutes,
+        requiresProfessionalReview: student?.requiresProfessionalReview ?? false,
       },
       policy,
     );
@@ -148,7 +161,14 @@ export class DecisionPipeline {
 
     let exceptionCaseId: string | null = null;
     if (verdict.verdict === 'ASK' || verdict.verdict === 'ESCALATE') {
-      exceptionCaseId = await this.openException(tx, input, row.id, decision.id, verdict.reasons);
+      exceptionCaseId = await this.openException(
+        tx,
+        input,
+        row.id,
+        decision.id,
+        verdict.reasons,
+        verdict.verdict,
+      );
     }
     return {
       proposalId: row.id,
@@ -191,29 +211,49 @@ export class DecisionPipeline {
     proposalId: string,
     decisionId: string,
     reasons: string[],
+    verdict: DecisionVerdict,
   ): Promise<string> {
     const domain = ACTION_DOMAIN[input.proposal.action.type];
+    // O que a IA muda no protocolo do aluno entra na Fila do Profissional: obrigatória (só sai
+    // com a liberação humana) ou opcional (liberada sozinha ao fim da janela). O resto da
+    // exceção vai para Alertas.
+    const action = input.proposal.action;
+    const protocol = isProtocolChange(action);
+    const optional = hasAutoRelease(action) && verdict === 'ASK';
+    const kind = protocol ? 'PROTOCOL_REVIEW' : 'NO_APPLICABLE_POLICY';
     const [exception] = await tx
       .insert(exceptionCases)
       .values({
         userId: input.userId,
-        kind: 'NO_APPLICABLE_POLICY',
-        priority: 'NORMAL',
+        kind,
+        priority: protocol && !optional ? 'HIGH' : 'NORMAL',
         domain:
           domain === 'NUTRITION' ? 'NUTRITION' : domain === 'TRAINING' ? 'TRAINING' : 'GENERAL',
         subject: { proposalId, decisionId },
-        summary:
-          `A política exige decisão humana para ${input.proposal.action.type}. ${reasons.join(' ')} Proposta: ${input.proposal.rationale.join(' ')}`.slice(
-            0,
-            1_500,
-          ),
+        reviewUrgency: protocol ? (optional ? 'OPTIONAL' : 'MANDATORY') : null,
+        autoReleaseAt: optional ? new Date(Date.now() + reviewWindowMs(action)) : null,
+        summary: (isPlanPublication(action)
+          ? `Protocolo gerado pela IA aguardando revisão. ${reasons.join(' ')} ${input.proposal.rationale.join(' ')}`
+          : protocol
+            ? `Mudança da IA no protocolo aguardando revisão (${action.type}). ${reasons.join(' ')} ${input.proposal.rationale.join(' ')}`
+            : `A política exige decisão humana para ${action.type}. ${reasons.join(' ')} Proposta: ${input.proposal.rationale.join(' ')}`
+        ).slice(0, 1_500),
       })
-      .returning({ id: exceptionCases.id });
+      .returning({
+        id: exceptionCases.id,
+        reviewUrgency: exceptionCases.reviewUrgency,
+        autoReleaseAt: exceptionCases.autoReleaseAt,
+      });
     if (!exception) throw new Error('falha ao abrir o caso de exceção');
     await this.events.record(tx, {
       userId: input.userId,
       type: 'ExceptionOpened',
-      payload: { exceptionCaseId: exception.id, kind: 'NO_APPLICABLE_POLICY' },
+      payload: {
+        exceptionCaseId: exception.id,
+        kind,
+        reviewUrgency: exception.reviewUrgency,
+        autoReleaseAt: exception.autoReleaseAt?.toISOString() ?? null,
+      },
     });
     return exception.id;
   }
@@ -227,14 +267,18 @@ export class DecisionPipeline {
         | 'DECISION_FAILURE'
         | 'STUDENT_REVIEW_REQUEST'
         | 'NO_APPLICABLE_POLICY'
+        | 'PROTOCOL_REVIEW'
         | 'CONVERSATION_TAKEOVER'
         | 'MEDICAL_EXAM';
       domain: 'TRAINING' | 'NUTRITION' | 'MEDICAL' | 'GENERAL';
       summary: string;
       subject: Record<string, string>;
       priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+      /** Caso da Fila do Profissional sem proposta (ex.: troca sem equivalente seguro). */
+      mandatoryReview?: boolean;
     },
   ): Promise<string> {
+    const mandatory = input.kind === 'DECISION_FAILURE' || input.mandatoryReview === true;
     const [exception] = await tx
       .insert(exceptionCases)
       .values({
@@ -243,6 +287,8 @@ export class DecisionPipeline {
         priority: input.priority ?? 'NORMAL',
         domain: input.domain,
         subject: input.subject,
+        // Geração que falhou: o aluno não recebe nada até um profissional refazer (revisão obrigatória).
+        reviewUrgency: mandatory ? 'MANDATORY' : null,
         summary: input.summary.slice(0, 1_500),
       })
       .returning({ id: exceptionCases.id });
@@ -250,7 +296,12 @@ export class DecisionPipeline {
     await this.events.record(tx, {
       userId: input.userId,
       type: 'ExceptionOpened',
-      payload: { exceptionCaseId: exception.id, kind: input.kind },
+      payload: {
+        exceptionCaseId: exception.id,
+        kind: input.kind,
+        reviewUrgency: mandatory ? 'MANDATORY' : null,
+        autoReleaseAt: null,
+      },
     });
     return exception.id;
   }

@@ -1,3 +1,12 @@
+/** Versão do extrator de texto dos artigos: entra no registro da extração (proveniência). */
+export const PARSER_VERSION = 'article-text-v1';
+/**
+ * Receita do vetor. v2: o embedding é do trecho COM o cabeçalho do documento (título, tipo, ano,
+ * domínio), para um trecho do meio do artigo ainda dizer de onde veio. O texto guardado é o mesmo.
+ * Quem mudar a receita precisa regerar os artigos padrão (`knowledge:build-defaults`).
+ */
+export const EMBEDDING_RECIPE = 'embedding-port-v2';
+
 const CHUNK_CHARS = 1800;
 const OVERLAP_CHARS = 270;
 

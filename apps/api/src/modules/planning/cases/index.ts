@@ -11,6 +11,7 @@ import {
 } from '@movivo/shared';
 
 import type { Assertion, EvalCase, NamedCheck } from '../../../core/agents/eval-case';
+import { selectFoodCandidates } from '../calc/menu';
 import { nutritionRules } from '../calc/params';
 import {
   EVAL_TODAY,
@@ -25,6 +26,7 @@ import {
   view,
   type Persona,
 } from './personas';
+import { EVAL_FOOD_ROWS } from './eval-foods';
 import { blockOf, runningSample, strengthSample } from './samples';
 import {
   externalSessionsOf,
@@ -403,11 +405,20 @@ const nutritionInput = (
   p: Persona,
   strategy: Parameters<typeof nutritionInputOf>[2]['strategy'],
   sessions: PlanSession[],
-) =>
-  required(
+) => {
+  const base = required(
     nutritionInputOf(view(p), NUTRITION_PARAMS, { strategy, sessions, enduranceFocus: false }),
     `nutrição de ${p.id}`,
   );
+  // A alergia da persona não filtra a lista de propósito: o caso mede se o agente a evita.
+  return {
+    ...base,
+    foods: selectFoodCandidates(EVAL_FOOD_ROWS, {
+      dietaryRestrictions: base.dietaryRestrictions,
+      allergenTerms: [],
+    }),
+  };
+};
 
 export const nutritionCases: EvalCase[] = [
   caseOf(
@@ -422,6 +433,7 @@ export const nutritionCases: EvalCase[] = [
     [
       path('strategy', 'eq', 'RECOMPOSITION', 'estratégia do Motor de Objetivos'),
       path('meals', 'lengthGte', 3, 'refeições estruturadas'),
+      path('meals.*.options', 'lengthGte', 2, 'opções de cardápio em cada refeição'),
       path('guidelines', 'lengthGte', 2, 'orientações práticas'),
     ],
     { minScore: 1 },
@@ -437,13 +449,13 @@ export const nutritionCases: EvalCase[] = [
       {
         kind: 'check',
         name: 'noAllergenInExamples',
-        description: 'nenhum exemplo contém amendoim',
+        description: 'nenhum alimento do cardápio contém amendoim',
       },
       {
         kind: 'judge',
-        description: 'exemplos são viáveis para orçamento apertado e dieta vegetariana',
+        description: 'cardápio viável para orçamento apertado e dieta vegetariana',
         rubric:
-          'Os exemplos de refeição são vegetarianos (sem carne, peixe ou frango), usam alimentos acessíveis a quem tem orçamento apertado e não contêm amendoim. O tom é prático e sem culpa.',
+          'O cardápio é vegetariano (sem carne, peixe ou frango), usam alimentos acessíveis a quem tem orçamento apertado e não contêm amendoim. O tom é prático e sem culpa.',
       },
     ],
   ),
@@ -660,9 +672,23 @@ const keepsExternalSport: NamedCheck = (output, evalCase) => {
   return { pass: missing.length === 0, detail: missing.map((m) => m.key).join(', ') || 'ok' };
 };
 
-const noAllergenInExamples: NamedCheck = (output) => {
-  const text = JSON.stringify((output as { meals?: unknown }).meals ?? []).toLowerCase();
-  const found = text.includes('amendoim') || text.includes('pasta de amendoim');
+const noAllergenInExamples: NamedCheck = (output, evalCase) => {
+  // O cardápio cita alimentos por id: resolve os nomes na lista que o agente recebeu.
+  const foods = (evalCase.input as { foods?: Array<{ id: string; name: string }> }).foods ?? [];
+  const names = new Map(foods.map((food) => [food.id, food.name]));
+  const text = JSON.stringify((output as { meals?: unknown }).meals ?? [])
+    .toLowerCase()
+    .concat(
+      ' ',
+      [
+        ...JSON.stringify((output as { meals?: unknown }).meals ?? []).matchAll(
+          /"foodId":"([^"]+)"/g,
+        ),
+      ]
+        .map((m) => (names.get(m[1] ?? '') ?? '').toLowerCase())
+        .join(' '),
+    );
+  const found = text.includes('amendoim');
   return { pass: !found, detail: found ? 'menciona amendoim' : 'ok' };
 };
 

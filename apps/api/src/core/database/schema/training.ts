@@ -12,6 +12,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -49,6 +50,7 @@ import {
   userIdColumn,
 } from './_shared';
 import { coachingDecisions } from './coaching';
+import { staff } from './staff';
 import { studentGoals } from './student-state';
 import { users } from './users';
 
@@ -77,6 +79,11 @@ export const trainingPlans = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     publishedAt: eventTimestamp('published_at'),
+    /** Quem liberou o protocolo (aprovação ou emenda); nulo na liberação automática. */
+    signedBy: uuid('signed_by').references(() => staff.id, { onDelete: 'set null' }),
+    signedAt: eventTimestamp('signed_at'),
+    /** SHA-256 do conteúdo no momento da liberação (`plan-signature.ts`). */
+    signatureHash: varchar('signature_hash', { length: 64 }),
     ...timestampColumns,
   },
   (t) => [
@@ -84,6 +91,10 @@ export const trainingPlans = pgTable(
     uniqueIndex('uq_training_plans_one_active')
       .on(t.userId)
       .where(sql`${t.status} = 'ACTIVE'`),
+    check(
+      'ck_training_plans_signature',
+      sql`(${t.signedAt} IS NULL) = (${t.signatureHash} IS NULL)`,
+    ),
     checkOneOf('ck_training_plans_status', t.status, planStatusSchema.options),
   ],
 );

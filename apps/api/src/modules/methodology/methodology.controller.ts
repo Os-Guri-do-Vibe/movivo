@@ -17,7 +17,9 @@ import {
   methodologyDomainSpec,
   methodologyDraftUpdateSchema,
   methodologyOpenDraftSchema,
+  methodologyStartTestSchema,
   plausibilityIssues,
+  type DomainSpec,
   type MethodologyDomain,
 } from '@movivo/shared';
 
@@ -27,18 +29,26 @@ import { CapabilitiesGuard } from '../auth/capabilities.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { CurrentUser } from '../auth/roles.decorator';
+import { readableBodyIssues } from './methodology-issues';
 import { MethodologyService } from './methodology.service';
 
 function parseDomain(value: string): MethodologyDomain {
   const parsed = methodologyDomainSchema.safeParse(value);
-  if (!parsed.success) throw new BadRequestException('domínio de metodologia desconhecido');
+  if (!parsed.success) throw new BadRequestException('Este domínio de metodologia não existe.');
   return parsed.data;
 }
 
-function parseBody<T>(schema: Parameters<typeof strictSafeParse<T>>[0], body: unknown): T {
+function parseBody<T>(
+  schema: Parameters<typeof strictSafeParse<T>>[0],
+  body: unknown,
+  spec?: DomainSpec,
+): T {
   const result = strictSafeParse(schema, body ?? {});
   if (!result.success) {
-    throw new BadRequestException({ message: 'corpo inválido', issues: result.error.issues });
+    throw new BadRequestException({
+      message: 'Alguns dados enviados não são válidos. Corrija os campos abaixo e tente de novo.',
+      issues: readableBodyIssues(spec, result.error.issues),
+    });
   }
   return result.data;
 }
@@ -125,16 +135,45 @@ export class MethodologyController {
   @RequireCapabilities(Capability.AI_METHODOLOGY_APPROVE)
   @ApiOperation({ summary: 'Edita o rascunho (volta para DRAFT e invalida testes anteriores)' })
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return {
-      data: await this.methodology.updateDraft(id, parseBody(methodologyDraftUpdateSchema, body)),
-    };
+    const { domain } = await this.methodology.get(id);
+    const update = parseBody(methodologyDraftUpdateSchema, body, methodologyDomainSpec(domain));
+    return { data: await this.methodology.updateDraft(id, update) };
   }
 
   @Post('documents/:id/test')
   @RequireCapabilities(Capability.AI_METHODOLOGY_APPROVE)
-  @ApiOperation({ summary: 'Roda os casos de avaliação de todas as tarefas que usam o domínio' })
-  async test(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
-    return { data: await this.methodology.test(id, user.userId) };
+  @ApiOperation({
+    summary: 'Inicia, em segundo plano, os casos de avaliação das tarefas que usam o domínio',
+  })
+  async test(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    // O teste usa modelos de IA reais e gera custo: só começa com o limite de gasto confirmado.
+    const { budgetBrl } = parseBody(methodologyStartTestSchema, body);
+    return { data: await this.methodology.startTest(id, user.userId, budgetBrl) };
+  }
+
+  @Get('documents/:id/test/estimate')
+  @RequireCapabilities(Capability.AI_CONFIG_READ)
+  @ApiOperation({ summary: 'Custo estimado do teste, antes de chamar os modelos' })
+  async testEstimate(@Param('id', ParseUUIDPipe) id: string) {
+    return { data: await this.methodology.estimateTest(id) };
+  }
+
+  @Post('documents/:id/test/cancel')
+  @RequireCapabilities(Capability.AI_METHODOLOGY_APPROVE)
+  @ApiOperation({ summary: 'Cancela o teste em andamento antes da próxima tarefa' })
+  cancelTest(@Param('id', ParseUUIDPipe) id: string) {
+    return { data: this.methodology.cancelTest(id) };
+  }
+
+  @Get('documents/:id/test')
+  @RequireCapabilities(Capability.AI_CONFIG_READ)
+  @ApiOperation({ summary: 'Andamento do teste do rascunho' })
+  testProgress(@Param('id', ParseUUIDPipe) id: string) {
+    return { data: this.methodology.testProgress(id) };
   }
 
   @Post('documents/:id/publish')

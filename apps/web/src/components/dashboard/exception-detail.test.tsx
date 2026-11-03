@@ -38,6 +38,8 @@ function detail(canResolve: boolean): ExceptionDetailData {
       summary: 'A política exige decisão humana para ADJUST_ENERGY_TARGET.',
       createdAt: '2026-11-04T12:00:00.000Z',
       assignedStaffId: null,
+      reviewUrgency: null,
+      autoReleaseAt: null,
       userId: '22222222-2222-4222-8222-222222222222',
       resolution: null,
       resolvedAt: null,

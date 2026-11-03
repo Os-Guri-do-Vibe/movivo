@@ -33,8 +33,8 @@ const AUTONOMY_DEFAULTS: Record<CoachingActionType, { level: string; limit: numb
   SUBSTITUTE_EXERCISE: { level: 'AUTO', limit: 0 },
   SHORTEN_SESSION: { level: 'AUTO_WITH_LIMITS', limit: 40 },
   ADJUST_WEEKLY_VOLUME: { level: 'AUTO_WITH_LIMITS', limit: 15 },
-  PUBLISH_TRAINING_PLAN: { level: 'AUTO', limit: 0 },
-  PUBLISH_NUTRITION_PLAN: { level: 'AUTO', limit: 0 },
+  PUBLISH_TRAINING_PLAN: { level: 'ASK', limit: 0 },
+  PUBLISH_NUTRITION_PLAN: { level: 'ASK', limit: 0 },
   ADJUST_ENERGY_TARGET: { level: 'AUTO_WITH_LIMITS', limit: 200 },
   ADJUST_MEAL_GUIDANCE: { level: 'AUTO', limit: 0 },
   DEFINE_STRATEGY: { level: 'AUTO', limit: 0 },
@@ -73,6 +73,12 @@ const OVERRIDES: Record<string, MethodologyParameters> = {
       },
     },
     periodization: {
+      blockWeeksByPhase: {
+        ADAPTATION: { weeks: { min: 3, max: 4 } },
+        HYPERTROPHY: { weeks: { min: 4, max: 6 } },
+        STRENGTH: { weeks: { min: 4, max: 6 } },
+        DELOAD: { weeks: { min: 1, max: 2 } },
+      },
       deloadEveryWeeks: levels({ weeks: 8 }, { weeks: 6 }, { weeks: 4 }),
       loadIncrementKg: {
         UPPER: { kg: { min: 1, max: 2.5 } },

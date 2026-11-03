@@ -6,12 +6,14 @@
  * da versão publicada. É o gate antes de publicar metodologia, trocar o modelo de um tier ou
  * mudar um prompt: a decisão de seguir em frente olha `passed` desta execução.
  */
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional, type OnModuleInit } from '@nestjs/common';
 import { z } from 'zod';
 
 import type { MethodologyParameters } from '@movivo/shared';
 
 import type { TierRoute } from '../../core/ai/ai.types';
+import { defaultTierRoutes } from '../../core/ai/model-tier-config';
+import { AppConfigService } from '../../core/config';
 import {
   type AgentContextSources,
   type MethodologyContext,
@@ -81,15 +83,44 @@ export interface EvalRunSummary {
 }
 
 @Injectable()
-export class EvaluationService {
+export class EvaluationService implements OnModuleInit {
   constructor(
     private readonly registry: AgentTaskRegistry,
     private readonly runner: AgentRunner,
     private readonly db: TenantDatabase,
+    // `@Inject` explícito: um tipo `X | null` é emitido como `Object` nos metadados do Nest e a
+    // injeção falharia em silêncio (foi assim que o teste rodou num modelo caro por engano).
+    @Inject(AppConfigService) private readonly config: AppConfigService,
     @Optional()
     @Inject(PUBLISHED_METHODOLOGY)
     private readonly published: PublishedMethodology | null = null,
   ) {}
+
+  /** Falha o boot (e o healthcheck) se a configuração do modelo de teste não chegou. */
+  onModuleInit(): void {
+    if (!this.config?.llm?.evalModel) {
+      throw new Error('EvaluationService sem a configuração do modelo dos testes do painel');
+    }
+  }
+
+  /** Modelo dos testes do painel (o DeepSeek mais barato). */
+  panelTestModel(): string {
+    return this.config.llm.evalModel;
+  }
+
+  /**
+   * Rota dos testes do painel (metodologia e fichas): o DeepSeek mais barato e NENHUM failover,
+   * para um erro nunca cair num modelo caro sem ninguém ver. Tarefas de imagem seguem a rota
+   * configurada, porque o DeepSeek não lê imagem.
+   */
+  panelTestRoute(taskId: string): TierRoute | undefined {
+    const { task } = this.registry.get(taskId);
+    if (task.tier === 'VISION') return undefined;
+    const base = defaultTierRoutes(this.config)[task.tier][0];
+    // Sem rota-base não há como montar o teste barato: falha, em vez de cair num modelo caro.
+    if (!base) throw new Error(`sem rota-base para o tier ${task.tier}`);
+    return { ...base, vendor: 'DEEPSEEK', model: this.config.llm.evalModel };
+  }
 
   async evaluate(taskId: string, options: EvaluateOptions = {}): Promise<EvalRunSummary> {
     const { task, cases, checks } = this.registry.get(taskId);

@@ -9,6 +9,7 @@ import { and, asc, eq, gte, inArray, isNull, lt } from 'drizzle-orm';
 import type {
   AvailabilityWindow,
   CoachingAction,
+  DailyTargets,
   NutritionPlanStructure,
   StudentPreference,
   TrainingPlanStructure,
@@ -27,6 +28,7 @@ import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-p
 import type { CommandResult } from '../coaching/decision/decision-executor.service';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { sessionLoad } from '../planning/calc/load';
+import { rescaleOption } from '../planning/calc/menu';
 import { ScheduleService } from '../training/schedule.service';
 
 type Action<T extends CoachingAction['type']> = Extract<CoachingAction, { type: T }>;
@@ -185,7 +187,13 @@ export class DomainCommands {
         .where(eq(scheduledSessions.id, next.scheduled.id));
       return {
         command: 'training.substitute_exercise',
-        result: { applied: true, scope: 'NEXT_SESSION', scheduledSessionId: next.scheduled.id },
+        result: {
+          applied: true,
+          scope: 'NEXT_SESSION',
+          scheduledSessionId: next.scheduled.id,
+          fromName: this.catalog.getById(action.fromExerciseId)?.name ?? null,
+          toName: target.name,
+        },
       };
     }
 
@@ -214,7 +222,13 @@ export class DomainCommands {
     );
     return {
       command: 'training.substitute_exercise',
-      result: { applied: published !== null, scope: 'PLAN', planId: published },
+      result: {
+        applied: published !== null,
+        scope: 'PLAN',
+        planId: published,
+        fromName: this.catalog.getById(action.fromExerciseId)?.name ?? null,
+        toName: target.name,
+      },
     };
   }
 
@@ -236,28 +250,7 @@ export class DomainCommands {
           : meal,
       ),
     };
-    await tx
-      .update(nutritionPlans)
-      .set({ status: 'SUPERSEDED' })
-      .where(eq(nutritionPlans.id, current.id));
-    const [created] = await tx
-      .insert(nutritionPlans)
-      .values({
-        userId,
-        version: current.version + 1,
-        status: 'ACTIVE',
-        goalId: current.goalId,
-        structure,
-        startsOn: current.startsOn,
-        methodologyVersions: current.methodologyVersions,
-        publishedAt: new Date(),
-      })
-      .returning({ id: nutritionPlans.id, version: nutritionPlans.version });
-    await this.events.record(tx, {
-      userId,
-      type: 'NutritionPlanPublished',
-      payload: { planId: created?.id ?? null, version: created?.version ?? null },
-    });
+    const created = await this.replaceActiveNutritionPlan(tx, userId, current, structure);
     return {
       command: 'nutrition.adjust_meal_guidance',
       result: { applied: true, planId: created?.id ?? null },
@@ -347,39 +340,31 @@ export class DomainCommands {
       },
       carbsG: Math.max(20, targets.carbsG + Math.round(action.deltaKcal / 4)),
     });
-    const structure: NutritionPlanStructure = {
-      ...current.structure,
+    const shifted = {
       trainingDay: shift(current.structure.trainingDay),
       restDay: shift(current.structure.restDay),
     };
+    // As quantidades do cardápio acompanham a nova meta de energia (mesmas proporções).
+    const mean = (days: { trainingDay: DailyTargets; restDay: DailyTargets }) =>
+      (days.trainingDay.energyKcal.min +
+        days.trainingDay.energyKcal.max +
+        days.restDay.energyKcal.min +
+        days.restDay.energyKcal.max) /
+      4;
+    const factor = mean(shifted) / mean(current.structure);
+    const meals = current.structure.meals.map((meal) =>
+      meal.options
+        ? { ...meal, options: meal.options.map((option) => rescaleOption(option, factor)) }
+        : meal,
+    );
+    const structure: NutritionPlanStructure = { ...current.structure, ...shifted, meals };
     if (Math.min(structure.trainingDay.energyKcal.min, structure.restDay.energyKcal.min) < 1_200) {
       return {
         command: 'nutrition.adjust_energy',
         result: { applied: false, reason: 'abaixo do piso de energia' },
       };
     }
-    await tx
-      .update(nutritionPlans)
-      .set({ status: 'SUPERSEDED' })
-      .where(eq(nutritionPlans.id, current.id));
-    const [created] = await tx
-      .insert(nutritionPlans)
-      .values({
-        userId,
-        version: current.version + 1,
-        status: 'ACTIVE',
-        goalId: current.goalId,
-        structure,
-        startsOn: current.startsOn,
-        methodologyVersions: current.methodologyVersions,
-        publishedAt: new Date(),
-      })
-      .returning({ id: nutritionPlans.id, version: nutritionPlans.version });
-    await this.events.record(tx, {
-      userId,
-      type: 'NutritionPlanPublished',
-      payload: { planId: created?.id ?? null, version: created?.version ?? null },
-    });
+    const created = await this.replaceActiveNutritionPlan(tx, userId, current, structure);
     return {
       command: 'nutrition.adjust_energy',
       result: { applied: true, planId: created?.id ?? null, deltaKcal: action.deltaKcal },
@@ -440,6 +425,70 @@ export class DomainCommands {
     };
   }
 
+  /** Nova versão do plano alimentar ativo com a estrutura dada (a anterior fica substituída). */
+  private async replaceActiveNutritionPlan(
+    tx: TenantTransaction,
+    userId: string,
+    current: typeof nutritionPlans.$inferSelect,
+    structure: NutritionPlanStructure,
+  ): Promise<{ id: string; version: number } | undefined> {
+    await tx
+      .update(nutritionPlans)
+      .set({ status: 'SUPERSEDED' })
+      .where(eq(nutritionPlans.id, current.id));
+    const [created] = await tx
+      .insert(nutritionPlans)
+      .values({
+        userId,
+        version: current.version + 1,
+        status: 'ACTIVE',
+        goalId: current.goalId,
+        structure,
+        startsOn: current.startsOn,
+        methodologyVersions: current.methodologyVersions,
+        publishedAt: new Date(),
+      })
+      .returning({ id: nutritionPlans.id, version: nutritionPlans.version });
+    await this.events.record(tx, {
+      userId,
+      type: 'NutritionPlanPublished',
+      payload: { planId: created?.id ?? null, version: created?.version ?? null },
+    });
+    return created;
+  }
+
+  /** Emenda do profissional no plano de treino ativo: nova versão, agenda mantida. */
+  async amendTrainingPlan(
+    tx: TenantTransaction,
+    userId: string,
+    structure: TrainingPlanStructure,
+    today: string,
+  ): Promise<{ planId: string } | null> {
+    const planId = await this.patchActiveTrainingPlan(
+      tx,
+      userId,
+      () => structure,
+      today,
+      'PROFESSIONAL_AMENDMENT',
+    );
+    return planId ? { planId } : null;
+  }
+
+  /** Emenda do profissional no plano alimentar ativo: nova versão. */
+  async amendNutritionPlan(
+    tx: TenantTransaction,
+    userId: string,
+    structure: NutritionPlanStructure,
+  ): Promise<{ planId: string } | null> {
+    const [current] = await tx
+      .select()
+      .from(nutritionPlans)
+      .where(and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.status, 'ACTIVE')));
+    if (!current) return null;
+    const created = await this.replaceActiveNutritionPlan(tx, userId, current, structure);
+    return created ? { planId: created.id } : null;
+  }
+
   // --- Nova versão do plano de treino (troca no plano) -----------------------------------
 
   /**
@@ -451,6 +500,7 @@ export class DomainCommands {
     userId: string,
     mutate: (structure: TrainingPlanStructure) => TrainingPlanStructure,
     today: string,
+    reason: 'EXERCISE_SUBSTITUTION' | 'PROFESSIONAL_AMENDMENT' = 'EXERCISE_SUBSTITUTION',
   ): Promise<string | null> {
     const [current] = await tx
       .select()
@@ -517,7 +567,7 @@ export class DomainCommands {
     await this.events.record(tx, {
       userId,
       type: 'PlanVersionPublished',
-      payload: { planId: created.id, version: created.version, reason: 'EXERCISE_SUBSTITUTION' },
+      payload: { planId: created.id, version: created.version, reason },
     });
     return created.id;
   }

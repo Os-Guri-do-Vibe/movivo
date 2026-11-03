@@ -11,13 +11,25 @@ import { z } from 'zod';
 
 import {
   energyStrategySchema,
+  mealEnergyIssue,
   mealSlotSchema,
-  nutritionPlanStructureSchema,
+  nutritionPlanBaseSchema,
   type NutritionPlanStructure,
 } from '@movivo/shared';
 
 import { defineAgentTask, type Validator, type Violation } from '../../../core/agents/agent-task';
 import { macroKcal, weeklyLossPct } from '../calc/energy';
+import { FORBIDDEN_FOODS, mentions } from '../calc/food-rules';
+import {
+  buildOption,
+  dailyCost,
+  draftMealSchema,
+  foodCandidateSchema,
+  foodNamesOf,
+  mealTarget,
+  type DraftMeal,
+  type FoodCandidate,
+} from '../calc/menu';
 import {
   fold,
   healthRecords,
@@ -52,86 +64,42 @@ export const nutritionInputSchema = z.object({
   /** Orçamento mensal de alimentação, em reais; `null` = o aluno não informou. */
   foodBudgetMonthlyBrl: z.number().min(0).nullable(),
   mealsOutsideHomePerWeek: z.number().int().min(0).max(21),
+  /**
+   * Alimentos que o cardápio pode usar (por 100 g, da TACO): já sem restrição, alergia e o que o
+   * aluno evita, com o que ele gosta primeiro. O cardápio só usa alimentos desta lista.
+   */
+  foods: z.array(foodCandidateSchema).max(220).default([]),
+  /** Orçamento de um dia (mensal ÷ 30); `null` = o aluno não informou. */
+  dailyBudgetBrl: z.number().min(0).nullable().default(null),
   professionalInstruction: professionalInstructionSchema,
 });
 export type NutritionInput = z.infer<typeof nutritionInputSchema>;
 
-export const nutritionOutputSchema = nutritionPlanStructureSchema;
-export type NutritionOutput = NutritionPlanStructure;
+/**
+ * Rascunho do agente: metas e, por refeição, as opções de cardápio só com alimento e proporção.
+ * Quantidades finais, nutrientes e trocas equivalentes são calculados pelo código
+ * (`finalizeNutrition`); o plano gravado é `NutritionPlanStructure`.
+ */
+export const nutritionOutputSchema = nutritionPlanBaseSchema
+  .omit({ meals: true, estimatedDailyCostBrl: true })
+  .extend({ meals: z.array(draftMealSchema).min(2).max(8) })
+  .superRefine((plan, ctx) => {
+    if (mealEnergyIssue(plan)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['meals'],
+        message: 'A distribuição de energia entre as refeições precisa somar 100%.',
+      });
+    }
+  });
+export type NutritionOutput = z.infer<typeof nutritionOutputSchema>;
+
+const foodMap = (input: NutritionInput): ReadonlyMap<string, FoodCandidate> =>
+  new Map(input.foods.map((food) => [food.id, food]));
 
 /** Tolerâncias: a meta pode sair do limite por arredondamento, não por escolha. */
 const KCAL_TOLERANCE = 50;
 const MACRO_ENERGY_TOLERANCE = 0.1;
-
-/** Termos de origem animal por restrição (lista de conferência, não substitui o nutricionista). */
-const FORBIDDEN_FOODS: Readonly<Record<string, readonly string[]>> = {
-  VEGAN: [
-    'carne',
-    'frango',
-    'peixe',
-    'atum',
-    'sardinha',
-    'salmao',
-    'tilapia',
-    'ovo',
-    'ovos',
-    'leite',
-    'queijo',
-    'iogurte',
-    'requeijao',
-    'manteiga',
-    'mel',
-    'whey',
-    'presunto',
-    'peru',
-    'bacon',
-    'camarao',
-    'linguica',
-    'bife',
-    'carne moida',
-    'gelatina',
-  ],
-  VEGETARIAN: [
-    'carne',
-    'frango',
-    'peixe',
-    'atum',
-    'sardinha',
-    'salmao',
-    'tilapia',
-    'presunto',
-    'peru',
-    'bacon',
-    'camarao',
-    'linguica',
-    'bife',
-    'carne moida',
-  ],
-  LACTOSE_FREE: ['leite', 'queijo', 'iogurte', 'requeijao', 'manteiga', 'creme de leite', 'whey'],
-  GLUTEN_FREE: [
-    'pao',
-    'macarrao',
-    'trigo',
-    'cevada',
-    'centeio',
-    'biscoito',
-    'bolacha',
-    'cuscuz de trigo',
-  ],
-};
-
-/** Palavras que anulam a presença do termo ("leite vegetal", "sem lactose", "sem gluten"). */
-const NEGATIONS = [
-  'sem lactose',
-  'sem gluten',
-  'vegetal',
-  'de soja',
-  'de amendoas',
-  'de aveia',
-  'de coco',
-  'zero lactose',
-  'sem leite',
-];
 
 const SUPPLEMENT_TERMS: Readonly<Record<string, readonly string[]>> = {
   CREATINE: ['creatina'],
@@ -149,13 +117,8 @@ function allergenTerms(state: Record<string, unknown>): string[] {
     .filter((t) => t.length >= 3);
 }
 
-function mentions(text: string, term: string): boolean {
-  const folded = fold(text);
-  if (NEGATIONS.some((n) => folded.includes(n))) return false;
-  return new RegExp(`(^|[^a-z])${term}([^a-z]|$)`).test(folded);
-}
-
-export const nutritionValidators: Validator<NutritionInput, NutritionOutput>[] = [
+/** Metas, refeições, restrições e suplementos: valem na geração e na edição do profissional. */
+export const nutritionEditValidators: Validator<NutritionInput, NutritionOutput>[] = [
   // A estratégia do plano é a definida pelo Motor de Objetivos.
   (input, output) =>
     output.strategy === input.strategy
@@ -278,28 +241,28 @@ export const nutritionValidators: Validator<NutritionInput, NutritionOutput>[] =
     return violations;
   },
 
-  // Restrições alimentares e alergias: nenhum exemplo contraria.
+  // Restrições alimentares e alergias: nenhum alimento do cardápio contraria.
   (input, output, context) => {
     const violations: Violation[] = [];
     const allergens = allergenTerms(context.state);
+    const foods = foodMap(input);
     output.meals.forEach((meal, index) => {
-      for (const [exampleIndex, example] of meal.examples.entries()) {
-        const path = `meals.${index}.examples.${exampleIndex}`;
+      for (const { path, name } of foodNamesOf(meal, foods)) {
         for (const restriction of input.dietaryRestrictions) {
           for (const term of FORBIDDEN_FOODS[restriction] ?? []) {
-            if (mentions(example, term)) {
+            if (mentions(name, term)) {
               violations.push({
-                path,
-                message: `"${example}" contraria a restrição ${restriction} (contém ${term})`,
+                path: `meals.${index}.${path}`,
+                message: `"${name}" contraria a restrição ${restriction} (contém ${term})`,
               });
             }
           }
         }
         for (const allergen of allergens) {
-          if (fold(example).includes(allergen)) {
+          if (fold(name).includes(allergen)) {
             violations.push({
-              path,
-              message: `"${example}" contém ${allergen}, alergia/intolerância registrada`,
+              path: `meals.${index}.${path}`,
+              message: `"${name}" contém ${allergen}, alergia/intolerância registrada`,
             });
           }
         }
@@ -329,6 +292,143 @@ export const nutritionValidators: Validator<NutritionInput, NutritionOutput>[] =
   (_input, output) => outputLanguageViolations(output),
 ];
 
+/** Cardápio: opções por refeição, quantidades que fecham a meta e custo dentro do orçamento. */
+const menuValidators: Validator<NutritionInput, NutritionOutput>[] = [
+  (input, output) => {
+    const violations: Violation[] = [];
+    const foods = foodMap(input);
+    output.meals.forEach((meal, mealIndex) => {
+      const main = ['BREAKFAST', 'LUNCH', 'DINNER'].includes(meal.slot);
+      const options = meal.options ?? [];
+      if (options.length < (main ? 3 : 2)) {
+        violations.push({
+          path: `meals.${mealIndex}.options`,
+          message: `traga ${main ? 3 : 2} opções de cardápio para esta refeição`,
+        });
+        return;
+      }
+      const target = mealTarget(meal, output);
+      options.forEach((option, optionIndex) => {
+        const built = buildOption(
+          option,
+          target,
+          foods,
+          `meals.${mealIndex}.options.${optionIndex}`,
+        );
+        for (const issue of built.issues) {
+          const [path, ...rest] = issue.split(': ');
+          violations.push({ path: path ?? `meals.${mealIndex}.options`, message: rest.join(': ') });
+        }
+      });
+    });
+    return violations;
+  },
+
+  // Orçamento: o custo de um dia (média das opções de cada refeição) cabe no orçamento do aluno.
+  (input, output) => {
+    if (input.dailyBudgetBrl === null) return [];
+    const cost = dailyCost(output.meals);
+    const limit = input.dailyBudgetBrl * 1.05;
+    return cost > limit
+      ? [
+          {
+            path: 'meals',
+            message: `o cardápio custa ~R$ ${cost.toFixed(2)} por dia e o orçamento do aluno é R$ ${input.dailyBudgetBrl.toFixed(2)} por dia; use opções mais baratas`,
+          },
+        ]
+      : [];
+  },
+];
+
+export const nutritionValidators: Validator<NutritionInput, NutritionOutput>[] = [
+  ...nutritionEditValidators,
+  ...menuValidators,
+];
+
+/**
+ * Do rascunho do agente ao plano gravado: ajusta as porções à meta de cada refeição, calcula os
+ * nutrientes e as trocas equivalentes e resume as opções em `examples`. Só roda depois de o
+ * rascunho passar nos validadores, então não produz cardápio fora da tolerância.
+ */
+export function finalizeNutrition(
+  draft: NutritionOutput,
+  input: NutritionInput,
+): NutritionPlanStructure {
+  const foods = foodMap(input);
+  const meals = draft.meals.map((meal: DraftMeal) => {
+    const target = mealTarget(meal, draft);
+    const options = (meal.options ?? []).map(
+      (option, index) => buildOption(option, target, foods, `meals.${index}`).option,
+    );
+    return {
+      slot: meal.slot,
+      energyShare: meal.energyShare,
+      proteinG: meal.proteinG,
+      guidance: meal.guidance,
+      examples:
+        options.length > 0 ? options.map((option) => option.title).slice(0, 5) : [meal.guidance],
+      ...(options.length > 0 ? { options } : {}),
+    };
+  });
+  return {
+    ...draft,
+    meals,
+    estimatedDailyCostBrl: Math.round(dailyCost(meals) * 100) / 100,
+  };
+}
+
+/** Ids dos alimentos citados num plano (itens e trocas). */
+export function foodIdsOf(structure: NutritionPlanStructure): string[] {
+  return [
+    ...new Set(
+      structure.meals.flatMap((meal) =>
+        (meal.options ?? []).flatMap((option) =>
+          option.items.flatMap((item) => [item.foodId, ...item.swaps.map((swap) => swap.foodId)]),
+        ),
+      ),
+    ),
+  ];
+}
+
+/**
+ * Edição do profissional: as quantidades ficam como ele prescreveu; o servidor só recalcula
+ * nutrientes, totais e a quantidade das trocas equivalentes (nunca confia em número do cliente).
+ */
+export function rebuildNutrition(
+  structure: NutritionPlanStructure,
+  input: NutritionInput,
+): { structure: NutritionPlanStructure; violations: Violation[] } {
+  const foods = foodMap(input);
+  const violations: Violation[] = [];
+  const meals = structure.meals.map((meal, mealIndex) => {
+    if (!meal.options) return meal;
+    const target = mealTarget(meal, structure);
+    const options = meal.options.map((option, optionIndex) => {
+      const built = buildOption(
+        option,
+        target,
+        foods,
+        `meals.${mealIndex}.options.${optionIndex}`,
+        false,
+      );
+      for (const issue of built.issues) {
+        const [path, ...rest] = issue.split(': ');
+        violations.push({ path: path ?? 'meals', message: rest.join(': ') });
+      }
+      return built.option;
+    });
+    return { ...meal, examples: options.map((o) => o.title).slice(0, 5), options };
+  });
+  return {
+    structure: {
+      ...structure,
+      meals,
+      estimatedDailyCostBrl: Math.round(dailyCost(meals) * 100) / 100,
+    },
+    violations,
+  };
+}
+
 export const nutritionTask = defineAgentTask<NutritionInput, NutritionOutput>({
   id: 'nutrition.build_plan',
   role: 'Nutricionista de IA da MOVIVO, trabalhando sob a metodologia publicada pelos nutricionistas parceiros. Você monta planos alimentares práticos, seguros e que o aluno consegue seguir na rotina real, sem rigidez e sem culpa.',
@@ -337,10 +437,14 @@ export const nutritionTask = defineAgentTask<NutritionInput, NutritionOutput>({
 Regras:
 1. A "strategy" do plano é exatamente a recebida. Escolha as metas de cada tipo de dia (treino e descanso) DENTRO dos limites em "bounds": energia (faixa), proteína, gordura mínima, fibra mínima e água mínima. Os macronutrientes precisam fechar com a energia (proteína 4 kcal/g, carboidrato 4 kcal/g, gordura 9 kcal/g). Dia de treino costuma ter mais carboidrato.
 2. Refeições: use as que o aluno já faz ("usualMeals"; pré e pós-treino são extras opcionais). A distribuição de energia soma 100% e a proteína das refeições fecha a meta do dia, com o mínimo por refeição principal da metodologia.
-3. Exemplos: combinações práticas e baratas, compatíveis com o orçamento mensal (foodBudgetMonthlyBrl, em reais; null = não informado), capacidade de cozinhar e refeições fora de casa. NUNCA contrariar restrição alimentar nem alergia/intolerância registrada, e respeitar os alimentos que o aluno gosta ou evita (no Estado do Aluno).
+3. Cardápio: cada refeição tem OPÇÕES de cardápio ("options"): 3 para café da manhã, almoço e jantar e 2 para as demais. Cada opção é uma refeição completa (ex.: ovos mexidos + pão + banana), com os alimentos ("items") escolhidos SÓ da lista "foods" (use o "id" exato) e a quantidade aproximada em "grams". Priorize os alimentos que o aluno gosta (primeiros da lista) e monte opções diferentes entre si, práticas e compatíveis com a capacidade de cozinhar e com as refeições fora de casa. NUNCA contrariar restrição alimentar nem alergia/intolerância registrada.
+   - O servidor ajusta as quantidades à meta de energia da refeição mantendo as PROPORÇÕES que você escolher: pense nas proporções (ex.: 1 porção de arroz para 1 de frango e 1 de legumes) e na proteína da refeição ("proteinG"), usando os valores por 100 g da lista.
+   - "unit": só para o que o aluno CONTA em unidades inteiras: ovo = {"singular":"ovo","plural":"ovos","grams":50}, pão francês = 50 g, fatia de pão de forma = 25 g, banana média = 100 g, maçã = 130 g, pote de iogurte = 170 g. NUNCA use colher, concha, xícara ou copo como medida: arroz, feijão, carnes, legumes e massas são pesados em gramas, e líquidos (leite, bebida vegetal, suco) são medidos em ml pelo servidor. Omita "unit" em tudo que não se conta em unidades.
+   - "swaps": 1 a 3 trocas equivalentes por alimento (id da lista, do MESMO grupo: arroz ↔ batata, macarrão ou mandioca; frango ↔ carne, peixe ou ovo; fruta ↔ fruta; leguminosa ↔ leguminosa). O servidor calcula a quantidade da troca para igualar a energia.
+   - "estimatedCostBrl": o custo da opção em reais, com preços médios de supermercado no Brasil. Com "dailyBudgetBrl" informado, o custo de um dia (média das opções de cada refeição, somada) deve caber nele: escolha alimentos básicos e baratos (ovo, frango, feijão, arroz, banana, aveia) quando o orçamento for apertado. Sem orçamento informado, mantenha o custo moderado.
 4. Suplementos: apenas os da lista permitida; se a lista estiver vazia, devolva lista vazia. Nunca sugira medicamento.
 5. guidelines: orientações curtas e acionáveis (hidratação, dia de treino longo, refeição fora de casa, o que fazer quando a rotina quebra). Em estratégia de restrição energética, nada de linguagem de culpa ou proibição.
-6. summary: 2 a 3 frases claras sobre a lógica do plano. Sem prometer resultado, sem diagnosticar.
+6. summary: 2 a 3 frases claras sobre a lógica do plano. Sem prometer resultado, sem diagnosticar. "guidance" de cada refeição: 1 a 2 frases sobre como montar e comer aquela refeição, sem repetir os alimentos.
 7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['NUTRITION'],

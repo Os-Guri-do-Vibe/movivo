@@ -29,9 +29,9 @@ import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { CheckInService } from '../src/modules/checkin-v2/check-in.service';
 import { EvolutionService } from '../src/modules/checkin-v2/evolution.service';
 import { FoodLogService } from '../src/modules/nutrition/food-log.service';
-import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { ExecutionService } from '../src/modules/training/execution.service';
 import { createStudent, fakeRunner, NOT_A_WORKOUT_IMAGE } from './plan-fixtures';
+import { generatePublished } from './plan-publication';
 
 let app: INestApplication;
 let db: TenantDatabase;
@@ -45,9 +45,7 @@ const LATER = new Date(NOW.getTime() + 20 * 86_400_000);
 
 async function studentWithPlan(): Promise<string> {
   const userId = await createStudent(db, created);
-  expect((await app.get(PlanGenerationService).generate(userId, { now: NOW })).status).toBe(
-    'PUBLISHED',
-  );
+  expect(await generatePublished(app, userId, NOW)).toBe('PUBLISHED');
   return userId;
 }
 

@@ -82,6 +82,8 @@ export const knowledgeDocumentsResponseSchema = z.object({
       maxBytes: z.int().positive(),
       quarantineDays: z.int().positive(),
       approvedOriginalDays: z.int().positive(),
+      /** A busca nos artigos (RAG) está ligada? Desligada, os artigos ficam indexados, mas nenhum agente os lê. */
+      retrievalEnabled: z.boolean().default(false),
     }),
   }),
   meta: controlCenterMetaSchema,

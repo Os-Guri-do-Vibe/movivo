@@ -64,3 +64,39 @@ export function canResolveSafety(
 ): boolean {
   return canActOnDomain(council, safetyDomainOf(kind, scope));
 }
+
+/** Quem age na fila de exceções. O ADMIN é sócio e também profissional da MOVIVO. */
+export interface QueueActor {
+  role: 'PROFESSIONAL' | 'ADMIN';
+  /** Conselho da conta, só para o PROFESSIONAL (o ADMIN vê todos os domínios). */
+  council: Council | null;
+  /** Registro no conselho ativo (só vale para o PROFESSIONAL). */
+  councilActive: boolean;
+}
+
+/**
+ * Pode agir num caso deste domínio? O profissional age no domínio do conselho dele, com registro
+ * ativo. O ADMIN, em todos: os fundadores respondem pela operação inteira.
+ */
+export function canActOnCase(actor: QueueActor, domain: ExceptionDomain): boolean {
+  if (actor.role === 'ADMIN') return true;
+  return actor.councilActive && actor.council !== null && canActOnDomain(actor.council, domain);
+}
+
+/**
+ * Pode encerrar um sinal de segurança ativo? Sinal CLÍNICO (dor no peito, PAR-Q positivo, gestação,
+ * saúde mental...) exige registro de CRM ativo, na conta de profissional ou de ADMIN: é decisão
+ * clínica, e o papel de administrador não a substitui. O ADMIN encerra os demais sinais.
+ *
+ * `registeredCouncil` é o conselho com registro ATIVO cadastrado na conta (nulo se não houver).
+ */
+export function canCloseSafety(
+  actor: { role: 'PROFESSIONAL' | 'ADMIN'; registeredCouncil: Council | null },
+  kind: SafetySignalKind,
+  scope: SafetyScope,
+): boolean {
+  if (actor.registeredCouncil && canResolveSafety(actor.registeredCouncil, kind, scope)) {
+    return true;
+  }
+  return actor.role === 'ADMIN' && safetyDomainOf(kind, scope) !== 'MEDICAL';
+}

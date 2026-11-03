@@ -66,7 +66,7 @@ export class PlanApprovalHandler implements OnModuleInit {
     await this.delivery.sendWhenComplete(userId);
   }
 
-  /** Ação de publicar plano decidida pela equipe; `null` para qualquer outra decisão. */
+  /** Ação de publicar plano liberada na fila; `null` para qualquer outra decisão. */
   private async approvedPublishAction(decisionId: string): Promise<PublishPlanAction | null> {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
@@ -75,7 +75,8 @@ export class PlanApprovalHandler implements OnModuleInit {
         .innerJoin(coachingProposals, eq(coachingProposals.id, coachingDecisions.proposalId))
         .where(eq(coachingDecisions.id, decisionId)),
     );
-    if (!row || row.decidedBy !== 'STAFF') return null;
+    // A equipe aprova na fila, ou a janela de revisão opcional vence e a fila libera sozinha.
+    if (!row || (row.decidedBy !== 'STAFF' && row.decidedBy !== 'AUTO_RELEASE')) return null;
     return isPublishPlanAction(row.action) ? row.action : null;
   }
 

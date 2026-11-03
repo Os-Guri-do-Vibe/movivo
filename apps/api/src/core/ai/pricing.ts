@@ -16,6 +16,9 @@ const PRICING: Record<string, Pricing> = {
   // Snapshot 2026-09-03 (api-docs.deepseek.com/quick_start/pricing) — tarifa de horário
   // de pico (a fora-de-pico é metade); usar o teto de propósito pra nunca subestimar custo.
   'deepseek-v4-flash': { input: 0.44, cached: 0.014, output: 1.32 },
+  // `deepseek-flash` (V4.1 Flash): preço de horário de pico da página oficial (a fora-de-pico é
+  // metade), teto de propósito. Sem esta linha o custo cairia no DEFAULT_PRICING, ~10x maior.
+  'deepseek-flash': { input: 0.3, cached: 0.006, output: 1.2 },
   'gpt-4.1': DEFAULT_PRICING,
   'claude-sonnet-4-5': { input: 3.0, cached: 0.3, output: 15.0 },
 };

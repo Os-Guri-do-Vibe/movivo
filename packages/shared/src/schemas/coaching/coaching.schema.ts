@@ -198,6 +198,16 @@ export const safetySeveritySchema = z.enum(['ATTENTION', 'URGENT', 'EMERGENCY'])
 export type SafetySeverity = z.infer<typeof safetySeveritySchema>;
 
 /** Domínio cujas ações automáticas ficam suspensas enquanto o sinal está ativo. */
+/**
+ * Sinais que a IA trata sozinha, com cautela (a dor e a lesão entram nos ajustes do plano) e que
+ * só geram alerta ao profissional: não suspendem as ações automáticas nem exigem revisão.
+ */
+export const NON_BLOCKING_SIGNAL_KINDS: readonly SafetySignalKind[] = [
+  'SEVERE_PAIN',
+  'PERSISTENT_PAIN',
+  'NEW_INJURY',
+];
+
 export const safetyScopeSchema = z.enum(['TRAINING', 'NUTRITION', 'ALL']);
 export type SafetyScope = z.infer<typeof safetyScopeSchema>;
 
@@ -215,6 +225,8 @@ export type SafetySignal = z.infer<typeof safetySignalSchema>;
 export const exceptionKindSchema = z.enum([
   'SAFETY',
   'NO_APPLICABLE_POLICY',
+  /** Protocolo (treino ou alimentação) gerado pela IA que aguarda a revisão do profissional. */
+  'PROTOCOL_REVIEW',
   'STUDENT_REVIEW_REQUEST',
   'DECISION_FAILURE',
   'CONVERSATION_TAKEOVER',
@@ -225,6 +237,14 @@ export type ExceptionKind = z.infer<typeof exceptionKindSchema>;
 
 export const exceptionPrioritySchema = z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
 export type ExceptionPriority = z.infer<typeof exceptionPrioritySchema>;
+
+/**
+ * Urgência da revisão de um protocolo na fila. `MANDATORY`: o aluno só recebe depois que um
+ * profissional revisa e libera. `OPTIONAL`: o profissional pode revisar, editar e liberar antes;
+ * sem ação, o protocolo é liberado sozinho ao fim da janela de revisão.
+ */
+export const reviewUrgencySchema = z.enum(['MANDATORY', 'OPTIONAL']);
+export type ReviewUrgency = z.infer<typeof reviewUrgencySchema>;
 
 export const exceptionStatusSchema = z.enum(['OPEN', 'IN_REVIEW', 'RESOLVED']);
 export type ExceptionStatus = z.infer<typeof exceptionStatusSchema>;

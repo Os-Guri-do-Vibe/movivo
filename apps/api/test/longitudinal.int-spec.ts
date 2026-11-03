@@ -38,12 +38,12 @@ import {
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
-import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { GoalProgressService } from '../src/modules/progress/goal-progress.service';
 import { PreferenceExtractionService } from '../src/modules/progress/preference-extraction.service';
 import { WeeklyReviewService } from '../src/modules/progress/weekly-review.service';
 import { StudentStateReader } from '../src/modules/student-state/student-state.reader';
 import { createStudent, fakeRunner } from './plan-fixtures';
+import { generatePublished } from './plan-publication';
 import {
   SIM_FIRST_WEEK,
   SIM_WEEKS,
@@ -67,9 +67,7 @@ const calls: string[] = [];
 
 async function student(persona: Persona): Promise<string> {
   const userId = await createStudent(db, created);
-  expect((await app.get(PlanGenerationService).generate(userId, { now: PLAN_DAY })).status).toBe(
-    'PUBLISHED',
-  );
+  expect(await generatePublished(app, userId, PLAN_DAY)).toBe('PUBLISHED');
   await simulateStudent(db, userId, persona, '2026-11-02');
   return userId;
 }
@@ -308,7 +306,7 @@ describe.skipIf(REAL)('metas e microtarefas', () => {
 
   it('conclui a microtarefa e o marco por evento, nunca por declaração', async () => {
     const userId = await createStudent(db, created);
-    await app.get(PlanGenerationService).generate(userId, { now: PLAN_DAY });
+    await generatePublished(app, userId, PLAN_DAY);
     // Sem treino feito, nada avança.
     expect((await goals.sync(userId, '2026-11-04')).tasks).toBe(0);
 
@@ -341,7 +339,7 @@ describe.skipIf(REAL)('metas e microtarefas', () => {
 
   it('tarefa semanal que fechou sem bater o alvo vira perdida e a semana nova abre sozinha', async () => {
     const userId = await createStudent(db, created);
-    await app.get(PlanGenerationService).generate(userId, { now: PLAN_DAY });
+    await generatePublished(app, userId, PLAN_DAY);
     await db.runAsSystem((tx) =>
       tx
         .update(goalTasks)

@@ -20,9 +20,10 @@ import {
   UserRound,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { Button } from '@/components/ui/button';
 import { getStudent } from '@/lib/control-center-api';
 import { goalLabel, KIND_LABEL, PRIORITY_LABEL } from '@/lib/exception-copy';
 import { formatPhone } from '@/lib/phone-mask';
@@ -43,6 +44,7 @@ import {
   registrationStatus,
   subscriptionStatus,
 } from './student-labels';
+import { ProtocolReview } from './protocol-review';
 import { describeTimelineEvent } from './student-timeline';
 
 const NOT_INFORMED = 'Não informado';
@@ -85,6 +87,63 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex flex-col gap-0.5 border-b border-border py-2 last:border-b-0 sm:flex-row sm:justify-between sm:gap-4">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd className="text-label sm:text-right">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Emenda do protocolo que o aluno já usa: o profissional do domínio edita, o servidor confere,
+ * vira a versão seguinte e o aluno recebe o protocolo atualizado no WhatsApp.
+ */
+function ProtocolAmendment({
+  studentId,
+  hasTraining,
+  hasNutrition,
+  onChanged,
+}: {
+  studentId: string;
+  hasTraining: boolean;
+  hasNutrition: boolean;
+  onChanged: () => Promise<unknown> | void;
+}) {
+  const [kind, setKind] = useState<'TRAINING' | 'NUTRITION' | null>(null);
+  const amend = useMemo(() => (kind ? { studentId, kind } : undefined), [studentId, kind]);
+  if (!hasTraining && !hasNutrition) return null;
+  return (
+    <div className="mt-4 space-y-4 border-t border-border pt-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs text-muted-foreground">
+          Alterar o protocolo em uso (o aluno recebe a versão nova):
+        </span>
+        {hasTraining ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setKind(kind === 'TRAINING' ? null : 'TRAINING')}
+          >
+            {kind === 'TRAINING' ? 'Fechar treino' : 'Emendar treino'}
+          </Button>
+        ) : null}
+        {hasNutrition ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setKind(kind === 'NUTRITION' ? null : 'NUTRITION')}
+          >
+            {kind === 'NUTRITION' ? 'Fechar alimentação' : 'Emendar alimentação'}
+          </Button>
+        ) : null}
+      </div>
+      {amend ? (
+        <ProtocolReview
+          key={amend.kind}
+          amend={amend}
+          canAct
+          onChanged={async () => {
+            await onChanged();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -224,6 +283,12 @@ export function StudentDetail({ id: studentId }: { id: string }) {
             {student.plan.nutrition ? `v${student.plan.nutrition.version}` : 'Sem plano publicado'}
           </Row>
         </dl>
+        <ProtocolAmendment
+          studentId={student.id}
+          hasTraining={Boolean(student.plan.training)}
+          hasNutrition={Boolean(student.plan.nutrition)}
+          onChanged={refresh}
+        />
       </Section>
 
       <Section

@@ -193,6 +193,27 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
+    id: 'rag-eval',
+    kind: 'TERMINAL',
+    name: 'Avaliar a busca nos artigos (RAG)',
+    description:
+      'Roda o conjunto de perguntas contra os artigos indexados e mede recall e abstenção em vários pisos de similaridade. Serve para calibrar RAG_MIN_COSINE e decidir se vale ligar RAG_ENABLED. Só vale com o embedding real.',
+    file: 'apps/api/src/scripts/rag-eval.ts',
+    command:
+      'cd /opt/movivo && docker compose exec api node --enable-source-maps dist/scripts/rag-eval.js --sweep 0.2,0.3,0.4,0.5',
+    notRunnableReason: OPERATOR_ONLY,
+  },
+  {
+    id: 'build-default-knowledge',
+    kind: 'TERMINAL',
+    name: 'Gerar os artigos padrão da Base de Conhecimento',
+    description:
+      'Gera o manifesto (hashes e vetores) dos artigos de assets/knowledge/articles/, que o deploy carrega sozinho. Só roda no ambiente de desenvolvimento, com o embedding real, e o resultado vai para o commit. Reaproveita o que não mudou.',
+    file: 'apps/api/src/scripts/build-default-knowledge.ts',
+    command: 'pnpm --filter @movivo/api knowledge:build-defaults',
+    notRunnableReason: OPERATOR_ONLY,
+  },
+  {
     id: 'generate-training-magic-link',
     kind: 'TERMINAL',
     name: 'Gerar link mágico de treino',

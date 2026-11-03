@@ -41,6 +41,8 @@ export const QUEUE = {
   domainEvents: 'domain-events',
   // Geração do plano integrado (estratégia + treino + nutrição) depois do onboarding.
   planGeneration: 'plan-generation',
+  // Liberação automática do protocolo de revisão opcional, ao fim da janela da fila.
+  protocolAutoRelease: 'protocol-auto-release',
   // Exame recebido no WhatsApp: leitura (visão) + comentário, fora do webhook.
   medicalExam: 'medical-exam',
   // Webhook do Strava: busca a atividade e registra o treino, fora da requisição.
@@ -132,6 +134,12 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [10_000, 60_000, 300_000],
     concurrency: 3,
     lockMs: 600_000,
+  },
+  // Idempotente pelo estado do caso; o job de liberação é leve e não disputa com a geração.
+  [QUEUE.protocolAutoRelease]: {
+    attempts: 3,
+    backoffMs: [5_000, 15_000, 45_000],
+    concurrency: 5,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // Duas chamadas de modelo (visão + raciocínio); a segunda tentativa cobre falha passageira.

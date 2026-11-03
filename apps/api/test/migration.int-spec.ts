@@ -137,7 +137,7 @@ const EXPECTED_TABLES = [
   'legacy_conversation_protocol_links_archive',
 ] as const;
 
-const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
+const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto', 'unaccent'] as const;
 
 const apiRoot = process.cwd();
 const { env } = loadEnv();

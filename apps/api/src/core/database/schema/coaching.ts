@@ -8,7 +8,7 @@
  * fila que a equipe trabalha por exceção.
  */
 import { sql } from 'drizzle-orm';
-import { index, jsonb, pgTable, smallint, text, uuid, varchar } from 'drizzle-orm/pg-core';
+import { check, index, jsonb, pgTable, smallint, text, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import {
   coachingActionTypeSchema,
@@ -18,6 +18,7 @@ import {
   exceptionPrioritySchema,
   exceptionStatusSchema,
   proposalStatusSchema,
+  reviewUrgencySchema,
   safetyScopeSchema,
   safetySeveritySchema,
   safetySignalKindSchema,
@@ -92,7 +93,11 @@ export const coachingDecisions = pgTable(
     index('idx_coaching_decisions_user').on(t.userId, t.createdAt),
     index('idx_coaching_decisions_proposal').on(t.proposalId),
     checkOneOf('ck_coaching_decisions_verdict', t.verdict, decisionVerdictSchema.options),
-    checkOneOf('ck_coaching_decisions_decided_by', t.decidedBy, ['POLICY_ENGINE', 'STAFF']),
+    checkOneOf('ck_coaching_decisions_decided_by', t.decidedBy, [
+      'POLICY_ENGINE',
+      'STAFF',
+      'AUTO_RELEASE',
+    ]),
   ],
 );
 
@@ -166,6 +171,13 @@ export const exceptionCases = pgTable(
     assignedStaffId: uuid('assigned_staff_id').references(() => staff.id, {
       onDelete: 'restrict',
     }),
+    /**
+     * Só nos casos de protocolo (`PROTOCOL_REVIEW`): `MANDATORY` exige a liberação de um
+     * profissional; `OPTIONAL` é liberado sozinho em `auto_release_at`. Nasce com o caso e a
+     * edição manual não o altera.
+     */
+    reviewUrgency: varchar('review_urgency', { length: 9 }),
+    autoReleaseAt: eventTimestamp('auto_release_at'),
     resolution: jsonb('resolution').$type<Record<string, unknown>>(),
     resolvedAt: eventTimestamp('resolved_at'),
     ...timestampColumns,
@@ -179,5 +191,11 @@ export const exceptionCases = pgTable(
     checkOneOf('ck_exception_cases_priority', t.priority, exceptionPrioritySchema.options),
     checkOneOf('ck_exception_cases_status', t.status, exceptionStatusSchema.options),
     checkOneOf('ck_exception_cases_domain', t.domain, exceptionDomainSchema.options),
+    checkOneOf('ck_exception_cases_review_urgency', t.reviewUrgency, reviewUrgencySchema.options),
+    // Revisão opcional sempre tem prazo de liberação; a obrigatória nunca tem.
+    check(
+      'ck_exception_cases_auto_release',
+      sql`(${t.reviewUrgency} = 'OPTIONAL') = (${t.autoReleaseAt} IS NOT NULL)`,
+    ),
   ],
 );

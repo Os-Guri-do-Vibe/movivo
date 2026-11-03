@@ -194,15 +194,28 @@ const STRENGTH: DomainSpec = {
       title: 'Periodização e progressão',
       description: 'Duração dos blocos, recuperação programada e como progredir.',
       fields: {
-        mesocycleWeeks: {
-          kind: 'range',
-          label: 'Duração de um bloco',
-          hint: 'Semanas de um mesociclo antes de reavaliar.',
-          unit: 'semanas',
-          min: 2,
-          max: 12,
-          plausible: [3, 8],
-          example: { min: 4, max: 6 },
+        blockWeeksByPhase: {
+          kind: 'table',
+          label: 'Duração de um bloco por fase',
+          hint: 'Semanas de cada bloco antes de reavaliar. Cada fase tem a sua duração, independente das outras. O plano usa o mínimo da faixa.',
+          rows: [
+            { key: 'ADAPTATION', label: 'Adaptação' },
+            { key: 'HYPERTROPHY', label: 'Hipertrofia' },
+            { key: 'STRENGTH', label: 'Força' },
+            { key: 'DELOAD', label: 'Recuperação' },
+          ],
+          columns: {
+            weeks: {
+              kind: 'range',
+              label: 'Semanas',
+              hint: 'Mínimo e máximo de semanas do bloco.',
+              unit: 'semanas',
+              min: 1,
+              max: 12,
+              plausible: [2, 8],
+              example: { min: 4, max: 6 },
+            },
+          },
         },
         deloadEveryWeeks: {
           kind: 'table',

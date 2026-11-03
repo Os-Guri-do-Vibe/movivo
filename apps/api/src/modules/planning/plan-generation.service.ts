@@ -16,6 +16,7 @@ import {
   type CoachedModality,
   type CoachingProposal,
   type GoalStrategy,
+  type NutritionPlanStructure,
   type PlanSession,
   type TrainingPlanStructure,
 } from '@movivo/shared';
@@ -66,7 +67,8 @@ import type { BlockOutput } from './tasks/blocks';
 import { hybridTask, type HybridInput } from './tasks/hybrid';
 import { hyroxTask } from './tasks/hyrox';
 import { coordinatorInputOf, coordinatorTask, type CoordinatorOutput } from './tasks/coordinator';
-import { nutritionTask, type NutritionOutput } from './tasks/nutrition';
+import { FoodCandidatesService } from '../nutrition/food-candidates.service';
+import { finalizeNutrition, nutritionTask, type NutritionOutput } from './tasks/nutrition';
 import { runningTask } from './tasks/running';
 import { strategyTask } from './tasks/strategy';
 import { strengthTask } from './tasks/strength';
@@ -122,6 +124,7 @@ export class PlanGenerationService {
     private readonly catalog: ExerciseCatalogProvider,
     private readonly pipeline: DecisionPipeline,
     private readonly publisher: PlanPublisher,
+    private readonly foods: FoodCandidatesService,
     private readonly delivery: PlanDelivery,
     private readonly outbox: OutboxRelay,
     private readonly logger: PinoLogger,
@@ -303,10 +306,11 @@ export class PlanGenerationService {
     if (view.training.modalities.length === 0 || !view.availability) {
       throw new PlanningBlocked('GENERAL', 'faltam modalidades ou disponibilidade na anamnese');
     }
-    const suspended = view.safety.signals.some((s) =>
-      ['TRAINING', 'NUTRITION', 'ALL'].includes(s.scope),
-    );
-    if (suspended) return { status: 'SKIPPED', reason: 'SAFETY_SIGNAL' };
+    // Só a emergência impede a geração. Os demais sinais (PAR-Q de risco, dor, lesão) entram no
+    // planejamento como restrição e o protocolo completo vai para a fila do profissional.
+    if (view.safety.signals.some((s) => s.severity === 'EMERGENCY')) {
+      return { status: 'SKIPPED', reason: 'SAFETY_SIGNAL' };
+    }
     if (await this.alreadyPlanned(userId, view.goal.goalId)) {
       return { status: 'SKIPPED', reason: 'ALREADY_PLANNED' };
     }
@@ -449,7 +453,7 @@ export class PlanGenerationService {
           modalityFocus: strategy.modalityFocus,
         },
         training.structure,
-        nutrition.run.output,
+        nutrition.structure,
       );
       return (await this.execute(coordinatorTask, userId, input)).output;
     } catch (error) {
@@ -543,11 +547,13 @@ export class PlanGenerationService {
         'faltam peso, altura, idade ou sexo para o plano alimentar',
       );
     }
-    const run = await this.execute(nutritionTask, userId, {
+    const fullInput = {
       ...input,
+      foods: await this.foods.forStudent(userId, input.dietaryRestrictions),
       professionalInstruction: instruction,
-    });
-    return { run, version: doc.version };
+    };
+    const run = await this.execute(nutritionTask, userId, fullInput);
+    return { run, structure: finalizeNutrition(run.output, fullInput), version: doc.version };
   }
 
   /** Grava o rascunho de treino e pede a decisão; com `EXECUTE`, ativa e agenda na hora. */
@@ -606,7 +612,7 @@ export class PlanGenerationService {
     const { planId } = await this.publisher.createNutritionDraft(tx, {
       userId: ctx.userId,
       goalId: ctx.goalId,
-      structure: built.run.output,
+      structure: built.structure,
       startsOn: ctx.today,
       methodologyVersions: { NUTRITION: built.version },
     });
@@ -812,6 +818,8 @@ interface BuiltTraining {
 
 interface BuiltNutrition {
   run: AgentRunResult<NutritionOutput>;
+  /** Plano gravado: porções, nutrientes e trocas calculados a partir do rascunho do agente. */
+  structure: NutritionPlanStructure;
   version: number;
 }
 

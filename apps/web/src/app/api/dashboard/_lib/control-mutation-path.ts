@@ -1,3 +1,5 @@
+import { agentProfileKeySchema } from '@movivo/shared';
+
 const UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 
 /** `ai/knowledge/upload` é multipart e tem rota própria (`control/ai/knowledge/upload/route.ts`). */
@@ -18,6 +20,7 @@ const STATIC_MUTATIONS = new Set([
   'ai/forbidden-topics/approve',
   'ai/forbidden-topics/retire',
   'ai/knowledge/review',
+  'ai/taco/import',
   'integration/whatsapp/instance',
 ]);
 
@@ -28,25 +31,31 @@ const PARAMETERIZED_MUTATIONS = [
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
   // de novo no backend, que só executa o que está no catálogo).
   /^scripts\/[a-z0-9-]{1,80}\/run$/,
-  // Fila de exceções: assumir, aprovar, recusar, encerrar e pedir ajuste do protocolo aos agentes
-  // (a autorização por domínio é do backend).
+  // Fila de exceções: assumir, aprovar, recusar, encerrar, pedir ajuste do protocolo aos agentes
+  // e avisar que a tela de revisão está aberta (a autorização por domínio é do backend).
   new RegExp(
-    `^exceptions/${UUID_SEGMENT}/(?:claim|approve|reject|resolve|request-adjustment)$`,
+    `^exceptions/${UUID_SEGMENT}/(?:claim|approve|reject|resolve|request-adjustment|review-hold|substitute)$`,
     'i',
   ),
   // Estúdio de metodologia: abrir rascunho de um domínio e editar/testar/publicar/descartar.
   /^methodology\/domains\/[A-Z]{3,16}\/drafts$/,
   new RegExp(`^methodology/documents/${UUID_SEGMENT}/(?:update|test|publish|discard)$`, 'i'),
+  new RegExp(`^methodology/documents/${UUID_SEGMENT}/test/cancel$`, 'i'),
   // Fichas dos agentes (só ADMIN no backend): abrir rascunho e editar/testar/publicar/descartar.
-  /^agents\/profiles\/[A-Z]{3,16}\/drafts$/,
+  // O agente vem da lista oficial (as personas têm underscore, como PERSONA_FEMALE).
+  new RegExp(`^agents/profiles/(?:${agentProfileKeySchema.options.join('|')})/drafts$`),
   new RegExp(`^agents/profiles/documents/${UUID_SEGMENT}/(?:update|test|publish|discard)$`, 'i'),
 ];
 
-/** Escritas por PUT: rotas de nível de modelo e a edição do protocolo em revisão na fila. */
+/**
+ * Escritas por PUT: rotas de nível de modelo, a edição do protocolo em revisão na fila e a
+ * emenda do protocolo ativo do aluno.
+ */
 export function isAllowedControlPutPath(path: string): boolean {
   return (
     /^agents\/tiers\/(?:FAST|STANDARD|REASONING|VISION)$/.test(path) ||
-    new RegExp(`^exceptions/${UUID_SEGMENT}/protocol$`, 'i').test(path)
+    new RegExp(`^exceptions/${UUID_SEGMENT}/protocol$`, 'i').test(path) ||
+    new RegExp(`^protocols/${UUID_SEGMENT}/(?:TRAINING|NUTRITION)$`, 'i').test(path)
   );
 }
 

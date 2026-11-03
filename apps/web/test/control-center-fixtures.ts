@@ -813,6 +813,7 @@ export const knowledgeDocumentsResponse: KnowledgeDocumentsResponse = {
       maxBytes: 524_288,
       quarantineDays: 30,
       approvedOriginalDays: 365,
+      retrievalEnabled: false,
     },
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },

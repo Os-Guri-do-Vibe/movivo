@@ -278,6 +278,11 @@ export const envSchema = z
     LLM_FALLBACK_MODEL: z.string().min(1).default('gpt-4.1'),
     LLM_SECONDARY_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
     /**
+     * Modelo dos TESTES do painel (metodologia e fichas dos agentes): o DeepSeek mais barato, sem
+     * failover para modelos caros. Não afeta o que os alunos usam.
+     */
+    LLM_EVAL_MODEL: z.string().min(1).default('deepseek-flash'),
+    /**
      * Atestado operacional, neutro por fornecedor. `true` significa que Jurídico/Segurança
      * verificaram DPA, transferência internacional, retenção/no-training e suboperadores.
      */
@@ -382,6 +387,20 @@ export const envSchema = z
 
     // -------------------------------------------------------- RAG (US-3.3)
     /**
+     * Liga a busca nos artigos da Base de Conhecimento: a tarefa `conversation.answer_question` passa
+     * a receber até `RAG_TOP_K` trechos como evidência. DESLIGADA por padrão: ligue só depois de
+     * medir o ganho (`pnpm --filter @movivo/api rag:eval` e os casos de avaliação do agente).
+     * Desligar é imediato e devolve o comportamento anterior, sem trechos no prompt.
+     */
+    RAG_ENABLED: envBoolean.default(false),
+    /**
+     * Estende a busca à revisão semanal (mensagens proativas): os analistas de hábitos e de
+     * recuperação passam a receber evidência junto dos números reais do aluno. Só vale com
+     * `RAG_ENABLED=true`. A consulta nasce de rótulos fixos dos sinais (nunca de texto do aluno
+     * nem de dado de saúde), então nada pessoal vai ao provedor de embedding. Desligar é imediato.
+     */
+    RAG_PROACTIVE_ENABLED: envBoolean.default(false),
+    /**
      * Threshold de cosseno do retrieval denso (Victor §4.2). Achado 2026-09-02: o default
      * documentado (0.75) nunca foi medido contra o `text-embedding-3-small` real — só contra
      * o embedding fake de dev, que tem outra distribuição. Com o provedor real habilitado
@@ -391,8 +410,15 @@ export const envSchema = z
      * de produção). 0.25 é calibrado pelo que foi medido de verdade: deixa passar match
      * genuinamente relevante, ainda filtra ruído (pares não relacionados do mesmo modelo
      * ficaram bem abaixo disso). Recalibrar de novo se o corpus real mostrar outro padrão.
+     *
+     * 2026-11-02, corpus real (48 documentos) e `text-embedding-3-small`: com 0,25 o recall era de 91%
+     * e a abstenção em perguntas fora do assunto, de só 43%; 0,30 manteve o recall (91%, nenhum
+     * falso-vazio) e subiu a abstenção para 57%; 0,35 já corta uma pergunta respondível (89%) e 0,45
+     * corta 6. Ficou 0,30 porque a régua é otimista (perguntas escritas olhando o corpus) e perguntas
+     * reais, mais ruidosas, tiram nota: vale errar para o lado do recall, já que trecho irrelevante é
+     * ignorado pelo agente e a falta de trecho custa a embasamento. Recalibrar com perguntas reais.
      */
-    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.25),
+    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.3),
     /** Score mínimo pós-rerank (Victor §4.3). */
     RAG_RERANK_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
     /** Trechos retornados após rerank. */

@@ -7,6 +7,7 @@ import {
   exceptionKindSchema,
   exceptionPrioritySchema,
   exceptionStatusSchema,
+  reviewUrgencySchema,
   uncertaintySchema,
 } from './coaching.schema';
 import { modelTierSchema, tierRouteSchema } from './model-tier.schema';
@@ -25,9 +26,56 @@ export const exceptionListItemSchema = z.object({
   studentId: z.uuid(),
   studentName: z.string().nullable(),
   canResolve: z.boolean(),
+  /** Só nos casos de protocolo: obrigatória (sem envio automático) ou opcional (libera no prazo). */
+  reviewUrgency: reviewUrgencySchema.nullable(),
+  /** Quando o protocolo opcional é liberado sozinho; `null` na revisão obrigatória. */
+  autoReleaseAt: iso.nullable(),
 });
 export type ExceptionListItem = z.infer<typeof exceptionListItemSchema>;
 export const exceptionListResponseSchema = z.array(exceptionListItemSchema);
+
+/**
+ * Os casos se dividem em dois painéis: a Fila do Profissional (o que a IA gerou ou mudou no
+ * protocolo, e a geração que falhou) e Alertas (todo o resto: segurança, pedido de revisão do
+ * aluno, exame, conversa, sem política aplicável).
+ */
+export const exceptionScopeSchema = z.enum(['QUEUE', 'ALERTS']);
+export type ExceptionScope = z.infer<typeof exceptionScopeSchema>;
+
+/** Tipos de caso que moram na Fila do Profissional; os demais são Alertas. */
+export const QUEUE_EXCEPTION_KINDS = ['PROTOCOL_REVIEW', 'DECISION_FAILURE'] as const;
+
+export function exceptionScopeOf(kind: string): ExceptionScope {
+  return (QUEUE_EXCEPTION_KINDS as readonly string[]).includes(kind) ? 'QUEUE' : 'ALERTS';
+}
+
+const countsSchema = z.object({
+  open: z.number().int().nonnegative(),
+  urgent: z.number().int().nonnegative(),
+});
+/** Casos abertos no total e em cada painel (o sino soma os dois; cada menu mostra o seu). */
+export const exceptionsSummarySchema = countsSchema.extend({
+  queue: countsSchema,
+  alerts: countsSchema,
+});
+export type ExceptionsSummary = z.infer<typeof exceptionsSummarySchema>;
+
+/**
+ * Respostas da anamnese enviada pelo aluno, na ordem do formulário. `data` é o conteúdo da
+ * etapa como o aluno respondeu (já sem a separação comum/cifrada); a tela traduz os rótulos.
+ */
+export const anamnesisAnswersViewSchema = z.object({
+  submittedAt: iso.nullable(),
+  flow: z.enum(['INITIAL', 'COMPLEMENTARY']),
+  steps: z.array(
+    z.object({
+      step: z.number().int().min(1).max(9),
+      title: z.string(),
+      data: z.record(z.string(), z.unknown()),
+    }),
+  ),
+});
+export type AnamnesisAnswersView = z.infer<typeof anamnesisAnswersViewSchema>;
 
 const proposalViewSchema = z.object({
   id: z.uuid(),
@@ -46,7 +94,11 @@ export const exceptionDetailSchema = z.object({
     userId: z.uuid(),
     resolution: z.record(z.string(), z.unknown()).nullable(),
     resolvedAt: iso.nullable(),
+    /** Referências do caso (proposta, decisão, sinal); `source: 'SWAP_GAP'` = troca sem equivalente. */
+    subject: z.record(z.string(), z.string()).optional(),
   }),
+  /** Nome dos exercícios citados na proposta ou no caso de troca (id → nome). */
+  exerciseNames: z.record(z.string(), z.string()).nullish(),
   student: z
     .object({ id: z.uuid(), name: z.string().nullable(), timezone: z.string().nullable() })
     .nullable(),
@@ -76,6 +128,16 @@ export const exceptionDetailSchema = z.object({
   exam: medicalExamViewSchema.nullish(),
 });
 export type ExceptionDetail = z.infer<typeof exceptionDetailSchema>;
+
+/** Exercícios do catálogo que a equipe pode escolher para a troca do caso. */
+export const swapOptionsResponseSchema = z.object({
+  fromExerciseId: z.string(),
+  fromName: z.string(),
+  options: z.array(z.object({ id: z.string(), name: z.string() })),
+});
+export type SwapOptions = z.infer<typeof swapOptionsResponseSchema>;
+
+export const substituteForCaseRequestSchema = z.object({ toExerciseId: z.string().min(1).max(80) });
 
 export const exceptionDecisionsResponseSchema = z.array(
   z.object({
@@ -158,8 +220,3 @@ export const agentCostsSchema = z.object({
 });
 export type AgentCosts = z.infer<typeof agentCostsSchema>;
 
-export const exceptionsSummarySchema = z.object({
-  open: z.number().int().nonnegative(),
-  urgent: z.number().int().nonnegative(),
-});
-export type ExceptionsSummary = z.infer<typeof exceptionsSummarySchema>;

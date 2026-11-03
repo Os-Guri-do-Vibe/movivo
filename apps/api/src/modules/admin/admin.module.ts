@@ -45,6 +45,8 @@ import { KnowledgeProcessingWorker } from './knowledge-processing.worker';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 import { SystemScriptsController } from './system-scripts.controller';
+import { TacoAdminController } from './taco-admin.controller';
+import { TacoAdminService } from './taco-admin.service';
 import { SystemScriptsService } from './system-scripts.service';
 
 @Module({
@@ -62,6 +64,7 @@ import { SystemScriptsService } from './system-scripts.service';
     L1GuardrailAdminController,
     AuditQueryController,
     KnowledgeAdminController,
+    TacoAdminController,
     SystemScriptsController,
   ],
   providers: [
@@ -77,6 +80,7 @@ import { SystemScriptsService } from './system-scripts.service';
     L1GuardrailAdminService,
     AuditQueryService,
     KnowledgeAdminService,
+    TacoAdminService,
     KnowledgeProcessingWorker,
     SystemScriptsService,
   ],

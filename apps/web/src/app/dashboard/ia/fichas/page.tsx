@@ -1,16 +1,6 @@
-import { AgentProfiles } from '@/components/dashboard/agent-profiles';
-import { hasAllCapabilities } from '@/lib/control-center-access';
+import { redirect } from 'next/navigation';
 
-import { requireDashboardCapability } from '../../_lib/session';
-
-export default async function AgentProfilesPage() {
-  const session = await requireDashboardCapability(
-    'control_center.agents.read',
-    '/dashboard/ia/fichas',
-  );
-  return (
-    <AgentProfiles
-      canWrite={hasAllCapabilities(session.capabilities, 'control_center.agents.profiles.write')}
-    />
-  );
+/** As fichas passaram para a lista de agentes (Visualizar e Editar em cada linha). */
+export default function AgentProfilesPage(): never {
+  redirect('/dashboard/ia/agentes');
 }

@@ -25,6 +25,7 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { AuditService } from './audit.service';
+import { logicalKeyFor } from '../../core/knowledge/logical-key';
 import {
   appendKnowledgeEvent,
   currentKnowledgeState,
@@ -86,17 +87,6 @@ interface KnowledgeListRow {
   retained_until: Date | null;
   blob_available: boolean;
   chunk_count: number;
-}
-
-function logicalKeyFor(title: string): string {
-  const key = title
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 120);
-  return key || `documento-${createHash('sha256').update(title).digest('hex').slice(0, 12)}`;
 }
 
 /** "Revisao_do_estudo-2024.pdf" → "Revisao do estudo 2024" (o usuário não precisa nomear nada). */
@@ -208,6 +198,7 @@ export class KnowledgeAdminService {
         maxBytes: this.config.knowledge.uploadMaxBytes,
         quarantineDays: QUARANTINE_DAYS,
         approvedOriginalDays: APPROVED_ORIGINAL_DAYS,
+        retrievalEnabled: this.config.rag.enabled,
       },
     });
   }
@@ -379,6 +370,11 @@ export class KnowledgeAdminService {
       await lockKnowledgeDocument(tx, id);
       const state = await currentKnowledgeState(tx, id);
       if (!state) throw new NotFoundException('Documento inexistente.');
+      // O hash e a chave lógica ficam na trilha (não são conteúdo): é a "lápide" que impede um
+      // artigo padrão excluído de voltar no próximo deploy (`seedDefaultArticles`).
+      const identity = (await tx.execute(sql`
+        SELECT sha256, logical_key FROM knowledge_documents WHERE id = ${id}::uuid
+      `)) as unknown as Array<{ sha256: string; logical_key: string }>;
       const purged = (await tx.execute(
         sql`SELECT public.delete_knowledge_document(${id}::uuid) AS chunks`,
       )) as unknown as Array<{ chunks: number }>;
@@ -388,7 +384,12 @@ export class KnowledgeAdminService {
         action: 'knowledge.delete',
         entityType: 'knowledge_document',
         entityId: id,
-        changes: { previousStatus: state.status, chunksRemoved: Number(purged[0]?.chunks ?? 0) },
+        changes: {
+          previousStatus: state.status,
+          chunksRemoved: Number(purged[0]?.chunks ?? 0),
+          sha256: identity[0]?.sha256 ?? null,
+          logicalKey: identity[0]?.logical_key ?? null,
+        },
       });
     });
     return this.list(actor);

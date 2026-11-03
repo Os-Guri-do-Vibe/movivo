@@ -537,6 +537,12 @@ services:
       # volta no webhook e de onde baixa o PDF do protocolo — por isso o nome do
       # serviço, e não localhost (que dentro do container é ele mesmo).
       API_PUBLIC_URL: http://api:3001
+      # RAG (busca nos artigos da Base de Conhecimento) LIGADO no local, para testar com os artigos
+      # reais. Em produção a chave vem de infra/vps/api.env via o secret API_ENV_PRODUCTION (ver
+      # apps/api/src/core/knowledge/README.md).
+      RAG_ENABLED: 'true'
+      # RAG na revisão semanal (mensagens proativas), também ligado no local.
+      RAG_PROACTIVE_ENABLED: 'true'
     secrets:
       - postgres_app_password
       - redis_password

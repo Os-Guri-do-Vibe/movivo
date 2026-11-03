@@ -3,12 +3,7 @@
  * metodologia. Publicar exige que todas as tarefas do agente passem nos casos de avaliação com o
  * rascunho no prompt. Só ADMIN chega aqui (capability exclusiva).
  */
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
 
 import {
@@ -25,9 +20,11 @@ import { agentProfiles } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { AuditService } from '../admin/audit.service';
 import { EvaluationService, type EvalRunSummary } from '../evaluation/evaluation.service';
-import { languageViolations } from '../planning/tasks/common';
 
 type AgentProfileRow = typeof agentProfiles.$inferSelect;
+
+/** Teto de gasto com modelos de IA em um teste de ficha (R$). */
+const MAX_TEST_SPEND_BRL = 5;
 
 const OPEN_STATUSES: readonly string[] = ['DRAFT', 'TESTING'];
 
@@ -101,14 +98,6 @@ export class AgentProfilesService {
     if (!OPEN_STATUSES.includes(row.status)) {
       throw new ConflictException('Só um rascunho aberto pode ser editado.');
     }
-    const issues = languageViolations(update.content, 'content');
-    if (issues.length > 0) {
-      throw new BadRequestException({
-        code: 'PROFILE_LANGUAGE',
-        message: 'A ficha usa linguagem fora dos guardrails da MOVIVO.',
-        issues: issues.map((i) => ({ path: i.path, message: i.message })),
-      });
-    }
     const [saved] = await this.db.runAsSystem((tx) =>
       tx
         .update(agentProfiles)
@@ -152,12 +141,25 @@ export class AgentProfilesService {
     );
     const profileOverride = { agent, version: row.version, content: row.content };
     const evaluations: EvalRunSummary[] = [];
-    for (const taskId of AGENT_PROFILE_TASKS[agent].filter((t) => evaluable.has(t))) {
-      evaluations.push(
-        await this.evaluation.evaluate(taskId, { profileOverride, requestedBy: staffId }),
-      );
+    const taskIds = AGENT_PROFILE_TASKS[agent].filter((t) => evaluable.has(t));
+    let spentBrl = 0;
+    for (const taskId of taskIds) {
+      // O teste usa modelos reais e gera custo: não gasta com o resto se uma tarefa já reprovou
+      // (a ficha não poderia ser publicada de qualquer forma) nem passa do teto de gasto.
+      if (spentBrl >= MAX_TEST_SPEND_BRL) break;
+      const summary = await this.evaluation.evaluate(taskId, {
+        profileOverride,
+        routeOverride: this.evaluation.panelTestRoute(taskId),
+        requestedBy: staffId,
+      });
+      evaluations.push(summary);
+      spentBrl += summary.costBrl;
+      if (!summary.passed) break;
     }
-    const passed = evaluations.length > 0 && evaluations.every((e) => e.passed);
+    const passed =
+      evaluations.length > 0 &&
+      evaluations.length === taskIds.length &&
+      evaluations.every((e) => e.passed);
     await this.db.runAsSystem((tx) =>
       tx
         .update(agentProfiles)

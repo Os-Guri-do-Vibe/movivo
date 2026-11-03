@@ -70,14 +70,18 @@ export class FoodCatalogService {
     return computeTotals(items, new Map(rows.map((row) => [row.id, row.per100g])));
   }
 
-  /** Grava (ou atualiza) os itens da TACO pelo código da fonte. Devolve quantos foram gravados. */
+  /**
+   * Grava (ou atualiza) os itens pelo código da fonte. Os da TACO entram como `TACO`; os
+   * complementos (`origin`) entram como `CUSTOM`, para nunca se misturarem com a TACO. Devolve
+   * quantos foram gravados.
+   */
   async importTaco(foods: readonly TacoFood[]): Promise<number> {
     await this.db.runAsSystem(async (tx) => {
       for (const food of foods) {
         await tx
           .insert(foodItems)
           .values({
-            source: 'TACO',
+            source: food.origin ? 'CUSTOM' : 'TACO',
             sourceCode: food.sourceCode,
             name: food.name,
             searchName: searchName(food.name),

@@ -21,8 +21,9 @@ import { staffQueueAlertMessage } from '../whatsapp/message-templates';
 const KIND_LABEL: Readonly<Record<string, string>> = {
   SAFETY: 'sinal de segurança',
   NO_APPLICABLE_POLICY: 'decisão humana necessária',
+  PROTOCOL_REVIEW: 'protocolo para revisão obrigatória',
   STUDENT_REVIEW_REQUEST: 'aluno pediu revisão',
-  DECISION_FAILURE: 'falha ao executar uma decisão',
+  DECISION_FAILURE: 'falha ao gerar o protocolo (revisão obrigatória)',
   CONVERSATION_TAKEOVER: 'conversa assumida',
   MEDICAL_EXAM: 'exame enviado',
 };

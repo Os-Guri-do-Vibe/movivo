@@ -61,7 +61,7 @@ export interface StrengthRules {
   minFrequencyPerMuscle: number | null;
   maxExercisesPerSession: number | null;
   deloadEveryWeeks: number | null;
-  mesocycleWeeks: Range | null;
+  blockWeeksByPhase: Record<string, Range>;
   rirByPhase: Record<string, Range>;
   repsByGoal: Record<string, Range>;
   restByKind: Record<string, Range>;
@@ -84,7 +84,7 @@ export function strengthRules(params: Params, level: RulesLevel): StrengthRules 
     minFrequencyPerMuscle: asNumber(field(params, 'volume', 'minFrequencyPerMuscle')),
     maxExercisesPerSession: asNumber(field(params, 'structure', 'maxExercisesPerSession')),
     deloadEveryWeeks: asNumber(cell(params, 'periodization', 'deloadEveryWeeks', level, 'weeks')),
-    mesocycleWeeks: asRange(field(params, 'periodization', 'mesocycleWeeks')),
+    blockWeeksByPhase: rowsAsRanges(params, 'periodization', 'blockWeeksByPhase', 'weeks'),
     rirByPhase: rowsAsRanges(params, 'intensity', 'rirByPhase', 'rir'),
     repsByGoal: rowsAsRanges(params, 'intensity', 'repsByGoal', 'reps'),
     restByKind: rowsAsRanges(params, 'intensity', 'restSeconds', 'seconds'),

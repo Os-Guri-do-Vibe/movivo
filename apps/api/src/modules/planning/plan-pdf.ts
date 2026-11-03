@@ -9,13 +9,8 @@ import PDFDocument from 'pdfkit';
 import {
   EXTERNAL_SPORT_LABELS,
   HYROX_STATION_LABELS,
-  MEAL_SLOT_LABELS,
   RUNNING_SESSION_KIND_LABELS,
-  SESSION_MODALITY_LABELS,
-  SESSION_PRIORITY_LABELS,
-  type DailyTargets,
   type EnduranceTarget,
-  type PlanRead,
   type PlanSession,
 } from '@movivo/shared';
 
@@ -29,25 +24,25 @@ export const COLOR = {
   branco: '#FFFFFF',
 } as const;
 const MARGIN = 48;
-const FOOTER =
+export const FOOTER =
   'Protocolo da equipe MOVIVO: profissionais de Educação Física (CREF) e Nutrição (CRN), usando IA como ferramenta. ' +
   'Sentiu dor, mal-estar ou ficou com dúvida? Fale com a gente pelo WhatsApp antes de seguir.';
 
-const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
-const SLOT_LABELS: Record<string, string> = {
+export const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+export const SLOT_LABELS: Record<string, string> = {
   MORNING: 'manhã',
   AFTERNOON: 'tarde',
   EVENING: 'noite',
   ANY: '',
 };
-const ENERGY_LABELS: Record<string, string> = {
+export const ENERGY_LABELS: Record<string, string> = {
   DEFICIT: 'Déficit moderado de energia',
   MAINTENANCE: 'Manutenção de energia',
   SURPLUS: 'Superávit moderado de energia',
   RECOMPOSITION: 'Recomposição corporal',
   PERFORMANCE_FUELING: 'Energia para o desempenho',
 };
-const SEGMENT_LABELS: Record<string, string> = {
+export const SEGMENT_LABELS: Record<string, string> = {
   WARMUP: 'Aquecimento',
   STEADY: 'Contínuo',
   WORK: 'Estímulo',
@@ -55,7 +50,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   STRIDES: 'Educativos/acelerações',
   COOLDOWN: 'Desaquecimento',
 };
-const TECHNIQUE_LABELS: Record<string, string> = {
+export const TECHNIQUE_LABELS: Record<string, string> = {
   DROP_SET: 'drop-set',
   REST_PAUSE: 'rest-pause',
   CLUSTER_SET: 'cluster',
@@ -79,18 +74,18 @@ export function pdfText(text: string): string {
     .trim();
 }
 
-function dayLabel(date: string, slot: string): string {
+export function dayLabel(date: string, slot: string): string {
   const d = new Date(`${date}T00:00:00Z`);
   const short = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
   const when = SLOT_LABELS[slot];
   return `${WEEKDAYS[d.getUTCDay()] ?? ''}, ${short}${when ? ` · ${when}` : ''}`;
 }
 
-function pace(seconds: number): string {
+export function pace(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
 }
 
-function targetLabel(target: EnduranceTarget): string {
+export function targetLabel(target: EnduranceTarget): string {
   switch (target.by) {
     case 'ZONE':
       return `zona ${target.zone.slice(1)}`;
@@ -103,7 +98,7 @@ function targetLabel(target: EnduranceTarget): string {
   }
 }
 
-function volume(distanceMeters?: number, durationSeconds?: number): string {
+export function volume(distanceMeters?: number, durationSeconds?: number): string {
   if (distanceMeters !== undefined) {
     return distanceMeters >= 1000
       ? `${(distanceMeters / 1000).toLocaleString('pt-BR')} km`
@@ -253,189 +248,4 @@ export function bullets(doc: Doc, items: readonly string[], size = 10): void {
         lineGap: 2,
       });
   }
-}
-
-function greeting(doc: Doc, plan: PlanRead, version: number, startsOn: string): void {
-  const name = plan.firstName ? pdfText(plan.firstName) : null;
-  doc
-    .fillColor(COLOR.grafite)
-    .font('Helvetica-Bold')
-    .fontSize(18)
-    .text(name ? `${name}, este é o seu protocolo` : 'Este é o seu protocolo', MARGIN);
-  paragraph(
-    doc,
-    `Versão ${version} · em vigor desde ${startsOn.split('-').reverse().join('/')}. Montado a partir do que você contou na anamnese e revisado pela equipe de profissionais da MOVIVO.`,
-    COLOR.musgo,
-    9,
-  );
-}
-
-export function trainingPlanPdf(plan: PlanRead): Promise<Buffer> {
-  const training = plan.training;
-  if (!training) throw new Error('aluno sem plano de treino ativo');
-  return render('Protocolo de treino', (doc) => {
-    greeting(doc, plan, training.version, training.startsOn);
-    if (plan.strategy) {
-      heading(doc, plan.strategy.title);
-      if (plan.strategy.studentMessage) paragraph(doc, plan.strategy.studentMessage);
-    }
-    heading(doc, 'Como o plano funciona');
-    paragraph(doc, training.structure.summary);
-
-    heading(doc, 'Sua semana');
-    const first = training.upcoming[0]?.date;
-    const week = first
-      ? training.upcoming.filter((s) => Date.parse(s.date) - Date.parse(first) < 7 * 86_400_000)
-      : [];
-    if (week.length === 0) {
-      paragraph(doc, 'As datas dos treinos aparecem na página do seu plano.', COLOR.musgo);
-    }
-    for (const s of week) {
-      const y = doc.y;
-      doc
-        .roundedRect(MARGIN, y, doc.page.width - MARGIN * 2, 26, 4)
-        .fill(COLOR.nevoa)
-        .fillColor(COLOR.petroleo)
-        .font('Helvetica-Bold')
-        .fontSize(10)
-        .text(dayLabel(s.date, s.slot), MARGIN + 10, y + 8, { width: 150 })
-        .fillColor(COLOR.grafite)
-        .font('Helvetica')
-        .text(
-          `${pdfText(s.title)} · ${SESSION_MODALITY_LABELS[s.modality]} · ${s.minutes} min`,
-          MARGIN + 170,
-          y + 8,
-          { width: doc.page.width - MARGIN * 2 - 180 },
-        );
-      doc.y = y + 32;
-    }
-
-    heading(doc, 'Fases');
-    bullets(
-      doc,
-      training.structure.phases.map(
-        (p) =>
-          `${p.name} (${p.weeks} ${p.weeks === 1 ? 'semana' : 'semanas'}): ${p.focus}${p.endsWithDeload ? ' Termina com uma semana mais leve para recuperar.' : ''}`,
-      ),
-    );
-
-    heading(doc, 'Sessões');
-    for (const session of training.structure.sessions) {
-      if (doc.y > doc.page.height - 180) doc.addPage();
-      doc
-        .fillColor(COLOR.grafite)
-        .font('Helvetica-Bold')
-        .fontSize(12)
-        .text(pdfText(session.title), MARGIN, doc.y + 6);
-      doc
-        .fillColor(session.priority === 'KEY' ? COLOR.coral : COLOR.musgo)
-        .font('Helvetica')
-        .fontSize(9)
-        .text(
-          [
-            SESSION_MODALITY_LABELS[session.content.modality],
-            SESSION_PRIORITY_LABELS[session.priority],
-            `${session.weeklyFrequency}× por semana`,
-            `~${session.estimatedMinutes} min`,
-            `esforço ~${session.estimatedRpe}/10`,
-          ].join(' · '),
-          MARGIN,
-        );
-      paragraph(doc, session.purpose, COLOR.musgo, 9.5);
-      doc.moveDown(0.3);
-      bullets(doc, sessionLines(session), 9.5);
-      doc.moveDown(0.6);
-    }
-
-    heading(doc, 'Ajustes');
-    paragraph(
-      doc,
-      'Se algo não couber na sua rotina, se a carga parecer pesada ou leve demais, ou se surgir qualquer desconforto, responda no WhatsApp. O Treinador MOVIVO ajusta com você, sempre dentro da metodologia dos nossos profissionais.',
-    );
-  });
-}
-
-function targetsTable(doc: Doc, label: string, t: DailyTargets): void {
-  const rows: [string, string][] = [
-    ['Energia', `${t.energyKcal.min}–${t.energyKcal.max} kcal`],
-    ['Proteína', `${t.proteinG} g`],
-    ['Carboidrato', `${t.carbsG} g`],
-    ['Gordura', `${t.fatG} g`],
-    ['Fibras', `${t.fiberG} g`],
-    ['Água', `${(t.waterMl / 1000).toLocaleString('pt-BR')} L`],
-  ];
-  doc.fillColor(COLOR.petroleo).font('Helvetica-Bold').fontSize(11).text(label, MARGIN);
-  for (const [name, value] of rows) {
-    const y = doc.y + 2;
-    doc
-      .fillColor(COLOR.musgo)
-      .font('Helvetica')
-      .fontSize(10)
-      .text(name, MARGIN + 8, y, { width: 120 })
-      .fillColor(COLOR.grafite)
-      .text(value, MARGIN + 140, y, { width: 200 });
-    doc.y = y + 14;
-  }
-  doc.moveDown(0.5);
-}
-
-export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
-  const nutrition = plan.nutrition;
-  if (!nutrition) throw new Error('aluno sem plano alimentar ativo');
-  const s = nutrition.structure;
-  return render('Protocolo alimentar', (doc) => {
-    greeting(doc, plan, nutrition.version, nutrition.startsOn);
-    heading(doc, ENERGY_LABELS[s.strategy] ?? 'Estratégia');
-    paragraph(doc, s.summary);
-
-    heading(doc, 'Metas do dia');
-    targetsTable(doc, 'Dia de treino', s.trainingDay);
-    targetsTable(doc, 'Dia de descanso', s.restDay);
-    paragraph(
-      doc,
-      'São faixas de referência, não números para perseguir à risca: a consistência ao longo da semana vale mais que um dia perfeito.',
-      COLOR.musgo,
-      9,
-    );
-
-    heading(doc, 'Refeições');
-    for (const meal of s.meals) {
-      if (doc.y > doc.page.height - 150) doc.addPage();
-      doc
-        .fillColor(COLOR.grafite)
-        .font('Helvetica-Bold')
-        .fontSize(11.5)
-        .text(MEAL_SLOT_LABELS[meal.slot], MARGIN, doc.y + 4);
-      doc
-        .fillColor(COLOR.musgo)
-        .font('Helvetica')
-        .fontSize(9)
-        .text(
-          `~${Math.round(meal.energyShare * 100)}% da energia do dia · ${meal.proteinG} g de proteína`,
-          MARGIN,
-        );
-      paragraph(doc, meal.guidance, COLOR.grafite, 10);
-      doc
-        .fillColor(COLOR.musgo)
-        .fontSize(9)
-        .text('Exemplos:', MARGIN, doc.y + 2);
-      bullets(doc, meal.examples, 9.5);
-      doc.moveDown(0.6);
-    }
-
-    heading(doc, 'Orientações');
-    bullets(doc, s.guidelines);
-    if (s.supplements.length > 0) {
-      heading(doc, 'Suplementos');
-      bullets(
-        doc,
-        s.supplements.map((sup) => `${sup.name}: ${sup.guidance}`),
-      );
-    }
-    heading(doc, 'Ajustes');
-    paragraph(
-      doc,
-      'Mande foto ou descrição das refeições pelo WhatsApp quando quiser acompanhamento. Se a rotina mudar, se algo não cair bem ou se tiver dúvida, é só responder: a equipe ajusta com você.',
-    );
-  });
 }

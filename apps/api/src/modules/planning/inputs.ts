@@ -314,13 +314,15 @@ export function strengthInputOf(
     options.catalog,
   );
   if (candidates.length < 8) return null;
+  const phase = beginner ? 'ADAPTATION' : goal === 'STRENGTH' ? 'STRENGTH' : 'HYPERTROPHY';
+  const blockWeeks = rules.blockWeeksByPhase[phase];
   return {
     level,
     goal,
-    phase: beginner ? 'ADAPTATION' : goal === 'STRENGTH' ? 'STRENGTH' : 'HYPERTROPHY',
+    phase,
     sessionsPerWeek: Math.min(6, options.sessions),
     minutesPerSession: minutesPerSession(view, 20, 180),
-    weeksInBlock: rules.mesocycleWeeks ? Math.round(rules.mesocycleWeeks.min) : 4,
+    weeksInBlock: blockWeeks ? Math.max(2, Math.round(blockWeeks.min)) : 4,
     split,
     modalityPriority: options.priority,
     candidates,
@@ -589,5 +591,11 @@ export function nutritionInputOf(
     cookingCapacity: life?.cookingCapacity ?? 'BASIC',
     foodBudgetMonthlyBrl: life?.foodBudgetMonthlyBrl ?? null,
     mealsOutsideHomePerWeek: life?.mealsOutsideHomePerWeek ?? 0,
+    // Os alimentos permitidos vêm da base (`FoodCandidatesService`), não do Estado do Aluno.
+    foods: [],
+    dailyBudgetBrl:
+      life?.foodBudgetMonthlyBrl != null
+        ? Math.round((life.foodBudgetMonthlyBrl / 30) * 100) / 100
+        : null,
   };
 }

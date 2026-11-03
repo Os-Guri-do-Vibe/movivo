@@ -1,7 +1,8 @@
 'use client';
 
 /** Um caso da fila: o que aconteceu, o que foi proposto, o estado do aluno e a decisão do profissional. */
-import { ArrowLeft } from 'lucide-react';
+import { exceptionScopeOf } from '@movivo/shared';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 
@@ -26,11 +27,15 @@ import {
   UNCERTAINTY_LABEL,
 } from '@/lib/exception-copy';
 
+import { AnamnesisAnswersButton } from './anamnesis-answers';
 import { ConfirmAction } from './confirm-action';
 import { StatusBadge } from './control-center-table';
-import { ResourceState, useControlCenterResource } from './control-center-ui';
+import { ResourceState, UpdatedAt, useControlCenterResource } from './control-center-ui';
 import { ExamReview } from './exam-review';
 import { ProtocolReview } from './protocol-review';
+import { SwapGapResolution } from './swap-gap-resolution';
+import { ReviewUrgencyBadge, ReviewUrgencyNotice } from './review-urgency';
+import { useReviewHold } from './use-review-hold';
 
 const dateTime = new Intl.DateTimeFormat('pt-BR', {
   dateStyle: 'short',
@@ -73,9 +78,16 @@ export function ExceptionDetail({ id }: { id: string }) {
     (signal?: AbortSignal) => getExceptionDecisions(id, signal),
     [id],
   );
-  const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
+  const { data, error, forbidden, loading, refresh, updatedAt } = useControlCenterResource(load);
   const decisions = useControlCenterResource(loadDecisions);
   const [note, setNote] = useState('');
+  // Com a tela aberta, a liberação automática que vencer espera o profissional terminar.
+  useReviewHold(
+    id,
+    data?.case.reviewUrgency === 'OPTIONAL' &&
+      data.case.status !== 'RESOLVED' &&
+      data.case.canResolve,
+  );
 
   if (!data) {
     return (
@@ -92,6 +104,10 @@ export function ExceptionDetail({ id }: { id: string }) {
   const goals = record(state.goals);
   const adherence = record(state.adherence);
   const open = item.status !== 'RESOLVED';
+  const inQueue = exceptionScopeOf(item.kind) === 'QUEUE';
+  // Geração que falhou: encerrar o caso faz os agentes tentarem de novo; o novo protocolo volta
+  // para a fila pela regra de sempre (obrigatório só para PAR-Q de risco, opcional nos demais).
+  const regenerable = item.kind === 'DECISION_FAILURE';
   const canAct = open && item.canResolve;
   const done = async (action: () => Promise<unknown>) => {
     await action();
@@ -101,13 +117,16 @@ export function ExceptionDetail({ id }: { id: string }) {
 
   return (
     <article className="space-y-6">
-      <Link
-        href="/dashboard/fila"
-        className="inline-flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft aria-hidden="true" className="size-4" />
-        Voltar para a fila
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href={inQueue ? '/dashboard/fila' : '/dashboard/alertas'}
+          className="inline-flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft aria-hidden="true" className="size-4" />
+          {inQueue ? 'Voltar para a Fila do Profissional' : 'Voltar para os Alertas'}
+        </Link>
+        <AnamnesisAnswersButton caseId={item.id} />
+      </div>
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -116,6 +135,10 @@ export function ExceptionDetail({ id }: { id: string }) {
           >
             {PRIORITY_LABEL[item.priority]}
           </StatusBadge>
+          <ReviewUrgencyBadge
+            reviewUrgency={item.reviewUrgency}
+            autoReleaseAt={item.autoReleaseAt}
+          />
           <h1 className="text-h2 font-semibold">{KIND_LABEL[item.kind]}</h1>
           <span className="text-xs text-muted-foreground">
             {DOMAIN_LABEL[item.domain]} · {ageLabel(item.createdAt)}
@@ -128,7 +151,15 @@ export function ExceptionDetail({ id }: { id: string }) {
             : ''}
         </p>
         <p className="max-w-prose text-label text-muted-foreground">{item.summary}</p>
+        <UpdatedAt at={updatedAt} className="mt-0" />
       </header>
+
+      {open ? (
+        <ReviewUrgencyNotice
+          reviewUrgency={item.reviewUrgency}
+          autoReleaseAt={item.autoReleaseAt}
+        />
+      ) : null}
 
       {safety ? (
         <section
@@ -156,7 +187,9 @@ export function ExceptionDetail({ id }: { id: string }) {
           aria-label="Proposta do sistema"
         >
           <h2 className="text-h3 font-semibold">O que o sistema propôs</h2>
-          <p className="mt-1 text-label">{describeAction(proposal.action)}</p>
+          <p className="mt-1 text-label">
+            {describeAction(proposal.action, data.exerciseNames ?? {})}
+          </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
             {proposal.rationale.map((line) => (
               <li key={line}>{line}</li>
@@ -182,6 +215,16 @@ export function ExceptionDetail({ id }: { id: string }) {
             </p>
           ) : null}
         </section>
+      ) : null}
+
+      {item.subject?.source === 'SWAP_GAP' && open ? (
+        <SwapGapResolution
+          caseId={item.id}
+          canAct={canAct}
+          onChanged={async () => {
+            await Promise.all([refresh(), decisions.refresh()]);
+          }}
+        />
       ) : null}
 
       {proposal && isProtocolAction(proposal.action) ? (
@@ -250,7 +293,7 @@ export function ExceptionDetail({ id }: { id: string }) {
                 <ConfirmAction
                   triggerLabel="Aprovar proposta"
                   title="Aprovar e executar a mudança?"
-                  description={describeAction(proposal.action)}
+                  description={describeAction(proposal.action, data.exerciseNames ?? {})}
                   confirmLabel="Aprovar"
                   onConfirm={() => done(() => approveException(item.id, note.trim() || undefined))}
                 />
@@ -264,6 +307,19 @@ export function ExceptionDetail({ id }: { id: string }) {
                   onConfirm={() => done(() => rejectException(item.id, note.trim()))}
                 />
               </>
+            ) : regenerable ? (
+              <ConfirmAction
+                triggerLabel="Regerar protocolo"
+                triggerIcon={RefreshCw}
+                title="Regerar o protocolo deste aluno?"
+                description="Os agentes tentam gerar o protocolo de novo. O caso é encerrado e o novo protocolo entra na Fila do Profissional (revisão obrigatória só se o aluno tiver PAR-Q de risco; nos demais, opcional e liberado sozinho em 2 h)."
+                confirmLabel="Regerar"
+                onConfirm={() =>
+                  done(() =>
+                    resolveException(item.id, note.trim() || 'Regeração do protocolo solicitada.'),
+                  )
+                }
+              />
             ) : (
               <ConfirmAction
                 triggerLabel="Encerrar caso"

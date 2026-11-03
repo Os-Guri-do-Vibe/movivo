@@ -93,7 +93,8 @@ describe('DashboardShell', () => {
       expect.arrayContaining([
         'Visão Geral',
         'Base de Alunos',
-        'Fila de exceções',
+        'Fila do Profissional',
+        'Alertas',
         'Agentes',
         'Administração',
       ]),
@@ -130,20 +131,22 @@ describe('DashboardShell', () => {
     ]);
   });
 
-  it('coloca Conversas e a Fila de exceções na área de alunos, cada uma com a sua capability', () => {
+  it('coloca Conversas, a Fila do Profissional e os Alertas na área de alunos', () => {
     const alunos = navigationGroupsFor(ADMIN_CAPABILITIES).find(
       (group) => group.label === 'Alunos',
     );
     expect(alunos?.items.map((item) => item.label)).toEqual([
       'Base de Alunos',
       'Conversas',
-      'Fila de exceções',
+      'Fila do Profissional',
+      'Alertas',
     ]);
-    expect(alunos?.items[2]).toMatchObject({ href: '/dashboard/fila', badge: 'exceptions' });
+    expect(alunos?.items[2]).toMatchObject({ href: '/dashboard/fila', badge: 'queue' });
+    expect(alunos?.items[3]).toMatchObject({ href: '/dashboard/alertas', badge: 'alerts' });
     // Suporte lê a base de alunos, mas não o conteúdo das conversas (dado de saúde) nem a fila.
     const suporte = navigationFor(['control_center.students.read']).map((item) => item.label);
     expect(suporte).not.toContain('Conversas');
-    expect(suporte).not.toContain('Fila de exceções');
+    expect(suporte).not.toContain('Fila do Profissional');
   });
 
   it('Agentes exige a capability própria', () => {

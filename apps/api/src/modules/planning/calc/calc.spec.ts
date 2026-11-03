@@ -71,6 +71,29 @@ describe('params', () => {
     expect(rules.deloadEveryWeeks).toBeNull();
   });
 
+  it('lê a duração do bloco de cada fase de forma independente', () => {
+    const rules = strengthRules(
+      {
+        periodization: {
+          blockWeeksByPhase: {
+            ADAPTATION: { weeks: { min: 3, max: 4 } },
+            HYPERTROPHY: { weeks: { min: 6, max: 8 } },
+            STRENGTH: { weeks: { min: 4, max: 5 } },
+            DELOAD: { weeks: { min: 1, max: 1 } },
+          },
+        },
+      },
+      'INTERMEDIATE',
+    );
+    expect(rules.blockWeeksByPhase).toEqual({
+      ADAPTATION: { min: 3, max: 4 },
+      HYPERTROPHY: { min: 6, max: 8 },
+      STRENGTH: { min: 4, max: 5 },
+      DELOAD: { min: 1, max: 1 },
+    });
+    expect(strengthRules(undefined, 'BEGINNER').blockWeeksByPhase).toEqual({});
+  });
+
   it('campo ausente vira null; sem documento nenhuma regra', () => {
     expect(runningRules(undefined, 'BEGINNER').easySharePct).toBeNull();
     expect(hybridRules(undefined).allowTwoSessionsSameDay).toBe(false);

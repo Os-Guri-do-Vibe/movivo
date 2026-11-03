@@ -1,4 +1,9 @@
 import {
+  tacoCatalogResponseSchema,
+  tacoFoodsResponseSchema,
+  type ImportTacoInput,
+  type TacoCatalogResponse,
+  type TacoFoodsResponse,
   agentCostsSchema,
   agentsOverviewSchema,
   exceptionActionResponseSchema,
@@ -6,7 +11,12 @@ import {
   exceptionDetailSchema,
   exceptionExamFileSchema,
   exceptionListResponseSchema,
+  anamnesisAnswersViewSchema,
+  swapOptionsResponseSchema,
+  type SwapOptions,
   exceptionsSummarySchema,
+  type AnamnesisAnswersView,
+  type ExceptionScope,
   type ExceptionsSummary,
   type AgentCosts,
   type AgentsOverview,
@@ -578,6 +588,24 @@ export function uploadKnowledgeArticle(file: File): Promise<KnowledgeDocumentsVi
   });
 }
 
+export function getTacoCatalog(signal?: AbortSignal): Promise<TacoCatalogResponse> {
+  return request('ai/taco', tacoCatalogResponseSchema, signal);
+}
+
+/** Todos os alimentos da TACO já importados, com a composição por 100 g. */
+export function getTacoFoods(signal?: AbortSignal): Promise<TacoFoodsResponse> {
+  return request('ai/taco/foods', tacoFoodsResponseSchema, signal);
+}
+
+/** Importa a TACO (CSV exportado da planilha oficial). Idempotente pelo número do alimento. */
+export function importTacoCsv(input: ImportTacoInput): Promise<TacoCatalogResponse> {
+  return mutate('ai/taco/import', input, tacoCatalogResponseSchema, {
+    forbidden: 'Seu papel não pode importar a TACO.',
+    fallback: 'Não foi possível importar a TACO.',
+    contract: 'A resposta da importação veio fora do contrato esperado.',
+  });
+}
+
 /** Exclui o artigo da base ativa. Sem justificativa. */
 export function deleteKnowledgeDocument(id: string): Promise<KnowledgeDocumentsViewResponse> {
   return mutate(
@@ -651,15 +679,17 @@ export function runSystemScript(id: string): Promise<ControlCenterScriptRunRespo
 
 /* --------- Fila de exceções (por conselho profissional) -------- */
 
+/** `scope`: `QUEUE` = Fila do Profissional; `ALERTS` = Alertas. */
 export function getExceptions(
   status?: 'OPEN' | 'IN_REVIEW' | 'RESOLVED',
+  scope?: ExceptionScope,
   signal?: AbortSignal,
 ): Promise<ExceptionListItem[]> {
-  return request(
-    `exceptions${status ? `?status=${status}` : ''}`,
-    exceptionListResponseSchema,
-    signal,
-  );
+  const query = new URLSearchParams();
+  if (status) query.set('status', status);
+  if (scope) query.set('scope', scope);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return request(`exceptions${suffix}`, exceptionListResponseSchema, signal);
 }
 
 export function getExceptionsSummary(signal?: AbortSignal): Promise<ExceptionsSummary> {
@@ -675,6 +705,29 @@ export function getExceptionDecisions(
   signal?: AbortSignal,
 ): Promise<ExceptionDecision[]> {
   return request(`exceptions/${id}/decisions`, exceptionDecisionsResponseSchema, signal);
+}
+
+/** Respostas da anamnese do aluno do caso (dado de saúde; cada leitura fica na auditoria). */
+export function getExceptionAnamnesis(
+  id: string,
+  signal?: AbortSignal,
+): Promise<AnamnesisAnswersView> {
+  return request(`exceptions/${id}/anamnesis`, anamnesisAnswersViewSchema, signal);
+}
+
+/** Exercícios que a equipe pode escolher numa troca sem equivalente seguro. */
+export function getSwapOptions(id: string, signal?: AbortSignal): Promise<SwapOptions> {
+  return request(`exceptions/${id}/swap-options`, swapOptionsResponseSchema, signal);
+}
+
+/** A equipe escolhe o exercício: a troca entra no protocolo e o aluno recebe o protocolo novo. */
+export function substituteExercise(id: string, toExerciseId: string) {
+  return mutate(
+    `exceptions/${id}/substitute`,
+    { toExerciseId },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
 }
 
 /** Arquivo original do exame do caso (PDF ou foto, em base64). */
@@ -873,4 +926,41 @@ export async function saveTierRoutes(
   if (!parsed.success)
     throw new ControlCenterApiError(502, 'A resposta veio fora do contrato esperado.');
   return parsed.data;
+}
+
+/** Protocolo ativo do aluno, aberto para emenda pelo profissional do domínio. */
+export function getActiveProtocol(
+  studentId: string,
+  kind: 'TRAINING' | 'NUTRITION',
+  signal?: AbortSignal,
+): Promise<ProtocolReview> {
+  return request(`protocols/${studentId}/${kind}`, protocolReviewSchema, signal);
+}
+
+/** Emenda o protocolo ativo: a conferência é a mesma da edição; o aluno recebe a versão nova. */
+export async function amendActiveProtocol(
+  studentId: string,
+  input: EditProtocolRequest,
+): Promise<void> {
+  const response = await fetch(`/api/dashboard/control/protocols/${studentId}/${input.kind}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (response.ok) return;
+  const issues =
+    isRecord(value) && Array.isArray(value.issues)
+      ? value.issues.flatMap((issue) =>
+          isRecord(issue) && typeof issue.message === 'string' ? [issue.message] : [],
+        )
+      : [];
+  const message =
+    isRecord(value) && typeof value.message === 'string'
+      ? value.message
+      : response.status === 403
+        ? EXCEPTION_MESSAGES.forbidden
+        : 'Não foi possível salvar a emenda do protocolo.';
+  throw new ProtocolEditError(response.status, message, issues);
 }

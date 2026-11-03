@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Bell,
   Bot,
   Brain,
   Cable,
@@ -12,7 +13,6 @@ import {
   Dumbbell,
   FlaskConical,
   Handshake,
-  IdCard,
   Landmark,
   LockKeyhole,
   Megaphone,
@@ -34,7 +34,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ThemeToggle } from '@/components/theme-toggle';
 import {
   hasAllCapabilities,
   type DashboardCapability,
@@ -58,8 +57,8 @@ export interface DashboardNavigationItem {
   capabilities?: readonly DashboardCapability[];
   /** Quando a tela chega. Exibido no lugar do link; o fundador vê o roadmap dentro do produto. */
   soon?: string;
-  /** Mostra a contagem de casos abertos da fila ao lado do rótulo. */
-  badge?: 'exceptions';
+  /** Mostra a contagem de casos abertos (Fila do Profissional ou Alertas) ao lado do rótulo. */
+  badge?: 'queue' | 'alerts';
 }
 
 export interface DashboardNavigationPillar {
@@ -105,11 +104,20 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
       {
-        // O que o sistema não resolveu sozinho, só do domínio do conselho do profissional.
+        // O que a IA gerou ou mudou no protocolo, antes de chegar ao aluno (revisão obrigatória
+        // ou opcional), só do domínio do conselho do profissional.
         href: '/dashboard/fila',
-        label: 'Fila de exceções',
+        label: 'Fila do Profissional',
         icon: ClipboardCheck,
-        badge: 'exceptions',
+        badge: 'queue',
+        capabilities: ['control_center.exceptions.read'],
+      },
+      {
+        // Segurança, pedidos de revisão do aluno, exames e demais casos que pedem um profissional.
+        href: '/dashboard/alertas',
+        label: 'Alertas',
+        icon: Bell,
+        badge: 'alerts',
         capabilities: ['control_center.exceptions.read'],
       },
     ],
@@ -140,17 +148,10 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.ai.config.read'],
       },
       {
-        // Tarefas dos agentes e resultado dos testes, modelo de cada nível e custo de IA.
+        // Lista dos agentes (ver e editar a ficha de cada um), testes, modelo de cada nível e custo de IA.
         href: '/dashboard/ia/agentes',
         label: 'Agentes',
         icon: Bot,
-        capabilities: ['control_center.agents.read'],
-      },
-      {
-        // Quem é cada agente e como trabalha (markdown versionado); só ADMIN edita.
-        href: '/dashboard/ia/fichas',
-        label: 'Fichas dos agentes',
-        icon: IdCard,
         capabilities: ['control_center.agents.read'],
       },
     ],
@@ -314,7 +315,7 @@ function DashboardNavigation({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const { open } = useExceptionsSummary();
+  const { queue, alerts } = useExceptionsSummary();
   const activeGroup = activeGroupFor(pathname);
   // Só a categoria da rota atual começa aberta — evita que a barra precise de
   // scroll com os 5 pilares + Visão Geral abertos ao mesmo tempo.
@@ -392,7 +393,8 @@ function DashboardNavigation({
                     );
                   }
                   const current = isCurrent(pathname, href);
-                  const unreadCount = badge === 'exceptions' ? open : 0;
+                  const unreadCount =
+                    badge === 'queue' ? queue.open : badge === 'alerts' ? alerts.open : 0;
                   const accessibleLabel =
                     unreadCount > 0
                       ? `${label}, ${unreadCount} caso${unreadCount === 1 ? '' : 's'}`
@@ -713,7 +715,8 @@ export function DashboardShell({
           <Menu aria-hidden="true" className="size-5" />
         </button>
         <PulsoMark className="h-8 w-auto" />
-        <ThemeToggle />
+        {/* Espaçador com a largura do botão de menu: mantém a logo centralizada. */}
+        <span aria-hidden="true" className="size-11" />
       </div>
       <MobileDrawer capabilities={capabilities} open={drawerOpen} onClose={closeDrawer} />
 

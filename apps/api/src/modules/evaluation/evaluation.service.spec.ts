@@ -74,9 +74,24 @@ function setup(replies: string[]) {
         }),
       }),
   } as unknown as TenantDatabase;
-  const service = new EvaluationService(registry, new AgentRunner(gateway), db, null);
+  const service = new EvaluationService(
+    registry,
+    new AgentRunner(gateway),
+    db,
+    CONFIG as never,
+    null,
+  );
   return { service, requests, inserted };
 }
+
+const CONFIG = {
+  llm: {
+    primaryModel: 'deepseek-v4-pro',
+    fallbackModel: 'gpt-4.1',
+    secondaryFallbackModel: 'claude-sonnet-4-5',
+    evalModel: 'deepseek-flash',
+  },
+};
 
 describe('EvaluationService', () => {
   it('roda cada caso, aplica asserções e grava o resultado com custo', async () => {

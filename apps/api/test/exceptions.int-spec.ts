@@ -3,8 +3,8 @@
  * Pré-requisito: `pnpm run infra:up`, com o contêiner `movivo-api` parado.
  *
  * Prova com Postgres real: cada conselho só vê e resolve o seu domínio, aprovar executa a
- * mudança e deixa decisão `STAFF` na trilha, sinal clínico só o médico encerra, ADMIN lê mas
- * não decide o que é clínico e registro inativo não decide nada.
+ * mudança e deixa decisão `STAFF` na trilha, sinal clínico só quem tem CRM ativo encerra, o ADMIN
+ * (sócio e profissional) lê e decide todos os domínios, e registro inativo não decide nada.
  */
 import 'reflect-metadata';
 
@@ -48,6 +48,7 @@ import { QueueManager } from '../src/modules/jobs/queue-manager.service';
 import { PlanApprovalHandler } from '../src/modules/planning/plan-approval.handler';
 import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { createStudent, fakeRunner } from './plan-fixtures';
+import { generatePublished } from './plan-publication';
 import { vi } from 'vitest';
 
 let app: INestApplication;
@@ -94,9 +95,7 @@ async function staffMember(who: Who): Promise<AuthenticatedUser> {
 
 async function studentWithPlan(): Promise<string> {
   const userId = await createStudent(db, created);
-  expect((await app.get(PlanGenerationService).generate(userId, { now: NOW })).status).toBe(
-    'PUBLISHED',
-  );
+  expect(await generatePublished(app, userId, NOW)).toBe('PUBLISHED');
   return userId;
 }
 
@@ -440,13 +439,14 @@ describe('domínio por conselho', () => {
     expect((await caseRow(id))?.resolution).toMatchObject({ outcome: 'REJECTED' });
   });
 
-  it('ADMIN lê tudo, mas não decide o que é clínico ou de outro domínio', async () => {
+  it('ADMIN lê e decide qualquer domínio (é sócio e também profissional)', async () => {
     const userId = await studentWithPlan();
     const id = await nutritionCase(userId);
-    expect((await exceptions.list(actors.ADMIN, {})).some((c) => c.id === id)).toBe(true);
-    await expect(exceptions.approve(actors.ADMIN, id, undefined)).rejects.toBeInstanceOf(
-      ForbiddenException,
+    expect((await exceptions.list(actors.ADMIN, {})).find((c) => c.id === id)?.canResolve).toBe(
+      true,
     );
+    await exceptions.approve(actors.ADMIN, id, undefined);
+    expect((await caseRow(id))?.status).toBe('RESOLVED');
   });
 
   it('registro no conselho inativo não decide nada', async () => {
@@ -488,6 +488,24 @@ describe('sinais de segurança', () => {
         .where(eq(safetyEvents.id, event?.id ?? '')),
     );
     expect(resolved).toMatchObject({ status: 'RESOLVED', resolvedBy: actors.CRM.userId });
+  });
+
+  it('sinal clínico: o ADMIN sem CRM ativo vê o caso, mas não encerra o sinal', async () => {
+    const userId = await studentWithPlan();
+    await app
+      .get(SafetyService)
+      .raise(
+        userId,
+        [{ kind: 'CHEST_PAIN', severity: 'EMERGENCY', scope: 'ALL', evidence: 'aperto no peito' }],
+        'RULE',
+      );
+    const [row] = await db.runAsSystem((tx) =>
+      tx.select().from(exceptionCases).where(eq(exceptionCases.userId, userId)),
+    );
+    expect((await exceptions.list(actors.ADMIN, {})).some((c) => c.id === row?.id)).toBe(true);
+    await expect(
+      exceptions.resolve(actors.ADMIN, row?.id ?? '', 'tentando encerrar'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('dor forte em treino é do profissional de Educação Física, não do médico', async () => {

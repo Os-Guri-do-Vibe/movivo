@@ -9,16 +9,18 @@
  * por chave de negócio (marcador no Redis `userId+type+chave`): retry de um envio concluído
  * não reenvia; mensagens de saúde são descartadas depois da revogação do consentimento.
  */
+import { createHash } from 'node:crypto';
+
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
-import { conversations, users } from '../../core/database/schema';
+import { conversations, staff, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
@@ -188,18 +190,60 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     }
   }
 
+  /**
+   * Quem recebe o alerta da fila: o número configurado (`STAFF_QUEUE_ALERT_PHONE`) e o telefone de
+   * toda conta de ADMIN (os sócios, que também são os profissionais) e de profissional com registro
+   * ativo. Telefone sintético de desenvolvimento (`+5555…`) nunca recebe. Se o banco falhar, o
+   * número configurado ainda recebe: o alerta é melhor esforço.
+   */
+  private async staffAlertRecipients(): Promise<string[]> {
+    const phones = new Set<string>();
+    const configured = this.config.whatsapp.staffQueueAlertPhone;
+    if (configured) phones.add(configured);
+    try {
+      const rows = await this.db.runAsSystem((tx) =>
+        tx
+          .select({ phone: staff.phoneNumber })
+          .from(staff)
+          .where(
+            and(
+              eq(staff.status, 'ACTIVE'),
+              or(
+                eq(staff.role, 'ADMIN'),
+                and(eq(staff.role, 'PROFESSIONAL'), eq(staff.councilActive, true)),
+              ),
+            ),
+          ),
+      );
+      for (const { phone } of rows) if (!phone.startsWith('+5555')) phones.add(phone);
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err, event: 'staff_alert_recipients_failed' },
+        'não foi possível listar as contas da equipe; só o número configurado recebe o alerta',
+      );
+    }
+    return [...phones];
+  }
+
   private async sendStaffQueueAlert(data: WhatsappOutboundJob): Promise<{ status: string }> {
-    const to = this.config.whatsapp.staffQueueAlertPhone;
-    if (!to) return { status: 'DISABLED' };
+    const recipients = await this.staffAlertRecipients();
+    if (recipients.length === 0) return { status: 'DISABLED' };
     if (!data.text || !data.dedupeId) {
       this.logger.warn({ type: data.type }, 'STAFF_QUEUE_ALERT sem texto ou chave — descartado');
       return { status: 'INVALID' };
     }
-    const markerKey = this.keys.global('wa-sent', data.type, data.dedupeId);
-    if ((await this.redis.exists(markerKey)) === 1) return { status: 'ALREADY_SENT' };
-    await this.transport.send({ to, text: data.text });
-    await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
-    return { status: 'SENT' };
+    let sent = 0;
+    for (const to of recipients) {
+      // Um marcador por destinatário: se um número falhar, a nova tentativa só repete esse.
+      // O número vira um hash curto: a chave aceita só [A-Za-z0-9._-], e telefone não fica no Redis.
+      const recipient = createHash('sha256').update(to).digest('hex').slice(0, 16);
+      const markerKey = this.keys.global('wa-sent', data.type, `${data.dedupeId}.${recipient}`);
+      if ((await this.redis.exists(markerKey)) === 1) continue;
+      await this.transport.send({ to, text: data.text });
+      await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
+      sent += 1;
+    }
+    return { status: sent > 0 ? 'SENT' : 'ALREADY_SENT' };
   }
 
   /** Monta o texto por tipo de job. `null` = nada a enviar. */

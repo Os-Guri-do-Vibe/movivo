@@ -92,6 +92,41 @@ export function swappedMessage(
   return `Troquei ${from} por ${to} ${when}. ${why}`;
 }
 
+export function swapScopeQuestion(from: string, to: string): string {
+  return `Posso trocar ${from} por ${to}. Você quer fazer essa troca só no treino de hoje, ou quer que eu atualize o seu protocolo com essa substituição?`;
+}
+
+/** Troca só de hoje: nada muda no protocolo, o aluno apenas é orientado a fazer a troca na sessão. */
+export function swapTodayMessage(from: string, to: string, why: string): string {
+  return `Combinado! No treino de hoje, faça ${to} no lugar de ${from}. ${why} O seu protocolo continua como está.`;
+}
+
+export const SWAP_DECLINED_MESSAGE = 'Tudo bem, deixei o seu treino como está.';
+
+/** Troca no protocolo que passou a fila do profissional (revisão opcional, liberada sozinha). */
+export function swapQueuedMessage(from: string, to: string): string {
+  return `Combinado! A troca de ${from} por ${to} no seu protocolo passa por uma checagem rápida da equipe e, em poucos minutos, te envio o protocolo atualizado.`;
+}
+
+/** Troca no protocolo que só um profissional libera (aluno com PAR-Q de risco). */
+export function swapPendingReviewMessage(from: string, to: string): string {
+  return `Anotei a troca de ${from} por ${to} no seu protocolo. Um profissional da MOVIVO precisa revisar antes; assim que liberar, te envio o protocolo atualizado.`;
+}
+
+/** Troca no protocolo liberada pela equipe (ou pela janela): o protocolo atualizado vai junto. */
+export function swapReleasedMessage(from: string, to: string, link: string): string {
+  return `Pronto! Troquei ${from} por ${to} no seu protocolo. Aqui está o treino atualizado: ${link}`;
+}
+
+export const SWAP_REJECTED_MESSAGE =
+  'A equipe avaliou a troca que você pediu e, por enquanto, o exercício continua como está no seu protocolo. Se quiser, me diga outro exercício que incomoda.';
+
+/** A equipe alterou o protocolo que já estava em uso. */
+export function protocolAmendedMessage(kind: 'TRAINING' | 'NUTRITION', link: string): string {
+  const what = kind === 'TRAINING' ? 'o seu plano de treino' : 'o seu plano alimentar';
+  return `A equipe da MOVIVO atualizou ${what}. Veja como ficou: ${link}`;
+}
+
 export const SWAP_NOT_FOUND_MESSAGE =
   'Qual exercício você quer trocar? Me diga o nome como aparece no seu treino.';
 
@@ -121,3 +156,31 @@ export function workoutReportMessage(link: string): string {
 }
 
 export const ASK_AVAILABLE_DAYS_MESSAGE = 'Em quais dias você consegue treinar nesta semana?';
+
+export const NO_NUTRITION_PLAN_MESSAGE =
+  'Você ainda não tem um plano alimentar ativo por aqui. Assim que ele estiver pronto, eu consigo sugerir opções de refeição dentro dele.';
+
+export function askMealMessage(labels: readonly string[]): string {
+  return `Para qual refeição você quer a sugestão? No seu plano: ${labels.join(', ')}.`;
+}
+
+export const MEAL_SUGGESTION_FAILED_MESSAGE =
+  'Não consegui montar uma boa opção agora. Me diga o que você tem em casa para essa refeição que eu monto com isso, ou fale com a equipe.';
+
+/** Sugestão de refeição: alimentos com a quantidade, dentro da meta da refeição do plano. */
+export function mealSuggestionMessage(
+  mealLabel: string,
+  options: ReadonlyArray<{
+    title: string;
+    items: ReadonlyArray<string>;
+    totals: { energyKcal: number; proteinG: number };
+    costBrl: number;
+  }>,
+): string {
+  const blocks = options.map((option, index) => {
+    const lines = option.items.map((item) => `• ${item}`).join('\n');
+    const cost = option.costBrl.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    return `${options.length > 1 ? `Opção ${index + 1}: ` : ''}${option.title}\n${lines}\n${option.totals.energyKcal} kcal · ${Math.round(option.totals.proteinG)} g de proteína · custo estimado ~${cost}`;
+  });
+  return `Aqui ${options.length > 1 ? 'vão duas opções' : 'vai uma opção'} para o seu ${mealLabel.toLowerCase()}, dentro da meta do seu plano:${WHATSAPP_BUBBLE_SEPARATOR}${blocks.join('\n\n')}${WHATSAPP_BUBBLE_SEPARATOR}Quer outra opção ou uma troca de algum alimento? É só me dizer.`;
+}

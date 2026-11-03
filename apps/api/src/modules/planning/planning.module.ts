@@ -7,6 +7,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { PublishedMethodologyModule } from '../methodology/published-methodology.module';
 import { StudentStateModule } from '../student-state/student-state.module';
 import { PlanningTasksModule } from './planning-tasks.module';
+import { NutritionModule } from '../nutrition/nutrition.module';
 import { PlanApprovalHandler } from './plan-approval.handler';
 import { PlanController } from './plan.controller';
 import { PlanDelivery } from './plan-delivery.service';
@@ -27,6 +28,7 @@ import { ProtocolReviewService } from './protocol-review.service';
     CoachingModule,
     DomainEventsModule,
     JobsModule,
+    NutritionModule,
     PublishedMethodologyModule,
     StudentStateModule,
   ],

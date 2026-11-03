@@ -26,7 +26,7 @@ describe('describeAction', () => {
         toExerciseId: 'b',
         scope: 'PLAN',
       }),
-    ).toContain('no plano todo');
+    ).toContain('no protocolo');
     expect(describeAction({ type: 'SEND_MESSAGE', text: 'Oi' })).toContain('Oi');
   });
 

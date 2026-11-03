@@ -76,8 +76,60 @@ export const methodologyTestOutcomeSchema = z.object({
       passed: z.boolean(),
       casesTotal: z.number(),
       casesPassed: z.number(),
+      /** O que reprovou, em português: "Situação: o que se esperava". Vazio se passou. */
+      failures: z.array(z.string()).default([]),
     }),
   ),
   unjustified: z.array(z.object({ path: z.string(), label: z.string() })),
 });
 export type MethodologyTestOutcome = z.infer<typeof methodologyTestOutcomeSchema>;
+
+/**
+ * Andamento do teste de um rascunho. O teste roda com modelos reais e leva minutos, então corre
+ * em segundo plano: o painel inicia e consulta este andamento até `FINISHED` ou `FAILED`.
+ */
+export const methodologyTestProgressSchema = z.object({
+  state: z.enum(['IDLE', 'RUNNING', 'FINISHED', 'FAILED']),
+  /** Tarefas de agente a avaliar e quantas já terminaram. */
+  total: z.number(),
+  completed: z.number(),
+  /** Tarefa em avaliação agora (id técnico). */
+  currentTask: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  /** Presente quando `FINISHED`. */
+  outcome: methodologyTestOutcomeSchema.nullable(),
+  /** Presente quando `FAILED`: frase pronta para o profissional. */
+  error: z.string().nullable(),
+  /** Gasto com modelos de IA neste teste até agora (R$). */
+  spentBrl: z.number(),
+  /** Por que o teste parou antes de avaliar todas as tarefas (primeira reprovação, limite de gasto). */
+  stoppedReason: z.string().nullable(),
+});
+export type MethodologyTestProgress = z.infer<typeof methodologyTestProgressSchema>;
+
+/** Confirmação de gasto: o teste só começa com um limite em reais definido por quem clicou. */
+export const methodologyStartTestSchema = z.object({
+  budgetBrl: z.number().min(0.1).max(50),
+});
+export type MethodologyStartTest = z.infer<typeof methodologyStartTestSchema>;
+
+/** Estimativa de custo de um teste, com base nos últimos testes das mesmas tarefas. */
+export const methodologyTestEstimateSchema = z.object({
+  tasks: z.array(
+    z.object({
+      taskId: z.string(),
+      cases: z.number(),
+      /** `null` quando a tarefa nunca foi avaliada (sem histórico para estimar). */
+      estimatedBrl: z.number().nullable(),
+    }),
+  ),
+  /** Soma das estimativas conhecidas. */
+  estimatedTotalBrl: z.number(),
+  /** Quantas tarefas não têm histórico de custo. */
+  unknownTasks: z.number(),
+  /** Limite de gasto sugerido (e usado se você confirmar sem mudar). */
+  suggestedBudgetBrl: z.number(),
+  /** Modelo usado nos testes (o DeepSeek mais barato). */
+  model: z.string().nullable(),
+});
+export type MethodologyTestEstimate = z.infer<typeof methodologyTestEstimateSchema>;

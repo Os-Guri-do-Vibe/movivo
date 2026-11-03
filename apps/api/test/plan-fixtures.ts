@@ -292,13 +292,29 @@ export const fakeRunner = {
           summary: 'Plano alimentar simples, com proteína distribuída ao longo do dia.',
           trainingDay: day(i.bounds.trainingDay),
           restDay: day(i.bounds.restDay),
-          meals: slots.map((slot) => ({
-            slot,
-            energyShare: share,
-            proteinG: 30,
-            guidance: 'Inclua uma fonte de proteína.',
-            examples: ['Arroz, feijão e ovos'],
-          })),
+          meals: slots.map((slot) => {
+            // Cardápio com alimentos reais da lista permitida (TACO carregada no banco).
+            const protein = i.foods.find((f) => f.category.startsWith('Carnes'));
+            const starch = i.foods.find((f) => f.category.startsWith('Cereais'));
+            const items = [protein, starch].flatMap((food) =>
+              food ? [{ foodId: food.id, grams: 120, swaps: [] }] : [],
+            );
+            return {
+              slot,
+              energyShare: share,
+              proteinG: 30,
+              guidance: 'Inclua uma fonte de proteína.',
+              ...(items.length > 0
+                ? {
+                    options: ['Opção A', 'Opção B'].map((title) => ({
+                      title,
+                      estimatedCostBrl: 6,
+                      items,
+                    })),
+                  }
+                : {}),
+            };
+          }),
           guidelines: ['Beba água ao longo do dia.'],
           supplements: [],
         },
@@ -419,7 +435,7 @@ export const fakeRunner = {
 export async function createStudent(
   db: TenantDatabase,
   created: string[],
-  options: { signal?: boolean } = {},
+  options: { signal?: boolean; requiresProfessionalReview?: boolean } = {},
 ): Promise<string> {
   const phone = `+55119${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
   const userId = await db.runAsSystem(async (tx) => {
@@ -430,6 +446,7 @@ export async function createStudent(
         email: `${phone.replace(/\D/g, '')}@example.invalid`,
         name: 'Aluno Plano',
         biologicalSex: 'MALE',
+        requiresProfessionalReview: options.requiresProfessionalReview ?? options.signal ?? false,
       })
       .returning({ id: users.id });
     if (!user) throw new Error('falha ao criar aluno');

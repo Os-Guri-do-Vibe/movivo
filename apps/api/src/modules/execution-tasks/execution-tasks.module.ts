@@ -3,11 +3,13 @@ import { Module, type OnModuleInit } from '@nestjs/common';
 import { AgentTaskRegistry } from '../../core/agents/agent-task-registry';
 import {
   answerCases,
+  answerEvidenceCases,
   answerTask,
   classifyCases,
   classifyTask,
   riskCases,
   riskTask,
+  substituteCases,
   substituteTask,
 } from '../conversation/tasks';
 import { foodLogCases, foodLogChecks, foodLogTask } from '../nutrition/food-log-task';
@@ -31,8 +33,8 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(mealPhotoTask, []);
     this.registry.register(foodLogTask, foodLogCases, foodLogChecks);
     this.registry.register(classifyTask, classifyCases);
-    this.registry.register(answerTask, answerCases);
-    this.registry.register(substituteTask, []);
+    this.registry.register(answerTask, [...answerCases, ...answerEvidenceCases]);
+    this.registry.register(substituteTask, substituteCases);
     this.registry.register(riskTask, riskCases);
     this.registry.register(reviewTask, reviewCases);
     this.registry.register(preferencesTask, preferencesCases);

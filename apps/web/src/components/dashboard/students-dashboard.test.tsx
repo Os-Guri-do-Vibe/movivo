@@ -383,12 +383,14 @@ describe('StudentsDashboard', () => {
     expect(screen.getByText('Ana Souza')).toBeVisible();
   });
 
-  // Achado 2026-08-19 (a pedido do fundador): a linha "Atualizado em" saiu do topo.
-  it('não mostra mais "Atualizado em" no topo da tela', async () => {
+  // 2026-11-01 (a pedido do fundador, "todos os painéis"): a linha "Atualizado em" volta ao topo,
+  // no mesmo padrão da Visão Geral. Revoga o achado de 2026-08-19, que a tinha tirado daqui.
+  it('mostra "Atualizado em" logo abaixo do título, como nos demais painéis', async () => {
     getStudents.mockResolvedValue(studentsResponse);
     render(<StudentsDashboard />);
     await screen.findByRole('table');
-    expect(screen.queryByText(/Atualizado em/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Atualizado em/)).toBeVisible();
+    expect(screen.getByText(/Atualizado em/).querySelector('time')).toBeInTheDocument();
   });
 
   // Achado 2026-08-19 (spec de Sofia): a contagem desceu para o rodapé do cartão da

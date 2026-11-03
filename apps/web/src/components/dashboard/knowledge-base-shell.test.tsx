@@ -46,10 +46,12 @@ describe('KnowledgeBaseShell', () => {
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Base de Conhecimento' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Documentos' })).toHaveAttribute(
-      'aria-current',
-      'page',
+    expect(screen.getByRole('link', { name: 'Artigos' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'TACO' })).toHaveAttribute(
+      'href',
+      '/dashboard/ia/base-conhecimento/taco',
     );
+    expect(screen.queryByRole('link', { name: 'Documentos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Metodologia' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Segurança' })).toHaveAttribute(
       'href',

@@ -6,7 +6,13 @@ import type { ValidationContext, Violation } from '../../../core/agents/agent-ta
 import { devMethodologyParameters } from '../../../core/database/seed-methodology';
 import { hybridValidators, type HybridInput } from './hybrid';
 import { hyroxValidators, type HyroxInput } from './hyrox';
-import { nutritionValidators, type NutritionInput, type NutritionOutput } from './nutrition';
+import type { FoodCandidate } from '../calc/menu';
+import {
+  finalizeNutrition,
+  nutritionValidators,
+  type NutritionInput,
+  type NutritionOutput,
+} from './nutrition';
 import { runningValidators, type RunningInput } from './running';
 import { strategyValidators, type StrategyInput, type StrategyOutput } from './strategy';
 import { strengthValidators, type StrengthCandidate, type StrengthInput } from './strength';
@@ -659,6 +665,43 @@ const bound = (kcal: [number, number], expenditure: number) => ({
   expenditureKcal: expenditure,
 });
 
+const food = (
+  id: string,
+  name: string,
+  category: string,
+  energyKcal: number,
+  proteinG: number,
+  carbsG: number,
+  fatG: number,
+  fiberG = 0,
+): FoodCandidate => ({ id, name, category, energyKcal, proteinG, carbsG, fatG, fiberG });
+
+const FOODS: FoodCandidate[] = [
+  food('ovo', 'Ovo de galinha, inteiro, cozido', 'Ovos e derivados', 146, 13.3, 0.6, 9.5),
+  food('pao', 'Pão, trigo, integral', 'Cereais e derivados', 253, 9.4, 49.9, 3.4, 6.9),
+  food('banana', 'Banana, prata', 'Frutas e derivados', 98, 1.3, 26, 0.1, 2),
+  food('arroz', 'Arroz, integral, cozido', 'Cereais e derivados', 124, 2.6, 25.8, 1, 2.7),
+  food('feijao', 'Feijão, carioca, cozido', 'Leguminosas e derivados', 76, 4.8, 13.6, 0.5, 8.5),
+  food('frango', 'Frango, peito, grelhado', 'Carnes e derivados', 159, 32, 0, 2.5),
+  food('iogurte', 'Iogurte, natural, desnatado', 'Leite e derivados', 41, 3.8, 5.9, 0.2),
+  food('aveia', 'Aveia, flocos', 'Cereais e derivados', 394, 13.9, 66.6, 8.5, 9.1),
+  food(
+    'batata',
+    'Batata-doce, cozida',
+    'Verduras, hortaliças e derivados',
+    77,
+    0.6,
+    18.4,
+    0.1,
+    2.2,
+  ),
+  food('tilapia', 'Peixe, tilápia, grelhado', 'Pescados e frutos do mar', 128, 26, 0, 2.7),
+  food('alface', 'Alface, crespa', 'Verduras, hortaliças e derivados', 11, 1.3, 1.7, 0.2, 1.8),
+  food('macarrao', 'Macarrão, cozido', 'Cereais e derivados', 102, 3.4, 19.9, 0.5, 1.2),
+  food('amendoim', 'Pasta de amendoim', 'Nozes e sementes', 588, 25, 20, 50, 6),
+  food('leite_vegetal', 'Bebida vegetal de aveia', 'Leite e derivados', 45, 1, 8, 1),
+];
+
 const nutritionInput = (over: Partial<NutritionInput> = {}): NutritionInput => ({
   strategy: 'DEFICIT',
   weightKg: 80,
@@ -672,6 +715,8 @@ const nutritionInput = (over: Partial<NutritionInput> = {}): NutritionInput => (
   cookingCapacity: 'BASIC',
   foodBudgetMonthlyBrl: 1200,
   mealsOutsideHomePerWeek: 3,
+  foods: FOODS,
+  dailyBudgetBrl: 40,
   ...over,
 });
 
@@ -684,6 +729,21 @@ const day = (kcal: [number, number], protein: number, carbs: number, fat: number
   waterMl: 3_000,
 });
 
+const swapOf = (foodId: string) => ({ foodId });
+const draftItem = (
+  foodId: string,
+  grams: number,
+  swaps: string[] = [],
+  unit?: { singular: string; plural: string; grams: number },
+) => ({ foodId, grams, swaps: swaps.map(swapOf), ...(unit ? { unit } : {}) });
+
+/** Três opções com as mesmas proporções (o servidor ajusta as quantidades à meta). */
+const options = (
+  titles: [string, string, string],
+  items: ReturnType<typeof draftItem>[],
+  cost: number,
+) => titles.map((title) => ({ title, estimatedCostBrl: cost, items }));
+
 const nutritionOutput = (over: Partial<NutritionOutput> = {}): NutritionOutput => ({
   strategy: 'DEFICIT',
   summary: 'Déficit moderado com proteína alta.',
@@ -695,28 +755,61 @@ const nutritionOutput = (over: Partial<NutritionOutput> = {}): NutritionOutput =
       energyShare: 0.25,
       proteinG: 40,
       guidance: 'Proteína no café',
-      examples: ['Ovos mexidos com pão integral'],
+      options: options(
+        ['Ovos com pão e banana', 'Ovos com pão e banana (B)', 'Ovos com pão e banana (C)'],
+        [
+          draftItem('ovo', 200, ['frango'], { singular: 'ovo', plural: 'ovos', grams: 50 }),
+          draftItem('pao', 50, ['aveia'], { singular: 'fatia', plural: 'fatias', grams: 25 }),
+          draftItem('banana', 100),
+        ],
+        5,
+      ),
     },
     {
       slot: 'LUNCH',
       energyShare: 0.35,
       proteinG: 45,
       guidance: 'Prato completo',
-      examples: ['Arroz, feijão e frango grelhado'],
+      options: options(
+        ['Frango, arroz e feijão', 'Frango, arroz e feijão (B)', 'Frango, arroz e feijão (C)'],
+        [
+          draftItem('frango', 100, ['tilapia']),
+          draftItem('arroz', 200, ['batata', 'macarrao']),
+          draftItem('feijao', 120),
+          draftItem('alface', 40),
+        ],
+        9,
+      ),
     },
     {
       slot: 'AFTERNOON_SNACK',
-      energyShare: 0.1,
-      proteinG: 25,
+      energyShare: 0.15,
+      proteinG: 18,
       guidance: 'Lanche prático',
-      examples: ['Iogurte com fruta'],
+      options: options(
+        ['Ovo, pão e banana', 'Ovo, pão e banana (B)', 'Ovo, pão e banana (C)'].slice(0, 2) as [
+          string,
+          string,
+          string,
+        ],
+        [draftItem('ovo', 100), draftItem('pao', 50), draftItem('banana', 50)],
+        4,
+      ).slice(0, 2),
     },
     {
       slot: 'DINNER',
-      energyShare: 0.3,
-      proteinG: 50,
+      energyShare: 0.25,
+      proteinG: 45,
       guidance: 'Jantar leve',
-      examples: ['Omelete com salada'],
+      options: options(
+        ['Peixe com batata-doce', 'Peixe com batata-doce (B)', 'Peixe com batata-doce (C)'],
+        [
+          draftItem('tilapia', 150, ['frango']),
+          draftItem('batata', 250, ['arroz']),
+          draftItem('alface', 60),
+        ],
+        8,
+      ),
     },
   ],
   guidelines: ['Beba água ao longo do dia.'],
@@ -759,14 +852,89 @@ describe('nutrition.build_plan', () => {
     expect(found).toContain('por semana');
   });
 
-  it('recusa exemplo que contraria vegetarianismo, lactose ou alergia', async () => {
+  it('cardápio dentro da meta: quantidades ajustadas, totais e trocas equivalentes calculados', async () => {
+    const input = nutritionInput();
     const output = nutritionOutput();
-    at(output.meals, 1).examples = ['Arroz, feijão e frango grelhado'];
-    at(output.meals, 2).examples = ['Iogurte com fruta'];
+    expect(await run(nutritionValidators, input, output, ctx)).toEqual([]);
+    const plan = finalizeNutrition(output, input);
+    const breakfast = at(plan.meals, 0);
+    const option = at(breakfast.options ?? [], 0);
+    // Meta do café: 25% de ~2.000 kcal. As quantidades fecham a meta e viram múltiplos da medida.
+    expect(Math.abs(option.totals.energyKcal - 500)).toBeLessThanOrEqual(60);
+    const eggs = at(option.items, 0);
+    expect(eggs.unit?.plural).toBe('ovos');
+    expect(eggs.grams % 50).toBe(0);
+    // A troca de frango pelo ovo mantém a energia do item (mesmo grupo de alimento).
+    const swap = at(eggs.swaps, 0);
+    expect(Math.abs(swap.energyKcal - eggs.energyKcal)).toBeLessThanOrEqual(40);
+    expect(breakfast.examples[0]).toBe('Ovos com pão e banana');
+    expect(plan.estimatedDailyCostBrl).toBeGreaterThan(0);
+  });
+
+  it('recusa cardápio com alimento fora da lista, sem as opções pedidas ou fora da meta', async () => {
+    const outside = nutritionOutput();
+    at(at(outside.meals, 1).options ?? [], 0).items = [draftItem('picanha', 300)];
+    expect((await run(nutritionValidators, nutritionInput(), outside, ctx)).join(' | ')).toContain(
+      'não está na lista permitida',
+    );
+
+    const few = nutritionOutput();
+    at(few.meals, 0).options = at(few.meals, 0).options?.slice(0, 2);
+    expect((await run(nutritionValidators, nutritionInput(), few, ctx)).join(' | ')).toContain(
+      'traga 3 opções',
+    );
+
+    const lowProtein = nutritionOutput();
+    at(at(lowProtein.meals, 2).options ?? [], 0).items = [
+      draftItem('iogurte', 200),
+      draftItem('banana', 60),
+    ];
+    expect(
+      (await run(nutritionValidators, nutritionInput(), lowProtein, ctx)).join(' | '),
+    ).toContain('de proteína e a meta da refeição');
+  });
+
+  it('recusa troca de outro grupo de alimento', async () => {
+    const output = nutritionOutput();
+    at(at(at(output.meals, 3).options ?? [], 0).items, 0).swaps = [swapOf('banana')];
+    expect((await run(nutritionValidators, nutritionInput(), output, ctx)).join(' | ')).toContain(
+      'não é uma troca equivalente',
+    );
+  });
+
+  it('o custo do dia precisa caber no orçamento do aluno', async () => {
+    const found = (
+      await run(nutritionValidators, nutritionInput({ dailyBudgetBrl: 10 }), nutritionOutput(), ctx)
+    ).join(' | ');
+    expect(found).toContain('orçamento do aluno');
+    expect(
+      await run(
+        nutritionValidators,
+        nutritionInput({ dailyBudgetBrl: null }),
+        nutritionOutput(),
+        ctx,
+      ),
+    ).toEqual([]);
+  });
+
+  it('recusa custo implausível para a quantidade de comida', async () => {
+    const output = nutritionOutput();
+    at(at(output.meals, 1).options ?? [], 0).estimatedCostBrl = 0.5;
+    expect((await run(nutritionValidators, nutritionInput(), output, ctx)).join(' | ')).toContain(
+      'não é plausível',
+    );
+  });
+
+  it('recusa alimento que contraria vegetarianismo, lactose ou alergia', async () => {
+    const output = nutritionOutput();
+    at(at(output.meals, 2).options ?? [], 0).items = [
+      draftItem('iogurte', 200),
+      draftItem('amendoim', 20),
+      draftItem('ovo', 100),
+    ];
     const state = {
       safety: { healthRecords: [{ kind: 'FOOD_ALLERGY', summary: 'amendoim (SEVERE_ALLERGY)' }] },
     };
-    at(output.meals, 3).examples = ['Salada com pasta de amendoim'];
     const found = (
       await run(
         nutritionValidators,
@@ -780,10 +948,13 @@ describe('nutrition.build_plan', () => {
     expect(found).toContain('alergia/intolerância');
   });
 
-  it('"leite vegetal" e "sem lactose" não contam como contrários', async () => {
+  it('"leite vegetal" não conta como contrário à lactose', async () => {
     const output = nutritionOutput();
-    at(output.meals, 2).examples = ['Iogurte sem lactose com fruta'];
-    at(output.meals, 0).examples = ['Aveia com leite vegetal'];
+    at(at(output.meals, 0).options ?? [], 0).items = [
+      draftItem('leite_vegetal', 300),
+      draftItem('aveia', 40),
+      draftItem('ovo', 150),
+    ];
     const found = await run(
       nutritionValidators,
       nutritionInput({ dietaryRestrictions: ['LACTOSE_FREE'] }),

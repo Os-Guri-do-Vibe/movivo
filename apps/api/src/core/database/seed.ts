@@ -27,7 +27,6 @@ import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
 import { staff, users } from './schema';
-import { seedDevFoods } from './seed-foods';
 import { seedDevMethodology } from './seed-methodology';
 
 const { env } = loadEnv();
@@ -153,9 +152,6 @@ async function main(): Promise<void> {
     console.log(
       `[db:seed] Metodologia de desenvolvimento (fictícia): ${methodologyDomains} domínio(s) publicados.`,
     );
-
-    const foods = await seedDevFoods(db);
-    console.log(`[db:seed] Alimentos de desenvolvimento (aproximados): ${foods} inserido(s).`);
 
     if (total !== SEED_USERS.length) {
       console.warn(

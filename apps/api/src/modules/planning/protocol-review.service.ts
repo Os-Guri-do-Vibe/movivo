@@ -46,7 +46,13 @@ import {
 } from './plan-publisher.service';
 import { parseStateView, type StateView } from './state-view';
 import { outputLanguageViolations } from './tasks/common';
-import { nutritionTask, nutritionValidators } from './tasks/nutrition';
+import { FoodCandidatesService } from '../nutrition/food-candidates.service';
+import {
+  foodIdsOf,
+  nutritionEditValidators,
+  nutritionTask,
+  rebuildNutrition,
+} from './tasks/nutrition';
 
 export type PublishPlanAction = Extract<
   CoachingAction,
@@ -73,14 +79,55 @@ export class ProtocolReviewService {
     private readonly stateReader: StudentStateReader,
     private readonly methodology: PublishedMethodologyReader,
     private readonly catalog: ExerciseCatalogProvider,
+    private readonly foods: FoodCandidatesService,
   ) {}
 
-  /** Protocolo do caso; `canEdit` vem da fila (caso aberto, proposta pendente, conselho certo). */
+  /** Nome de cada exercício do catálogo (id desconhecido fica de fora). */
+  exerciseNames(ids: readonly string[]): Record<string, string> {
+    const names: Record<string, string> = {};
+    for (const id of ids) {
+      const found = this.catalog.getById(id);
+      if (found) names[id] = found.name;
+    }
+    return names;
+  }
+
+  /** Exercícios de força seguros e viáveis para o aluno: o que a equipe pode escolher numa troca. */
+  async swapOptions(userId: string, now: Date = new Date()) {
+    const { view } = await this.readState(userId, now);
+    return viableStrengthExercises(view, levelOf(view, 'STRENGTH'), this.catalog.getAll())
+      .map((e) => ({ id: e.id, name: e.name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }
+
+  /** Protocolo ativo do aluno como ação de publicação (base da emenda); `null` se não há. */
+  async activeAction(
+    userId: string,
+    kind: 'TRAINING' | 'NUTRITION',
+  ): Promise<PublishPlanAction | null> {
+    const table = kind === 'TRAINING' ? trainingPlans : nutritionPlans;
+    const [active] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ id: table.id })
+        .from(table)
+        .where(and(eq(table.userId, userId), eq(table.status, 'ACTIVE'))),
+    );
+    if (!active) return null;
+    return kind === 'TRAINING'
+      ? { type: 'PUBLISH_TRAINING_PLAN', planId: active.id }
+      : { type: 'PUBLISH_NUTRITION_PLAN', planId: active.id };
+  }
+
+  /**
+   * Protocolo do caso; `canEdit` vem da fila (caso aberto, proposta pendente, conselho certo).
+   * Na emenda (`amend`) o protocolo é o ativo e a edição vale para ele.
+   */
   async view(
     userId: string,
     action: PublishPlanAction,
     canEdit: boolean,
     now: Date = new Date(),
+    amend = false,
   ): Promise<ProtocolReview> {
     const kind = protocolKindOf(action);
     const plan = await this.plan(userId, action);
@@ -89,7 +136,7 @@ export class ProtocolReviewService {
       planId: plan.id,
       version: plan.version,
       status: plan.status as PlanStatus,
-      editable: canEdit && plan.status === 'DRAFT',
+      editable: canEdit && plan.status === (amend ? 'ACTIVE' : 'DRAFT'),
       strategy: strategy
         ? {
             title: strategy.title,
@@ -100,7 +147,24 @@ export class ProtocolReviewService {
         : null,
     };
     if (kind === 'NUTRITION') {
-      return { kind, ...base, structure: plan.structure as NutritionPlanStructure };
+      const structure = plan.structure as NutritionPlanStructure;
+      const { view: stateView } = await this.readState(userId, now);
+      const [allowed, inPlan] = await Promise.all([
+        this.foods.forStudent(userId, stateView.dietaryRestrictions),
+        this.foods.byIds(foodIdsOf(structure)),
+      ]);
+      const foodOptions = [...new Map([...inPlan, ...allowed].map((f) => [f.id, f])).values()]
+        .map(({ id, name, category, energyKcal, proteinG, carbsG, fatG }) => ({
+          id,
+          name,
+          category,
+          energyKcal,
+          proteinG,
+          carbsG,
+          fatG,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      return { kind, ...base, structure, foodOptions };
     }
     const structure = plan.structure as TrainingPlanStructure;
     const { view, today } = await this.readState(userId, now);
@@ -157,13 +221,18 @@ export class ProtocolReviewService {
     action: PublishPlanAction,
     request: EditProtocolRequest,
     now: Date = new Date(),
+    amend = false,
   ): Promise<ValidatedProtocol> {
     if (request.kind !== protocolKindOf(action)) {
       throw new BadRequestException('A edição não corresponde ao tipo de protocolo do caso.');
     }
     const plan = await this.plan(userId, action);
-    if (plan.status !== 'DRAFT') {
-      throw new ConflictException('O protocolo não está mais em revisão.');
+    if (plan.status !== (amend ? 'ACTIVE' : 'DRAFT')) {
+      throw new ConflictException(
+        amend
+          ? 'O protocolo ativo mudou. Recarregue a tela.'
+          : 'O protocolo não está mais em revisão.',
+      );
     }
     const { view, today, slices } = await this.readState(userId, now);
 
@@ -199,21 +268,28 @@ export class ProtocolReviewService {
     if (!doc) throw new ConflictException('A metodologia de nutrição não está publicada.');
     const original = plan.structure as NutritionPlanStructure;
     const strategy = await this.strategyOf(userId, plan.goalId);
-    const input = nutritionInputOf(view, doc.parameters, {
+    const base = nutritionInputOf(view, doc.parameters, {
       strategy: original.strategy,
       sessions: await this.db.runAsSystem((tx) => latestTrainingSessions(tx, userId)),
       enduranceFocus: (strategy?.modalityFocus[0] ?? 'STRENGTH') !== 'STRENGTH',
     });
-    if (!input) {
+    if (!base) {
       throw new ConflictException('Faltam dados do aluno para conferir o plano alimentar.');
     }
+    // Só alimentos da base: o servidor recalcula nutrientes e trocas a partir do id.
+    const input = {
+      ...base,
+      foods: await this.foods.byIds(foodIdsOf(request.structure)),
+    };
     const context = { state: slices, methodology: { NUTRITION: doc.parameters } };
     const violations: Violation[] = [];
-    for (const validator of nutritionValidators) {
+    for (const validator of nutritionEditValidators) {
       violations.push(...(await validator(input, request.structure, context)));
     }
+    const rebuilt = rebuildNutrition(request.structure, input);
+    violations.push(...rebuilt.violations);
     rejectIfAny(violations);
-    return { kind: 'NUTRITION', structure: request.structure };
+    return { kind: 'NUTRITION', structure: rebuilt.structure };
   }
 
   /** Grava a estrutura editada no rascunho (só enquanto ele ainda é rascunho). */

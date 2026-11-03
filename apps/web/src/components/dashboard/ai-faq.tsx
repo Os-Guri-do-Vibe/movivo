@@ -174,7 +174,7 @@ export function AiFaqDashboard({
       ) : (
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="text-h2 font-bold">FAQ</h2>
+            <h2 className="text-h3 font-semibold">FAQ</h2>
             <p className="mt-2 max-w-3xl text-label text-muted-foreground">
               Respostas publicadas para a IA, com simulador obrigatório antes de qualquer alteração.
             </p>
@@ -210,13 +210,13 @@ export function AiFaqDashboard({
         className="mt-6 rounded-xl border border-border bg-card p-5"
         aria-labelledby="faq-list-title"
       >
-        <h2 id="faq-list-title" className="text-h2 font-bold">
+        <h2 id="faq-list-title" className="text-h3 font-semibold">
           Respostas vigentes
         </h2>
         {active.length === 0 ? (
           <p className="mt-2 text-label text-muted-foreground">Nenhuma resposta publicada.</p>
         ) : (
-          <ul className="mt-4 grid gap-3 lg:grid-cols-2">
+          <ul className="mt-4 grid gap-3 @3xl:grid-cols-2">
             {active.map((entry) => (
               <li key={entry.faqKey} className="rounded-lg border border-border p-4">
                 <p className="font-semibold">{entry.canonicalQuestion}</p>
@@ -263,7 +263,7 @@ export function AiFaqDashboard({
           className="mt-6 rounded-xl border border-border bg-card p-5"
           aria-labelledby="faq-editor-title"
         >
-          <h2 id="faq-editor-title" className="text-h2 font-bold">
+          <h2 id="faq-editor-title" className="text-h3 font-semibold">
             {faqKey ? 'Editar resposta' : 'Nova resposta'}
           </h2>
           <div className="mt-4 grid gap-4">
@@ -326,7 +326,7 @@ export function AiFaqDashboard({
 
           <div className="mt-5 rounded-lg border border-border bg-secondary p-4">
             <h3 className="font-semibold">Simulador obrigatório</h3>
-            <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+            <ol className="mt-3 grid gap-2 @lg:grid-cols-2">
               {(
                 simulation?.checks ?? [
                   { id: 'SCHEMA', title: 'Contrato e proteção contra instruções' },
@@ -392,7 +392,7 @@ export function AiFaqDashboard({
         className="mt-6 rounded-xl border border-border bg-card p-5"
         aria-labelledby="faq-history-title"
       >
-        <h2 id="faq-history-title" className="flex items-center gap-2 text-h2 font-bold">
+        <h2 id="faq-history-title" className="flex items-center gap-2 text-h3 font-semibold">
           <History aria-hidden="true" className="size-5" />
           Histórico imutável
         </h2>
@@ -413,7 +413,7 @@ export function AiFaqDashboard({
                     {entry.current ? ' · atual' : ''} · {entry.canonicalQuestion}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {dateLabel(entry.createdAt)} · {entry.createdBy ?? 'autor removido'} ·{' '}
+                    {dateLabel(entry.createdAt)} · {entry.createdBy ?? 'padrão do sistema'} ·{' '}
                     {entry.changeNote}
                   </p>
                 </div>

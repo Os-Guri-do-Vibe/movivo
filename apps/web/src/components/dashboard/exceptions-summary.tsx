@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Contagem de casos abertos da fila de exceções (sino do cabeçalho e selo do menu). Um só
+ * Contagem de casos abertos da Fila do Profissional e dos Alertas (sino do cabeçalho e selos do menu). Um só
  * `fetch` periódico alimenta os dois; falha de rede mantém o último número (nunca zera).
  */
 import { Bell } from 'lucide-react';
@@ -12,7 +12,12 @@ import type { ExceptionsSummary } from '@movivo/shared';
 import { getExceptionsSummary } from '@/lib/control-center-api';
 
 const POLL_MS = 60_000;
-const EMPTY: ExceptionsSummary = { open: 0, urgent: 0 };
+const EMPTY: ExceptionsSummary = {
+  open: 0,
+  urgent: 0,
+  queue: { open: 0, urgent: 0 },
+  alerts: { open: 0, urgent: 0 },
+};
 const Context = createContext<ExceptionsSummary>(EMPTY);
 
 export function ExceptionsSummaryProvider({ children }: { children: ReactNode }) {
@@ -41,14 +46,19 @@ export function useExceptionsSummary(): ExceptionsSummary {
 }
 
 export function ExceptionsBell() {
-  const { open, urgent } = useExceptionsSummary();
+  const { open, urgent, queue, alerts } = useExceptionsSummary();
   const label =
     open === 0
-      ? 'Fila de exceções, nenhum caso aberto'
-      : `Fila de exceções, ${open} caso${open === 1 ? '' : 's'} aberto${open === 1 ? '' : 's'}${urgent > 0 ? `, ${urgent} urgente${urgent === 1 ? '' : 's'}` : ''}`;
+      ? 'Fila do Profissional e Alertas, nenhum caso aberto'
+      : `Fila do Profissional e Alertas, ${open} caso${open === 1 ? '' : 's'} aberto${open === 1 ? '' : 's'}${urgent > 0 ? `, ${urgent} urgente${urgent === 1 ? '' : 's'}` : ''}`;
+  // Alerta urgente primeiro; senão a fila (ou os alertas, se só eles têm algo aberto).
+  const href =
+    alerts.urgent > 0 || (queue.open === 0 && alerts.open > 0)
+      ? '/dashboard/alertas'
+      : '/dashboard/fila';
   return (
     <Link
-      href="/dashboard/fila"
+      href={href}
       aria-label={label}
       className="relative flex size-11 items-center justify-center rounded-lg text-foreground hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none lg:size-10"
     >

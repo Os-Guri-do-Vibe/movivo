@@ -17,6 +17,10 @@ const USER_ID = '11111111-1111-4111-8111-111111111111';
 
 interface Deps {
   staffPhone?: string;
+  /** Telefones das contas ADMIN e profissionais ativas (a consulta da equipe). */
+  staffAccounts?: string[];
+  /** Simula falha ao listar as contas da equipe. */
+  staffLookupFails?: boolean;
   phone?: string | null;
   name?: string | null;
   markerExists?: boolean;
@@ -57,10 +61,21 @@ function makeTx(deps: Deps) {
 
 function makeWorker(deps: Deps = {}) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
+  const staffTx = {
+    select: () => ({
+      from: () => ({
+        where: () =>
+          deps.staffLookupFails
+            ? Promise.reject(new Error('db fora do ar'))
+            : Promise.resolve((deps.staffAccounts ?? []).map((phone) => ({ phone }))),
+      }),
+    }),
+  };
   const db = {
     runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
       cb(makeTx(deps)),
     ),
+    runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(staffTx)),
   } as unknown as TenantDatabase;
   const redis = {
     exists: vi.fn(() => Promise.resolve(deps.markerExists ? 1 : 0)),
@@ -163,6 +178,72 @@ describe('WhatsappOutboundWorker.process', () => {
 
     expect(result).toEqual({ status: 'DISABLED' });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('STAFF_QUEUE_ALERT: avisa também as contas ADMIN e profissionais ativas, sem repetir número', async () => {
+    const { worker, send } = makeWorker({
+      staffPhone: '+5511900000000',
+      staffAccounts: ['+5511911111111', '+5511922222222', '+5511900000000'],
+    });
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'Novo caso', dedupeId: 'c1' }),
+    );
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send.mock.calls.map(([message]) => message.to).sort()).toEqual([
+      '+5511900000000',
+      '+5511911111111',
+      '+5511922222222',
+    ]);
+  });
+
+  it('STAFF_QUEUE_ALERT: só as contas da equipe (sem número configurado) já ligam o alerta', async () => {
+    const { worker, send } = makeWorker({ staffAccounts: ['+5511911111111'] });
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'Novo caso', dedupeId: 'c1' }),
+    );
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledWith({ to: '+5511911111111', text: 'Novo caso' });
+  });
+
+  it('STAFF_QUEUE_ALERT: telefone sintético de desenvolvimento (+5555) nunca recebe', async () => {
+    const { worker, send } = makeWorker({
+      staffAccounts: ['+5555000000099', '+5555000000098'],
+    });
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'x', dedupeId: 'c1' }),
+    );
+
+    expect(result).toEqual({ status: 'DISABLED' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('STAFF_QUEUE_ALERT: se a lista da equipe falhar, o número configurado ainda recebe', async () => {
+    const { worker, send } = makeWorker({ staffPhone: '+5511900000000', staffLookupFails: true });
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'x', dedupeId: 'c1' }),
+    );
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('STAFF_QUEUE_ALERT: um marcador por destinatário (falha de um não repete os outros)', async () => {
+    const { worker, redis } = makeWorker({ staffAccounts: ['+5511911111111', '+5511922222222'] });
+
+    await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'x', dedupeId: 'c1' }),
+    );
+
+    const keys = vi.mocked(redis.set).mock.calls.map(([key]) => String(key));
+    expect(new Set(keys).size).toBe(2);
+    // Telefone não vai para o Redis: a chave leva só um hash curto do número.
+    expect(keys.some((key) => key.includes('5511'))).toBe(false);
   });
 
   it('STAFF_QUEUE_ALERT: alerta já enviado não reenvia', async () => {

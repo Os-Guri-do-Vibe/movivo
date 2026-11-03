@@ -5,21 +5,28 @@
  * mesmo veredito. A segurança não depende de o modelo "ter cuidado": é esta função que bloqueia,
  * pergunta ou encaminha. Ordem de avaliação (a primeira regra que se aplica decide):
  *   1. sinal de EMERGÊNCIA ativo → BLOQUEAR tudo, exceto a mensagem de segurança;
- *   2. sinal ativo no escopo da ação → ENCAMINHAR;
+ *   2. sinal ativo no escopo da ação → ENCAMINHAR (dor e lesão não entram: a IA ajusta o plano com
+ *      cautela e o profissional recebe o alerta, sem trava);
  *   3. aluno pediu revisão humana (LGPD art. 20) → ENCAMINHAR mudanças no plano;
- *   4. troca de exercício por desconforto → ENCAMINHAR (desconforto não é preferência);
- *   5. nível configurado da ação (sem política publicada: conservador);
- *   6. limite numérico da ação (AUTO_WITH_LIMITS);
- *   7. incerteza alta do agente rebaixa a execução automática.
+ *   4. nível configurado da ação (sem política publicada: conservador);
+ *   5. limite numérico da ação (AUTO_WITH_LIMITS);
+ *   6. incerteza alta do agente rebaixa a execução automática;
+ *   7. todo protocolo publicado e toda troca de exercício no protocolo passam pela Fila do
+ *      Profissional: revisão obrigatória (ENCAMINHAR) quando o aluno exige revisão profissional
+ *      (PAR-Q de risco), opcional (PERGUNTAR, liberada sozinha ao fim da janela) nos demais.
+ *      Sinal ativo e pedido de revisão do aluno NÃO travam essas ações: eles têm o caso próprio
+ *      em Alertas, e o protocolo segue pela fila.
  */
 import {
   ACTION_DOMAIN,
+  NON_BLOCKING_SIGNAL_KINDS,
   type AutonomyLevel,
   type CoachingAction,
   type CoachingDomain,
   type DecisionVerdict,
   type SafetyScope,
   type SafetySeverity,
+  type SafetySignalKind,
   type Uncertainty,
 } from '@movivo/shared';
 
@@ -39,6 +46,8 @@ export interface PolicyContext {
   reviewRequested: boolean;
   /** Duração prevista da sessão que a proposta quer encurtar. */
   sessionPlannedMinutes?: number;
+  /** O aluno exige revisão profissional dos protocolos (PAR-Q de risco na anamnese). */
+  requiresProfessionalReview?: boolean;
 }
 
 export interface PolicyVerdict {
@@ -65,6 +74,41 @@ const CONSERVATIVE_LEVEL: Readonly<Record<CoachingDomain, AutonomyLevel>> = {
 };
 
 const PLAN_CHANGING: readonly CoachingDomain[] = ['TRAINING', 'NUTRITION', 'GOALS', 'SCHEDULE'];
+
+/** Publicar um protocolo (treino ou alimentação) para o aluno. */
+export function isPlanPublication(action: CoachingAction): boolean {
+  return action.type === 'PUBLISH_TRAINING_PLAN' || action.type === 'PUBLISH_NUTRITION_PLAN';
+}
+
+/** Troca de exercício que altera o protocolo (e não só a próxima sessão). */
+export function isPlanSubstitution(action: CoachingAction): boolean {
+  return action.type === 'SUBSTITUTE_EXERCISE' && action.scope === 'PLAN';
+}
+
+/**
+ * Ações que têm janela de revisão opcional: o profissional pode revisar, mas se ninguém agir
+ * o sistema libera sozinho. As demais ações da fila (ajustes de volume e de alimentação)
+ * respeitam o limite da metodologia: fora dele, só a equipe libera.
+ */
+export function hasAutoRelease(action: CoachingAction): boolean {
+  return isPlanPublication(action) || isPlanSubstitution(action);
+}
+
+/** Ações que alteram o protocolo do aluno: o que a IA mudou aparece na Fila do Profissional. */
+export function isProtocolChange(action: CoachingAction): boolean {
+  return (
+    hasAutoRelease(action) ||
+    action.type === 'ADJUST_WEEKLY_VOLUME' ||
+    action.type === 'ADJUST_ENERGY_TARGET' ||
+    action.type === 'ADJUST_MEAL_GUIDANCE'
+  );
+}
+
+/**
+ * A estratégia é só a base interna do plano (o aluno não a recebe): segurança e revisão humana
+ * não a seguram, para que a IA monte o protocolo completo e o profissional o revise na fila.
+ */
+const INTERNAL_ACTIONS: ReadonlySet<CoachingAction['type']> = new Set(['DEFINE_STRATEGY']);
 
 /** Verifica o limite numérico de uma ação em `AUTO_WITH_LIMITS`. `null` = ação sem limite. */
 function withinLimit(
@@ -130,9 +174,16 @@ export function evaluateAction(
     );
   }
 
-  const suspending = context.activeSignals.find((s) =>
-    SUSPENDED_BY_SCOPE[s.scope].includes(domain),
-  );
+  // Estratégia (interna), protocolo publicado e troca no protocolo seguem pela fila do
+  // profissional: sinal ativo e pedido de revisão geram o próprio caso em Alertas.
+  const internal = INTERNAL_ACTIONS.has(action.type) || hasAutoRelease(action);
+  const suspending = internal
+    ? undefined
+    : context.activeSignals.find(
+        (s) =>
+          !NON_BLOCKING_SIGNAL_KINDS.includes(s.kind as SafetySignalKind) &&
+          SUSPENDED_BY_SCOPE[s.scope].includes(domain),
+      );
   if (suspending) {
     return verdict(
       'ESCALATE',
@@ -140,12 +191,8 @@ export function evaluateAction(
     );
   }
 
-  if (context.reviewRequested && PLAN_CHANGING.includes(domain)) {
+  if (context.reviewRequested && !internal && PLAN_CHANGING.includes(domain)) {
     return verdict('ESCALATE', 'o aluno pediu revisão humana: mudanças no plano aguardam a equipe');
-  }
-
-  if (action.type === 'SUBSTITUTE_EXERCISE' && action.reason === 'DISCOMFORT') {
-    return verdict('ESCALATE', 'troca por desconforto: pode ser dor, não preferência');
   }
 
   const configured = policy?.byAction[action.type];
@@ -165,7 +212,21 @@ export function evaluateAction(
     }
   }
 
-  if (result === 'EXECUTE' && context.uncertainty === 'HIGH') {
+  if (hasAutoRelease(action)) {
+    // A visibilidade do que a IA envia ao aluno é regra do produto, não parâmetro de autonomia:
+    // nenhum nível publicado libera protocolo (ou troca no protocolo) sem passar pela fila do
+    // profissional. A incerteza alta não vira revisão obrigatória, só fica registrada.
+    if (context.uncertainty === 'HIGH') reasons.push('o agente declarou incerteza alta');
+    if (context.requiresProfessionalReview && result !== 'BLOCK') {
+      reasons.push('PAR-Q de risco: revisão obrigatória do profissional antes do envio');
+      result = 'ESCALATE';
+    } else if (result === 'EXECUTE') {
+      reasons.push(
+        'mudança no protocolo na fila do profissional: revisão opcional, liberada após a janela',
+      );
+      result = 'ASK';
+    }
+  } else if (result === 'EXECUTE' && context.uncertainty === 'HIGH') {
     reasons.push('o agente declarou incerteza alta');
     result = policy?.highUncertainty ?? 'ASK';
   }

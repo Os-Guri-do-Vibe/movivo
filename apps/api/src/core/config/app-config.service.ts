@@ -57,6 +57,8 @@ export interface LlmConfig {
   readonly primaryModel: string;
   readonly fallbackModel: string;
   readonly secondaryFallbackModel: string;
+  /** Modelo (DeepSeek) dos testes do painel. */
+  readonly evalModel: string;
   readonly maxTokens: number;
   readonly timeoutMs: number;
   readonly userDailyMessageLimit: number;
@@ -252,6 +254,7 @@ export class AppConfigService {
       primaryModel: this.config.LLM_PRIMARY_MODEL,
       fallbackModel: this.config.LLM_FALLBACK_MODEL,
       secondaryFallbackModel: this.config.LLM_SECONDARY_FALLBACK_MODEL,
+      evalModel: this.config.LLM_EVAL_MODEL,
       maxTokens: this.config.LLM_MAX_TOKENS,
       timeoutMs: this.config.LLM_TIMEOUT_MS,
       userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
@@ -318,14 +321,18 @@ export class AppConfigService {
       : null;
   }
 
-  /** Config do RAG (US-3.3). Thresholds/top-K do retrieval + rerank. */
+  /** Config do RAG: liga/desliga e piso de similaridade, top-K e candidatos da busca. */
   get rag(): {
+    readonly enabled: boolean;
+    readonly proactiveEnabled: boolean;
     readonly minCosine: number;
     readonly rerankMinScore: number;
     readonly topK: number;
     readonly candidates: number;
   } {
     return {
+      enabled: this.config.RAG_ENABLED,
+      proactiveEnabled: this.config.RAG_PROACTIVE_ENABLED,
       minCosine: this.config.RAG_MIN_COSINE,
       rerankMinScore: this.config.RAG_RERANK_MIN_SCORE,
       topK: this.config.RAG_TOP_K,

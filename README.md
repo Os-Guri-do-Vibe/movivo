@@ -365,7 +365,7 @@ schema sem gerar a migração.
 
 ```bash
 pnpm --filter @movivo/api db:generate   # gera migração a partir do schema
-pnpm --filter @movivo/api db:migrate    # aplica migrações + reconcilia grants
+pnpm --filter @movivo/api db:migrate    # aplica migrações + reconcilia grants + carrega a TACO (assets/foods)
 pnpm --filter @movivo/api db:seed       # popula dados sintéticos de dev (idempotente)
 pnpm --filter @movivo/api db:studio     # UI do Drizzle Studio
 ```

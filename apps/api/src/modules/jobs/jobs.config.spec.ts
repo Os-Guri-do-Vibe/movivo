@@ -41,6 +41,7 @@ describe('jobs.config', () => {
         'domain-events',
         // Geração do plano integrado depois do onboarding.
         'plan-generation',
+        'protocol-auto-release',
         // Exame recebido no WhatsApp (leitura + comentário).
         'medical-exam',
         // Atividades do Strava (webhook).

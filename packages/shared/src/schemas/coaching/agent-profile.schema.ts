@@ -202,8 +202,12 @@ export const agentProfileStatusSchema = z.enum([
   'DISCARDED',
 ]);
 
+/** Tamanho da ficha em caracteres. O texto inteiro entra no prompt de toda tarefa do agente. */
+export const AGENT_PROFILE_MIN_CHARS = 80;
+export const AGENT_PROFILE_MAX_CHARS = 20_000;
+
 export const agentProfileUpdateSchema = z.object({
-  content: z.string().trim().min(80).max(6_000),
+  content: z.string().trim().min(AGENT_PROFILE_MIN_CHARS).max(AGENT_PROFILE_MAX_CHARS),
   changeNote: z.string().trim().min(3).max(500),
 });
 export type AgentProfileUpdate = z.infer<typeof agentProfileUpdateSchema>;
@@ -250,3 +254,101 @@ export const agentProfileTestResponseSchema = z.object({
   }),
 });
 export type AgentProfileTestResult = z.infer<typeof agentProfileTestResponseSchema>['data'];
+
+/** O que cada tarefa de agente faz, em palavras do dia a dia (o id técnico não diz nada ao profissional). */
+export const AGENT_TASK_LABELS: Readonly<Record<string, string>> = {
+  'coordination.review_protocol': 'Coordenador: revisar o protocolo',
+  'goals.define_strategy': 'Estratégia: definir o objetivo',
+  'strength.build_block': 'Musculação: montar o bloco de treino',
+  'strength.choose_substitute': 'Musculação: escolher exercício substituto',
+  'running.build_block': 'Corrida: montar o bloco de treino',
+  'hyrox.build_block': 'HYROX: montar o bloco de treino',
+  'hybrid.reconcile_week': 'Planejador híbrido: organizar a semana',
+  'nutrition.build_plan': 'Nutrição: montar o plano alimentar',
+  'nutrition.interpret_food_log': 'Nutrição: interpretar o registro alimentar',
+  'conversation.answer_question': 'Comunicação: responder dúvidas do aluno',
+  'conversation.classify_inbound': 'Comunicação: entender a mensagem do aluno',
+  'progress.weekly_review': 'Comunicação: revisão semanal',
+  'preferences.extract_preferences': 'Comunicação: registrar preferências do aluno',
+  'recovery.analyze_week': 'Recuperação: analisar a semana',
+  'habits.analyze_week': 'Hábitos: analisar a semana',
+  'medical.read_exam': 'Exames: ler o exame',
+  'medical.comment_exam': 'Exames: comentar o exame',
+  'safety.detect_risk_signals': 'Segurança: detectar sinais de risco no texto',
+  'vision.extract_workout_screenshot': 'Visão: ler o print do treino',
+  'vision.identify_meal': 'Visão: identificar a refeição na foto',
+  'evaluation.judge': 'Avaliador automático dos testes',
+};
+
+/** Nome legível da tarefa; sem tradução, cai no nome do agente e, por fim, em um texto neutro. */
+export function agentTaskLabel(taskId: string): string {
+  const known = AGENT_TASK_LABELS[taskId];
+  if (known) return known;
+  const key = agentOfTask(taskId);
+  return key ? AGENT_PROFILE_LABELS[key] : 'Tarefa interna dos agentes';
+}
+
+/** Função de cada agente em uma frase, para a lista do painel (o profissional não lê o id da tarefa). */
+export const AGENT_PROFILE_ROLES: Readonly<Record<AgentProfileKey, string>> = {
+  COORDINATOR: 'Revisa o protocolo inteiro e resolve conflitos entre treino e alimentação',
+  STRATEGY: 'Define o objetivo e o caminho realista de cada aluno',
+  STRENGTH: 'Monta os blocos de musculação e escolhe exercícios substitutos',
+  RUNNING: 'Monta os blocos de corrida',
+  HYROX: 'Prepara o aluno para a prova HYROX',
+  HYBRID: 'Organiza as modalidades na semana real do aluno',
+  NUTRITION: 'Monta o plano alimentar e interpreta o registro de refeições',
+  COMMUNICATION: 'Responde dúvidas do aluno e faz a revisão semanal',
+  RECOVERY: 'Analisa sono, energia e carga da semana',
+  HABITS: 'Analisa adesão e barreiras na rotina do aluno',
+  MEDICAL: 'Lê e comenta exames, sob a supervisão do médico (CRM)',
+  PERSONA_FEMALE: 'Conversa com as alunas pelo WhatsApp',
+  PERSONA_MALE: 'Conversa com os alunos pelo WhatsApp',
+};
+
+/** Título dos agentes sem nome próprio, na lista do painel: a função, clara e em português. */
+const AGENT_PROFILE_TITLES: Readonly<Record<Exclude<AgentProfileKey, PersonaKey>, string>> = {
+  COORDINATOR: 'Coordenador do Protocolo',
+  STRATEGY: 'Especialista em Estratégia',
+  STRENGTH: 'Especialista em Musculação',
+  RUNNING: 'Especialista em Corrida',
+  HYROX: 'Especialista em HYROX',
+  HYBRID: 'Especialista em Treino Híbrido',
+  NUTRITION: 'Especialista em Nutrição',
+  COMMUNICATION: 'Especialista em Comunicação',
+  RECOVERY: 'Especialista em Recuperação',
+  HABITS: 'Especialista em Hábitos',
+  MEDICAL: 'Especialista em Exames e Saúde',
+};
+
+/** Nome do agente na lista: as personas têm nome próprio; os demais, o título da função. */
+export function agentDisplayName(agent: AgentProfileKey): string {
+  return agent === 'PERSONA_FEMALE' || agent === 'PERSONA_MALE'
+    ? PERSONAS[agent].name
+    : AGENT_PROFILE_TITLES[agent];
+}
+
+/** Como a lista do painel agrupa os agentes: quem fala com o aluno primeiro, depois os especialistas. */
+export const AGENT_PROFILE_GROUPS: ReadonlyArray<{
+  id: 'personas' | 'specialists';
+  label: string;
+  agents: readonly AgentProfileKey[];
+}> = [
+  { id: 'personas', label: 'Atendimento no WhatsApp', agents: ['PERSONA_FEMALE', 'PERSONA_MALE'] },
+  {
+    id: 'specialists',
+    label: 'Especialistas',
+    agents: [
+      'COORDINATOR',
+      'STRATEGY',
+      'STRENGTH',
+      'RUNNING',
+      'HYROX',
+      'HYBRID',
+      'NUTRITION',
+      'COMMUNICATION',
+      'RECOVERY',
+      'HABITS',
+      'MEDICAL',
+    ],
+  },
+];

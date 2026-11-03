@@ -2,8 +2,8 @@
  * Sinais de segurança no banco: gravar, consultar os ativos e resolver.
  *
  * Um sinal ativo suspende as ações automáticas do seu escopo (motor de políticas). Sinal
- * URGENTE ou de EMERGÊNCIA abre caso prioritário na fila da equipe na mesma transação, com o
- * evento de domínio correspondente. O mesmo tipo de sinal já ativo não é duplicado.
+ * URGENTE ou de EMERGÊNCIA abre caso prioritário em Alertas na mesma transação, com o evento de
+ * domínio correspondente (exceto o PAR-Q de risco, cuja revisão é o protocolo da Fila). O mesmo tipo de sinal já ativo não é duplicado.
  */
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
@@ -107,7 +107,9 @@ export class SafetyService {
         type: 'SafetySignalRaised',
         payload: { safetyEventId: row.id, kind: signal.kind, severity: signal.severity },
       });
-      if (signal.severity !== 'ATTENTION') {
+      // O PAR-Q de risco não abre caso em Alertas: o protocolo dele entra na Fila do Profissional
+      // como revisão obrigatória, e liberá-lo é rever o PAR-Q (um item só para o profissional).
+      if (signal.severity !== 'ATTENTION' && signal.kind !== 'PARQ_POSITIVE') {
         const [exception] = await tx
           .insert(exceptionCases)
           .values({
