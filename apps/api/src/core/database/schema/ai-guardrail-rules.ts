@@ -20,9 +20,8 @@ export const aiGuardrailRules = pgTable(
     version: integer('version').notNull(),
     status: aiGuardrailStatusEnum('status').notNull().default('PUBLISHED'),
     changeNote: text('change_note').notNull(),
-    createdBy: uuid('created_by')
-      .notNull()
-      .references(() => staff.id, { onDelete: 'restrict' }),
+    /** Nulo nas regras padrão da aplicação (carga do sistema no deploy). */
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [unique('uq_ai_guardrail_rules_key_version').on(table.ruleKey, table.version)],

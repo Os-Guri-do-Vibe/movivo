@@ -88,7 +88,7 @@ export class ForbiddenTopicAdminController {
   @ApiBody({ schema: zodSchemaToOpenApi(forbiddenTopicActionSchema) })
   @ApiResponse({
     status: 200,
-    description: 'Tema aprovado — passa a ser reforçado no prompt do AI Coach.',
+    description: 'Tema aprovado — passa a ser reforçado no prompt da IA.',
   })
   @ApiResponse({
     status: 400,

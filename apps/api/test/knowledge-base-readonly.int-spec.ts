@@ -3,11 +3,11 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  * Corpus do RAG somente-leitura para o runtime (US-3.3 / Sato §10.4 — anti-envenenamento),
  * reverificado como gate da Sprint 7 (TASK-7.9.5).
  *
- * A Sprint 7 introduziu escrita de configuração de IA pelo painel (`agent_config`). Este
+ * O painel escreve configuração de IA (FAQ, temas proibidos, guardrails). Este
  * teste prova que essa superfície nova **não** trouxe junto escrita no corpus: a role de
  * runtime (`movivo_app`) continua sem INSERT/UPDATE/DELETE em `knowledge_base` — a mesma
  * asserção sobre `information_schema.role_table_grants` usada em
- * `agent-config-immutability.int-spec.ts`, mais a tentativa real de escrita (42501).
+ * o spec de imutabilidade de `audit_logs`, mais a tentativa real de escrita (42501).
  *
  * O `REVOKE` vem de `KNOWLEDGE_BASE_SQL` em `core/database/migrate.ts`, aplicado DEPOIS do
  * grant genérico — se alguém inverter essa ordem, ou remover o REVOKE, este teste falha.

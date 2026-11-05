@@ -1,42 +1,34 @@
 'use client';
 
-import {
-  AlertTriangle,
-  BookOpenText,
-  Brain,
-  Files,
-  HelpCircle,
-  History,
-  ShieldCheck,
-  type LucideIcon,
-} from 'lucide-react';
+import { AlertTriangle, Brain, Files, HelpCircle, History, Salad, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   getKnowledgeDocuments,
-  getMethodology,
   type KnowledgeDocumentsViewResponse,
-  type MethodologyResponse,
 } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
+
+import { CONTROL_H, FOCUS_RING } from './control-center-table';
+import { SectorHeader } from './control-center-ui';
+import { StatStrip } from './knowledge-ui';
 
 const BASE = '/dashboard/ia/base-conhecimento';
 
 /** Disparado pelas seções após mudar a base, para o resumo do topo não ficar defasado. */
 export const KNOWLEDGE_CHANGED_EVENT = 'movivo:knowledge-changed';
 const SECTIONS = [
-  { href: BASE, label: 'Metodologia', icon: BookOpenText },
-  { href: `${BASE}/documentos`, label: 'Documentos', icon: Files },
+  { href: `${BASE}/documentos`, label: 'Artigos', icon: Files },
+  { href: `${BASE}/taco`, label: 'TACO', icon: Salad },
   { href: `${BASE}/faq`, label: 'FAQ', icon: HelpCircle },
   { href: `${BASE}/seguranca`, label: 'Segurança', icon: ShieldCheck },
   { href: `${BASE}/historico`, label: 'Histórico', icon: History },
 ] as const;
 
-function SummaryStrip() {
+function SummaryStrip({ onLoaded }: { onLoaded: () => void }) {
   const [documents, setDocuments] = useState<KnowledgeDocumentsViewResponse | null>(null);
-  const [methodology, setMethodology] = useState<MethodologyResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
@@ -46,8 +38,10 @@ function SummaryStrip() {
       controller = new AbortController();
       const { signal } = controller;
       void Promise.allSettled([
-        getKnowledgeDocuments(signal).then(setDocuments),
-        getMethodology(signal).then(setMethodology),
+        getKnowledgeDocuments(signal).then((loaded) => {
+          setDocuments(loaded);
+          onLoaded();
+        }),
       ]).then((results) => {
         if (!signal.aborted) setUnavailable(results.some((result) => result.status === 'rejected'));
       });
@@ -58,77 +52,30 @@ function SummaryStrip() {
       window.removeEventListener(KNOWLEDGE_CHANGED_EVENT, load);
       controller.abort();
     };
-  }, []);
+  }, [onLoaded]);
 
   const corpus = documents?.data.documents ?? [];
-  const versions = methodology?.data.versions ?? [];
-  const current =
-    versions.find((version) => version.current) ??
-    versions.find((version) => version.status === 'PUBLISHED');
   const count = (predicate: (status: string) => boolean) =>
     documents ? corpus.filter((item) => predicate(item.status)).length : null;
   const waiting = count((status) => status === 'READY_FOR_REVIEW' || status === 'PENDING');
   const failed = count((status) => status === 'FAILED');
-  const cards: Array<{
-    label: string;
-    value: string;
-    icon: LucideIcon;
-    /** Coral só quando há algo a resolver; zero é um estado calmo. */
-    alert?: boolean;
-  }> = [
-    {
-      label: 'Metodologia vigente',
-      value: current ? `v${current.version}` : '—',
-      icon: BookOpenText,
-    },
-    {
-      label: 'Fontes ativas',
-      value: String(count((status) => status === 'PUBLISHED') ?? '—'),
-      icon: Files,
-    },
-    {
-      label: 'Aguardando revisão',
-      value: String(waiting ?? '—'),
-      icon: History,
-      alert: (waiting ?? 0) > 0,
-    },
-    {
-      label: 'Falhas no processamento',
-      value: String(failed ?? '—'),
-      icon: AlertTriangle,
-      alert: (failed ?? 0) > 0,
-    },
-  ];
 
   return (
-    <div className="mt-6">
-      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            className={cn(
-              'flex items-center gap-4 rounded-xl border bg-card p-4',
-              card.alert ? 'border-coral/60' : 'border-border',
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                'flex size-10 shrink-0 items-center justify-center rounded-lg',
-                card.alert ? 'bg-coral/20' : 'bg-accent text-accent-foreground',
-              )}
-            >
-              <card.icon className="size-5" />
-            </span>
-            <div className="min-w-0">
-              <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                {card.label}
-              </dt>
-              <dd className="mt-0.5 font-mono text-h2 font-bold">{card.value}</dd>
-            </div>
-          </div>
-        ))}
-      </dl>
+    <div>
+      <StatStrip
+        stats={[
+          {
+            label: 'Fontes ativas',
+            value: String(count((status) => status === 'PUBLISHED') ?? '—'),
+          },
+          { label: 'Aguardando revisão', value: String(waiting ?? '—'), alert: (waiting ?? 0) > 0 },
+          {
+            label: 'Falhas no processamento',
+            value: String(failed ?? '—'),
+            alert: (failed ?? 0) > 0,
+          },
+        ]}
+      />
       {unavailable ? (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
           <AlertTriangle aria-hidden="true" className="size-3.5" />
@@ -141,42 +88,45 @@ function SummaryStrip() {
 
 export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const markUpdated = useCallback(() => setUpdatedAt(new Date()), []);
+  const nav = useRef<HTMLElement>(null);
+
+  // No celular as abas rolam: a seção atual precisa estar à vista quando a página abre.
+  useEffect(() => {
+    const current = nav.current?.querySelector('[aria-current="page"]');
+    current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+  }, [pathname]);
 
   return (
-    <div>
-      <header>
-        <h1 className="flex items-center gap-3 text-h1 font-bold text-foreground">
-          <Brain aria-hidden="true" className="size-7 text-verde-pulso" />
-          Base de Conhecimento
-        </h1>
-        <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-          Tudo o que a IA sabe e segue: a metodologia do profissional CREF, as evidências, as
-          respostas prontas e as regras de segurança.
-        </p>
-      </header>
+    <div className="@container mx-auto w-full max-w-6xl space-y-6">
+      <SectorHeader title="Base de Conhecimento" icon={Brain} updatedAt={updatedAt} />
 
-      <SummaryStrip />
+      <SummaryStrip onLoaded={markUpdated} />
 
       <nav
+        ref={nav}
         aria-label="Seções da Base de Conhecimento"
-        className="mt-6 overflow-x-auto border-b border-border"
+        className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <ul className="flex min-w-max gap-1">
+        <ul className="flex min-w-max border-b border-border">
           {SECTIONS.map(({ href, label, icon: Icon }) => {
-            const current = href === BASE ? pathname === BASE : pathname.startsWith(href);
+            const current = pathname.startsWith(href);
             return (
               <li key={href}>
                 <Link
                   href={href}
                   aria-current={current ? 'page' : undefined}
                   className={cn(
-                    'flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 px-4 py-2 text-label font-semibold transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                    'flex items-center gap-2 px-3 text-label font-medium transition-colors @md:px-4',
+                    CONTROL_H,
+                    FOCUS_RING,
                     current
-                      ? 'border-verde-pulso bg-accent/60 text-foreground'
-                      : 'border-transparent text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                      ? 'text-foreground shadow-[inset_0_-2px_0_0_var(--foreground)]'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  <Icon aria-hidden="true" className="size-4" />
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
                   {label}
                 </Link>
               </li>
@@ -185,7 +135,7 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
         </ul>
       </nav>
 
-      <div className="mt-8">{children}</div>
+      <div>{children}</div>
     </div>
   );
 }

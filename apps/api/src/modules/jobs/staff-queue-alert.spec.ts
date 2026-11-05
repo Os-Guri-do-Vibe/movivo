@@ -5,24 +5,18 @@ import { type QueueManager } from './queue-manager.service';
 import { enqueueStaffQueueAlert } from './staff-queue-alert';
 
 describe('enqueueStaffQueueAlert', () => {
-  it('enfileira o alerta com jobId idempotente por tipo e item', async () => {
+  it('enfileira o alerta com jobId idempotente por caso', async () => {
     const enqueue = vi.fn(() => Promise.resolve('1'));
     const logger = { warn: vi.fn() };
     await enqueueStaffQueueAlert({ enqueue } as unknown as QueueManager, logger, {
-      userId: 'u1',
-      kind: 'SUBSTITUTION_REVIEW',
-      refId: 'r1',
+      caseId: 'c1',
+      text: 'Novo caso na fila MOVIVO',
     });
     expect(enqueue).toHaveBeenCalledWith(
       QUEUE.whatsappOutbound,
       'staff-queue-alert',
-      {
-        userId: 'u1',
-        type: 'STAFF_QUEUE_ALERT',
-        staffAlertKind: 'SUBSTITUTION_REVIEW',
-        dedupeId: 'r1',
-      },
-      { jobId: 'staff-queue-alert-SUBSTITUTION_REVIEW-r1' },
+      { userId: null, type: 'STAFF_QUEUE_ALERT', text: 'Novo caso na fila MOVIVO', dedupeId: 'c1' },
+      { jobId: 'staff-queue-alert-c1' },
     );
   });
 
@@ -31,9 +25,8 @@ describe('enqueueStaffQueueAlert', () => {
     const logger = { warn: vi.fn() };
     await expect(
       enqueueStaffQueueAlert({ enqueue } as unknown as QueueManager, logger, {
-        userId: 'u1',
-        kind: 'PROTOCOL_REVIEW',
-        refId: 'p1',
+        caseId: 'c1',
+        text: 'x',
       }),
     ).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalledOnce();

@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AnamnesisController } from './anamnesis.controller';
 import { type AnamnesisService } from './anamnesis.service';
+import { type BodyPhotoService } from './body-photo.service';
 
 function makeController() {
   const svc = {
@@ -19,7 +20,11 @@ function makeController() {
     verifyPhoneCode: vi.fn(() => Promise.resolve({ phoneVerified: true })),
     submit: vi.fn(() => Promise.resolve({ status: 'SUBMITTED', outcome: 'READY' })),
   } as unknown as AnamnesisService;
-  return { controller: new AnamnesisController(svc), svc };
+  const photos = {
+    put: vi.fn((_token: string, angle: string) => Promise.resolve({ angle })),
+    remove: vi.fn((_token: string, angle: string) => Promise.resolve({ angle })),
+  } as unknown as BodyPhotoService;
+  return { controller: new AnamnesisController(svc, photos), svc, photos };
 }
 
 describe('AnamnesisController', () => {
@@ -47,9 +52,9 @@ describe('AnamnesisController', () => {
     expect(svc.patchStep).toHaveBeenCalledWith('tok', 2, { anamnesis: {}, pain: {} });
   });
 
-  it('patchStep rejeita etapa inválida (só 1/2/3)', async () => {
+  it('patchStep rejeita etapa inválida (só de 1 a 9)', async () => {
     const { controller, svc } = makeController();
-    await expect(controller.patchStep('tok', '9', {})).rejects.toThrow(/etapa inválida/i);
+    await expect(controller.patchStep('tok', '10', {})).rejects.toThrow(/etapa inválida/i);
     expect(svc.patchStep).not.toHaveBeenCalled();
   });
 
@@ -74,5 +79,29 @@ describe('AnamnesisController', () => {
     await controller.submit('tok');
     expect(svc.getByToken).toHaveBeenCalledWith('tok');
     expect(svc.submit).toHaveBeenCalledWith('tok');
+  });
+
+  it('putPhoto entrega os bytes da imagem à posição validada', async () => {
+    const { controller, photos } = makeController();
+    const bytes = Buffer.from([0xff, 0xd8, 0xff]);
+    await controller.putPhoto('tok', 'FRONT', { body: bytes });
+    expect(photos.put).toHaveBeenCalledWith('tok', 'FRONT', bytes);
+  });
+
+  it('putPhoto sem corpo binário envia vazio (o serviço recusa)', async () => {
+    const { controller, photos } = makeController();
+    await controller.putPhoto('tok', 'BACK', { body: { not: 'bytes' } });
+    expect(photos.put).toHaveBeenCalledWith('tok', 'BACK', Buffer.alloc(0));
+  });
+
+  it('foto e exclusão recusam posição fora das quatro', async () => {
+    const { controller, photos } = makeController();
+    await expect(controller.putPhoto('tok', 'SIDE', { body: Buffer.alloc(1) })).rejects.toThrow(
+      /Posição da foto inválida/,
+    );
+    await expect(controller.deletePhoto('tok', 'TOP')).rejects.toThrow(/inválida/);
+    expect(photos.put).not.toHaveBeenCalled();
+    await controller.deletePhoto('tok', 'LEFT');
+    expect(photos.remove).toHaveBeenCalledWith('tok', 'LEFT');
   });
 });

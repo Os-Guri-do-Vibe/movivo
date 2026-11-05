@@ -132,10 +132,10 @@ export class ConversionSequenceWorker implements OnModuleInit {
     const text = await this.messageFor(userId, key);
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
-      'coach-message',
+      'agent-message',
       {
         userId,
-        type: 'COACH_MESSAGE',
+        type: 'CONVERSATION_MESSAGE',
         text,
         dedupeId: `conv_${key}`,
       },

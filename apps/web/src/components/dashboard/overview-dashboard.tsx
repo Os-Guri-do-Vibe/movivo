@@ -27,7 +27,6 @@ import { getOverview } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
 import {
-  DataQuality,
   formatMetric,
   ResourceState,
   SectorHeader,
@@ -525,7 +524,6 @@ export function OverviewDashboard() {
         </p>
       ) : null}
       <OverviewSections data={state.data.data} />
-      <DataQuality notes={state.data.meta.dataQuality} />
     </div>
   );
 }

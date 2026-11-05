@@ -278,6 +278,11 @@ export const envSchema = z
     LLM_FALLBACK_MODEL: z.string().min(1).default('gpt-4.1'),
     LLM_SECONDARY_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
     /**
+     * Modelo dos TESTES do painel (metodologia e fichas dos agentes): o DeepSeek mais barato, sem
+     * failover para modelos caros. Não afeta o que os alunos usam.
+     */
+    LLM_EVAL_MODEL: z.string().min(1).default('deepseek-flash'),
+    /**
      * Atestado operacional, neutro por fornecedor. `true` significa que Jurídico/Segurança
      * verificaram DPA, transferência internacional, retenção/no-training e suboperadores.
      */
@@ -285,46 +290,15 @@ export const envSchema = z
     LLM_OPENAI_HEALTH_DATA_APPROVED: envBoolean.default(false),
     LLM_ANTHROPIC_HEALTH_DATA_APPROVED: envBoolean.default(false),
     /**
-     * Default de tokens por chamada quando o caller não pede um valor explícito (chat/
-     * check-in). NÃO é teto sobre um `maxTokens` explícito do request (achado 2026-09-02:
-     * o router chegou a fazer esse clamp por engano e truncava toda geração de protocolo
-     * de volta a este valor, mesmo com `LLM_PROTOCOL_MAX_TOKENS` maior — ver
-     * `llm-router.service.ts`).
+     * Default de tokens por chamada quando o caller não pede um valor explícito. NÃO é teto
+     * sobre um `maxTokens` explícito do request (cada tarefa de agente declara o seu).
      */
     LLM_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(4096),
     /**
-     * Teto de tokens só para `PROTOCOL_GENERATION` (achado 2026-09-02: o valor fixo de
-     * 1.800 tokens no código, calibrado para a metodologia curta original, passou a
-     * truncar a saída — e falhar no parse do JSON — assim que a metodologia publicada
-     * ficou mais detalhada e o protocolo gerado passou a ter mais sessões/exercícios).
-     * Mesmo raciocínio do `LLM_PROTOCOL_TIMEOUT_MS` acima: geração de protocolo é job de
-     * fila, sem pressão de UX em tempo real, então pode usar um teto bem mais alto que
-     * chat/check-in.
-     */
-    LLM_PROTOCOL_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(6000),
-    /**
-     * Timeout hard por tentativa de provedor (Victor §1.2). Vale para chat/check-in
-     * (latência importa numa conversa de WhatsApp em tempo real).
-     *
-     * Subido de 8s pra 15s (achado 2026-09-02, reproduzido ao vivo): com a OpenAI sem
-     * crédito (`insufficient_quota`, falha instantânea) e o DeepSeek ainda não aprovado
-     * pra HEALTH, toda conversa real caía pro Claude Sonnet 4.5 como único provedor
-     * viável — e o prompt real do coach (persona + metodologia + histórico) precisa de
-     * mais que 8s pra responder (medido direto contra a API: ~6s numa chamada isolada
-     * bem menor que o prompt real, sem cache). 8s estourava consistentemente e o aluno
-     * recebia só o fallback genérico ("já te respondo") em vez de uma resposta de
-     * verdade. 15s ainda é curto o bastante pra não quebrar a sensação de tempo real do
-     * WhatsApp (com "digitando…" ativo durante a espera).
+     * Timeout hard por tentativa de provedor (Victor §1.2). 15s é curto o bastante para não
+     * quebrar a sensação de tempo real do WhatsApp (com "digitando…" ativo durante a espera).
      */
     LLM_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(15_000),
-    /**
-     * Timeout hard só para `PROTOCOL_GENERATION` (achado 2026-08-18: 8s é curto demais
-     * pra uma geração real de protocolo estruturado completo — toda tentativa contra o
-     * GPT-4.1 real estourava, esgotava os 3 retries e caía no fallback de segurança
-     * sempre, mascarado como "validação bloqueou"). É um job de fila em background, sem
-     * pressão de UX em tempo real — pode esperar bem mais que o chat.
-     */
-    LLM_PROTOCOL_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(45_000),
     /** Teto anti-abuso: chamadas por usuário/dia (LLM10 — Sato §9.4). */
     LLM_USER_DAILY_MESSAGE_LIMIT: z.coerce.number().int().min(1).default(90),
     /** Baseline do budget alert de custo por usuário/dia em BRL (LLM10). */
@@ -333,11 +307,10 @@ export const envSchema = z
     LLM_USD_BRL_RATE: z.coerce.number().positive().default(5.5),
 
     // ------------------------------------------ WhatsApp / EvolutionAPI
-    /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
+    /** Base pública dos links enviados por WhatsApp (treino, check-in, assinatura). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
     /**
-     * Número que recebe o alerta de WhatsApp quando um protocolo ou uma proposta de
-     * substituição entra na fila do profissional (E.164, com ou sem `+`). Opcional:
+     * Número que recebe o alerta de WhatsApp quando um caso urgente entra na fila de exceções (E.164, com ou sem `+`). Opcional:
      * ausente = alerta desligado, o resto do fluxo não muda.
      */
     STAFF_QUEUE_ALERT_PHONE: z
@@ -367,7 +340,17 @@ export const envSchema = z
      * segredo conhecido publicamente. Via contrato `*_FILE` (docs/SECURITY.md §2).
      */
     EVOLUTION_WEBHOOK_TOKEN: z.string().min(43).optional(),
-    // ------------------------------------------ Transcrição de áudio (AI Coach entende
+    // ------------------------------------------ Strava (OAuth do atleta + webhook de
+    // atividades). Tudo opcional: sem as três, "conectar Strava" segue para a conversa normal.
+    STRAVA_CLIENT_ID: z
+      .string()
+      .regex(/^\d{1,12}$/)
+      .optional(),
+    /** Segredo do app no Strava (contrato `*_FILE`). */
+    STRAVA_CLIENT_SECRET: z.string().min(20).optional(),
+    /** Token que o Strava devolve na verificação da assinatura do webhook (`hub.verify_token`). */
+    STRAVA_WEBHOOK_VERIFY_TOKEN: z.string().min(32).optional(),
+    // ------------------------------------------ Transcrição de áudio (IA entende
     // voz — ADR-009, revisão 2026-09-14, decisão do fundador). CASCATA: OpenAI é a perna
     // PRIMÁRIA de produção (`gpt-4o-mini-transcribe`, mesmo fornecedor já em diligência
     // no ADR-005-R2 — reaproveita `OPENAI_API_KEY` acima, não é relação nova), Groq é o
@@ -383,7 +366,7 @@ export const envSchema = z
     /**
      * Teto de duração aceito por áudio, verificado ANTES de baixar/transcrever (o
      * `audioMessage.seconds` do Baileys já vem no próprio webhook). Acima disso, o AI
-     * Coach pede pro aluno escrever ou resumir — protege custo de STT e o SLA de latência
+     * a IA pede pro aluno escrever ou resumir — protege custo de STT e o SLA de latência
      * do turno (Sofia §5.4: ≤8s até a 1ª bolha), não é limite técnico do provedor.
      */
     AUDIO_TRANSCRIPTION_MAX_DURATION_SECONDS: z.coerce.number().int().min(5).max(600).default(120),
@@ -404,6 +387,20 @@ export const envSchema = z
 
     // -------------------------------------------------------- RAG (US-3.3)
     /**
+     * Liga a busca nos artigos da Base de Conhecimento: a tarefa `conversation.answer_question` passa
+     * a receber até `RAG_TOP_K` trechos como evidência. DESLIGADA por padrão: ligue só depois de
+     * medir o ganho (`pnpm --filter @movivo/api rag:eval` e os casos de avaliação do agente).
+     * Desligar é imediato e devolve o comportamento anterior, sem trechos no prompt.
+     */
+    RAG_ENABLED: envBoolean.default(false),
+    /**
+     * Estende a busca à revisão semanal (mensagens proativas): os analistas de hábitos e de
+     * recuperação passam a receber evidência junto dos números reais do aluno. Só vale com
+     * `RAG_ENABLED=true`. A consulta nasce de rótulos fixos dos sinais (nunca de texto do aluno
+     * nem de dado de saúde), então nada pessoal vai ao provedor de embedding. Desligar é imediato.
+     */
+    RAG_PROACTIVE_ENABLED: envBoolean.default(false),
+    /**
      * Threshold de cosseno do retrieval denso (Victor §4.2). Achado 2026-09-02: o default
      * documentado (0.75) nunca foi medido contra o `text-embedding-3-small` real — só contra
      * o embedding fake de dev, que tem outra distribuição. Com o provedor real habilitado
@@ -413,8 +410,15 @@ export const envSchema = z
      * de produção). 0.25 é calibrado pelo que foi medido de verdade: deixa passar match
      * genuinamente relevante, ainda filtra ruído (pares não relacionados do mesmo modelo
      * ficaram bem abaixo disso). Recalibrar de novo se o corpus real mostrar outro padrão.
+     *
+     * 2026-11-02, corpus real (48 documentos) e `text-embedding-3-small`: com 0,25 o recall era de 91%
+     * e a abstenção em perguntas fora do assunto, de só 43%; 0,30 manteve o recall (91%, nenhum
+     * falso-vazio) e subiu a abstenção para 57%; 0,35 já corta uma pergunta respondível (89%) e 0,45
+     * corta 6. Ficou 0,30 porque a régua é otimista (perguntas escritas olhando o corpus) e perguntas
+     * reais, mais ruidosas, tiram nota: vale errar para o lado do recall, já que trecho irrelevante é
+     * ignorado pelo agente e a falta de trecho custa a embasamento. Recalibrar com perguntas reais.
      */
-    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.25),
+    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.3),
     /** Score mínimo pós-rerank (Victor §4.3). */
     RAG_RERANK_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
     /** Trechos retornados após rerank. */

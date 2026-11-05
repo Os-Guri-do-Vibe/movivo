@@ -28,3 +28,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Criptografia em repouso das colunas de saúde (LGPD Art. 11) — a cifra em si
 -- é implementada na sprint de anamnese; aqui só garantimos a extensão.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- Busca textual do RAG sem acento: o aluno escreve "series de costas" no WhatsApp e o artigo traz
+-- "séries". O `migrate.ts` também garante a extensão (é "trusted": o dono do banco a cria).
+CREATE EXTENSION IF NOT EXISTS unaccent;

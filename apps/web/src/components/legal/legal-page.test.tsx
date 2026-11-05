@@ -37,7 +37,7 @@ describe('página legal', () => {
       <LegalPage
         title="Termos de Uso"
         document={{
-          version: 'terms-2026-09-v1',
+          version: 'terms-2026-10-v2',
           status: 'BETA_VISIBLE',
           effectiveOn: null,
           markdown: 'CNPJ **[CNPJ]** pendente.',

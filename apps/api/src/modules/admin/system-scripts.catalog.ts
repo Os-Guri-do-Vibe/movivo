@@ -13,8 +13,6 @@
  */
 import { QUEUE, type QueueName } from '../jobs/jobs.config';
 
-export type ScriptKind = 'CRON' | 'ROUTINE' | 'TERMINAL';
-
 interface ScriptBase {
   id: string;
   name: string;
@@ -52,51 +50,122 @@ export type ScriptDefinition = CronScript | RoutineScript | TerminalScript;
 
 export const CRON_SCRIPTS: readonly CronScript[] = [
   {
-    id: 'workout-daily-scan',
+    id: 'training-daily-scan',
     kind: 'CRON',
-    name: 'Link diário de treino',
+    name: 'Link diário do treino',
     description:
-      'Envia por WhatsApp o link do treino do dia a cada aluno com protocolo ativo. Quando o último treino previsto ficou sem registro, a mesma mensagem leva uma pergunta curta sobre ele (no máximo 2 por semana, nunca em dias seguidos), em um balão separado. No mesmo horário, abre o alerta para o profissional CREF de quem faltou à 3ª sessão seguida ou a mais de 60% das sessões. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
-    queue: QUEUE.workoutDaily,
-    schedulerId: 'daily-workout-scan',
+      'Envia por WhatsApp o link do treino do dia a cada aluno com plano ativo e marca como perdidas as sessões que ficaram para trás. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
+    queue: QUEUE.trainingDaily,
+    schedulerId: 'daily-training-scan',
     cron: '* * * * * (UTC)',
     schedule: 'Todo dia às 04:00 (fuso de cada aluno)',
     runEffect:
-      'Enfileira agora o envio do link de treino de hoje aos alunos elegíveis que ainda não o receberam hoje. Quem já recebeu não recebe de novo. A entrega em si acontece na fila do WhatsApp.',
+      'Fecha agora as sessões vencidas e envia o link de hoje aos alunos elegíveis que ainda não o receberam. Quem já recebeu não recebe de novo.',
     resultLabels: {
       eligible: 'elegíveis',
       sent: 'na fila de envio',
-      asked: 'com a pergunta sobre o treino sem registro',
-      alerted: 'alertas de frequência abertos',
+      missed: 'sessões marcadas como perdidas',
     },
   },
   {
-    id: 'checkin-weekly-scan',
+    id: 'plan-rollover-scan',
     kind: 'CRON',
-    name: 'Check-in semanal',
+    name: 'Agenda de treino sempre à frente',
     description:
-      'Convida o aluno por WhatsApp a responder o check-in da semana, que ajusta o protocolo. A varredura roda a cada minuto e dispara no domingo, no horário do fuso de cada aluno.',
-    queue: QUEUE.checkinWeekly,
-    schedulerId: 'weekly-checkin-scan',
+      'Completa a agenda dos alunos com plano ativo: mantém a semana corrente e a seguinte agendadas (o plano publica só duas semanas) e aplica a semana leve que a fase prevê. A varredura roda a cada minuto e dispara às 03:00 do fuso de cada aluno.',
+    queue: QUEUE.planRollover,
+    schedulerId: 'plan-rollover-scan',
     cron: '* * * * * (UTC)',
-    schedule: 'Domingo às 18:00 (fuso de cada aluno)',
+    schedule: 'Todo dia às 03:00 (fuso de cada aluno)',
     runEffect:
-      'Enfileira agora o convite de check-in aos alunos elegíveis que ainda não têm o check-in desta semana. Quem já foi convidado não recebe outro. A entrega em si acontece na fila do WhatsApp.',
+      'Agenda agora as semanas que ainda não têm sessões para os alunos elegíveis. Semanas já agendadas não mudam.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'sessões agendadas' },
+  },
+  {
+    id: 'specialist-follow-up-scan',
+    kind: 'CRON',
+    name: 'Revisão semanal dos especialistas',
+    description:
+      'No domingo à noite, junto da revisão semanal do progresso, o treinador lê a semana de treino do aluno (adesão, esforço, carga, prontidão e progressão) e ajusta o protocolo quando os dados pedem (19:15); a nutricionista lê a semana alimentar e ajusta o plano (19:30). A persona conversa com o aluno. A varredura roda a cada minuto e dispara no fuso de cada aluno.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'specialist-follow-up-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Domingo, treino às 19:15 e nutrição às 19:30 (fuso de cada aluno)',
+    runEffect:
+      'Enfileira agora o acompanhamento de treino e de nutrição dos alunos elegíveis. Quem já foi acompanhado não recebe de novo no mesmo dia.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'na fila' },
+  },
+  {
+    id: 'meal-routine-scan',
+    kind: 'CRON',
+    name: 'Rotina alimentar no WhatsApp',
+    description:
+      'Lembra o aluno de registrar cada refeição no horário dela, com a primeira opção do cardápio; fecha o dia com o resumo de calorias, macros e água quando tudo foi registrado ou às 23:30; e, se o registro some por dois dias ou mais, a especialista de hábitos puxa conversa às 14:00. A varredura roda a cada minuto e dispara no fuso de cada aluno.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'meal-routine-scan',
+    cron: '* * * * * (UTC)',
+    schedule:
+      'Lembretes 07:30, 10:00, 12:30, 15:30, 19:30 e 21:30; resumo do dia a cada 15 min das 19:00 às 23:30; busca ativa às 14:00 (fuso de cada aluno)',
+    runEffect:
+      'Varre agora os alunos que estão em horário de lembrete, de resumo ou de busca ativa neste minuto. Quem já recebeu a mensagem do dia não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', queued: 'na fila' },
+  },
+  {
+    id: 'care-scan',
+    kind: 'CRON',
+    name: 'Cuidado diário do aluno',
+    description:
+      'Três rotinas por aluno no relógio local dele. Às 11:00, a escada de silêncio: quem fica 3, 6, 10 e 21 dias sem dar sinal recebe, a cada degrau, um contato com abordagem escolhida pelo especialista de hábitos (a equipe é avisada a partir do 10º dia), e quem está ativo recebe o lembrete do meio da semana do passo combinado. Às 21:00, o estudo da noite: os especialistas leem o dia inteiro do aluno (check-in, relatos do chat, treino, alimentação, peso). Às 23:50, fecha o estudo do dia. No máximo um contato proativo por dia.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'care-scan',
+    cron: '* * * * * (UTC)',
+    schedule:
+      'Todo dia: 11:00 silêncio e combinado, 21:00 estudo da noite, 23:50 fecho do dia (fuso de cada aluno)',
+    runEffect:
+      'Enfileira agora as três rotinas para todos os alunos elegíveis, ignorando o horário. Quem já recebeu contato proativo hoje não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'na fila' },
+  },
+  {
+    id: 'cycle-reassessment-scan',
+    kind: 'CRON',
+    name: 'Reavaliação de fim de ciclo',
+    description:
+      'No dia em que o protocolo vence, envia ao aluno o link do formulário de reavaliação (nova avaliação corporal, rotina, objetivos e como foi a fase). Com a resposta, os agentes comparam o começo com o agora e montam o próximo ciclo de treino e alimentação para a Fila do Profissional. A varredura roda a cada minuto e dispara às 16:00 do fuso de cada aluno.',
+    queue: QUEUE.cycleReassessment,
+    schedulerId: 'cycle-reassessment-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Todo dia às 16:00 (fuso de cada aluno)',
+    runEffect:
+      'Abre agora a reavaliação dos alunos cujo ciclo venceu e ainda não receberam o link. Quem já recebeu não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', opened: 'reavaliações abertas', resumed: 'retomadas' },
+  },
+  {
+    id: 'weekly-check-in-scan',
+    kind: 'CRON',
+    name: 'Check-in adaptativo semanal',
+    description:
+      'Abre o check-in da semana (perguntas escolhidas pelos sinais do aluno) e envia o link por WhatsApp. A varredura roda a cada minuto e dispara no domingo, às 15:00 do fuso de cada aluno (o aluno tem a tarde e o começo da noite para responder antes da revisão semanal das 19:00).',
+    queue: QUEUE.checkIn,
+    schedulerId: 'weekly-check-in-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Domingo às 15:00 (fuso de cada aluno)',
+    runEffect:
+      'Abre agora o check-in da semana dos alunos elegíveis que ainda não têm um e envia o convite. Quem já recebeu nesta semana não recebe outro.',
     resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
   },
   {
-    id: 'protocol-renewal-scan',
+    id: 'weekly-review-scan',
     kind: 'CRON',
-    name: 'Renovação de mesociclo',
+    name: 'Revisão semanal do progresso',
     description:
-      'Detecta protocolos com mesociclo vencido e envia o convite para o formulário de renovação. Reenvia o convite quando o anterior expirou.',
-    queue: QUEUE.protocolRenewalScan,
-    schedulerId: 'protocol-renewal-scan',
-    cron: '0 9 * * * (America/Sao_Paulo)',
-    schedule: 'Todo dia às 09:00 (Brasília)',
+      'Revisa a semana que fechou de cada aluno: mede adesão, esforço, carga, peso e registro alimentar, e só chama o modelo quando há sinal de atenção. Explicações entram como hipótese; as ações passam pelo motor de políticas. A varredura roda a cada minuto e dispara no domingo, às 19:00 do fuso de cada aluno (a semana de segunda a domingo está fechando).',
+    queue: QUEUE.weeklyReview,
+    schedulerId: 'weekly-review-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Domingo às 19:00 (fuso de cada aluno)',
     runEffect:
-      'Varre agora os protocolos vencidos e envia o convite de renovação a quem ainda não tem um convite válido.',
-    resultLabels: { created: 'convites na fila de envio' },
+      'Enfileira agora a revisão da semana anterior de todos os alunos elegíveis que ainda não foram revisados. Quem já foi revisado nesta semana não é revisado de novo.',
+    resultLabels: { eligible: 'elegíveis', queued: 'revisões na fila' },
   },
   {
     id: 'subscription-period-scan',
@@ -112,6 +181,20 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
       'Varre agora as assinaturas com período vencido, encerra o acesso de quem não renovou e envia o aviso de fim de plano.',
     resultLabels: { expired: 'encerradas' },
   },
+  {
+    id: 'outbox-relay-scan',
+    kind: 'CRON',
+    name: 'Publicação de eventos de domínio',
+    description:
+      'Publica na fila os eventos de domínio gravados pelas mudanças de estado (plano publicado, treino registrado, sinal de segurança…), para que os consumidores reajam. Cada mudança já pede publicação imediata; esta varredura recolhe o que ficou para trás.',
+    queue: QUEUE.outboxRelay,
+    schedulerId: 'outbox-relay-scan',
+    cron: 'a cada 10 s',
+    schedule: 'A cada 10 segundos',
+    runEffect:
+      'Publica agora os eventos ainda não publicados. Evento já publicado não sai de novo.',
+    resultLabels: { published: 'eventos publicados' },
+  },
 ];
 
 export const ROUTINE_SCRIPTS: readonly RoutineScript[] = [
@@ -126,11 +209,21 @@ export const ROUTINE_SCRIPTS: readonly RoutineScript[] = [
       'Cria no livro-caixa as despesas recorrentes que ainda não foram lançadas. É idempotente: rodar de novo não duplica lançamento.',
   },
   {
+    id: 'complementary-anamnesis-campaign',
+    kind: 'ROUTINE',
+    name: 'Campanha da anamnese complementar',
+    description:
+      'Convida os alunos ativos que ainda não aceitaram os textos vigentes a revisar o aceite e responder as perguntas novas (plano de treino e de alimentação). Quem revogou o consentimento de saúde e quem já tem um convite válido ficam de fora.',
+    schedule: null,
+    runEffect:
+      'Envia agora, pelo WhatsApp, um link individual para cada aluno elegível. Rodar de novo só alcança quem ainda não recebeu um convite válido.',
+  },
+  {
     id: 'exercise-catalog-refresh',
     kind: 'ROUTINE',
     name: 'Atualização do catálogo de exercícios',
     description:
-      'Recarrega do banco o catálogo de exercícios usado pela geração e pela validação de protocolos.',
+      'Recarrega do banco o catálogo de exercícios usado no planejamento e na validação das sessões.',
     schedule: 'A cada 5 minutos (timer interno da API)',
     runEffect: 'Recarrega agora o catálogo de exercícios em memória. Não envia mensagem a ninguém.',
   },
@@ -142,101 +235,64 @@ const ARGUMENT_REQUIRED = 'Exige um argumento (telefone, e-mail ou ID) — só n
 
 export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
   {
-    id: 'check-protocol-queue-state',
+    id: 'eval',
     kind: 'TERMINAL',
-    name: 'Estado do protocolo na fila',
+    name: 'Avaliação das tarefas de agente',
     description:
-      'Leitura pontual: mostra status, aprovação e urgência de revisão do protocolo de um aluno.',
-    file: 'apps/api/src/scripts/check-protocol-queue-state.ts',
-    command: 'node --enable-source-maps dist/scripts/check-protocol-queue-state.js <telefone>',
+      'Roda os casos de referência de uma tarefa de agente com o modelo real, grava o resultado em eval_runs e mostra caso a caso o que reprovou. É o teste exigido antes de publicar metodologia, trocar o modelo de um nível ou mudar um prompt.',
+    file: 'apps/api/src/scripts/eval.ts',
+    command: 'pnpm --filter @movivo/api run eval --task <id-da-tarefa>',
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
-    id: 'diagnose-protocol-fallback',
+    id: 'make-vision-fixtures',
     kind: 'TERMINAL',
-    name: 'Investigar protocolo em fallback',
+    name: 'Gerar imagens sintéticas de avaliação da visão',
     description:
-      'Reexecuta a geração de protocolo de um aluno, sem gravar, para explicar por que caiu no template de fallback.',
-    file: 'apps/api/src/scripts/diagnose-protocol-fallback.ts',
-    command: 'node --enable-source-maps dist/scripts/diagnose-protocol-fallback.js <telefone>',
+      'Redesenha as telas sintéticas (prints de relógio e uma tela que não é treino) usadas nos casos de avaliação da leitura de imagem e regrava o arquivo de fixtures. Só é preciso rodar se os valores esperados mudarem.',
+    file: 'apps/api/scripts/make-vision-fixtures.mjs',
+    command: 'node apps/api/scripts/make-vision-fixtures.mjs',
+    notRunnableReason: 'Reescreve um arquivo do repositório — só no terminal.',
+  },
+  {
+    id: 'import-taco',
+    kind: 'TERMINAL',
+    name: 'Importar a tabela TACO',
+    description:
+      'Importa (ou atualiza) a Tabela Brasileira de Composição de Alimentos a partir do CSV exportado da planilha oficial. É a base de cálculo de calorias, macros e micronutrientes dos registros alimentares.',
+    file: 'apps/api/src/scripts/import-taco.ts',
+    command: 'node --enable-source-maps dist/scripts/import-taco.js <arquivo.csv>',
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
-    id: 'enqueue-protocol-auto-release',
+    id: 'rag-eval',
     kind: 'TERMINAL',
-    name: 'Reenfileirar liberação automática',
+    name: 'Avaliar a busca nos artigos (RAG)',
     description:
-      'Enfileira o job de liberação automática que faltou para um protocolo de revisão opcional.',
-    file: 'apps/api/src/scripts/enqueue-protocol-auto-release.ts',
-    command: 'node --enable-source-maps dist/scripts/enqueue-protocol-auto-release.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
+      'Roda o conjunto de perguntas contra os artigos indexados e mede recall e abstenção em vários pisos de similaridade. Serve para calibrar RAG_MIN_COSINE e decidir se vale ligar RAG_ENABLED. Só vale com o embedding real.',
+    file: 'apps/api/src/scripts/rag-eval.ts',
+    command:
+      'cd /opt/movivo && docker compose exec api node --enable-source-maps dist/scripts/rag-eval.js --sweep 0.2,0.3,0.4,0.5',
+    notRunnableReason: OPERATOR_ONLY,
   },
   {
-    id: 'generate-workout-magic-link',
+    id: 'build-default-knowledge',
+    kind: 'TERMINAL',
+    name: 'Gerar os artigos padrão da Base de Conhecimento',
+    description:
+      'Gera o manifesto (hashes e vetores) dos artigos de assets/knowledge/articles/, que o deploy carrega sozinho. Só roda no ambiente de desenvolvimento, com o embedding real, e o resultado vai para o commit. Reaproveita o que não mudou.',
+    file: 'apps/api/src/scripts/build-default-knowledge.ts',
+    command: 'pnpm --filter @movivo/api knowledge:build-defaults',
+    notRunnableReason: OPERATOR_ONLY,
+  },
+  {
+    id: 'generate-training-magic-link',
     kind: 'TERMINAL',
     name: 'Gerar link mágico de treino',
     description:
       'Gera o link de acesso ao treino de um aluno sem esperar o envio diário (teste manual).',
-    file: 'apps/api/src/scripts/generate-workout-magic-link.ts',
-    command: 'pnpm exec tsx src/scripts/generate-workout-magic-link.ts <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
-    id: 'redteam-prompt-injection',
-    kind: 'TERMINAL',
-    name: 'Red team de prompt injection',
-    description:
-      'Ataca o modelo real com casos de injeção de prompt (dados sintéticos) e mede a taxa de aprovação. Consome tokens.',
-    file: 'apps/api/src/scripts/redteam-prompt-injection.ts',
-    command: 'REDTEAM_PROVIDER=openai pnpm exec tsx src/scripts/redteam-prompt-injection.ts',
-    notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
-  },
-  {
-    id: 'eval-agenda',
-    kind: 'TERMINAL',
-    name: 'Avaliação da agenda flexível',
-    description:
-      'Roda 50 frases de aluno (dados sintéticos) pelo leitor de pedidos de agenda e pelo classificador de intenção, com o modelo real, e mede o acerto. Consome tokens.',
-    file: 'apps/api/src/scripts/eval-agenda.ts',
-    command: 'EVAL_PROVIDER=deepseek pnpm exec tsx src/scripts/eval-agenda.ts',
-    notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
-  },
-  {
-    id: 'reenqueue-blocked-parq',
-    kind: 'TERMINAL',
-    name: 'Reenfileirar PAR-Q bloqueado',
-    description:
-      'Migração única: reenfileira a geração de protocolo dos alunos presos no antigo gate de PAR-Q. Aceita --dry-run.',
-    file: 'apps/api/src/scripts/reenqueue-blocked-parq.ts',
-    command: 'pnpm exec tsx src/scripts/reenqueue-blocked-parq.ts --dry-run',
-    notRunnableReason: OPERATOR_ONLY,
-  },
-  {
-    id: 'render-sample-pdf',
-    kind: 'TERMINAL',
-    name: 'PDF de amostra do protocolo',
-    description: 'Gera um PDF de protocolo de exemplo para conferir mudanças visuais.',
-    file: 'apps/api/src/scripts/render-sample-pdf.ts',
-    command: 'pnpm exec tsx src/scripts/render-sample-pdf.ts <saida.pdf>',
-    notRunnableReason: 'Grava um arquivo local — só no terminal.',
-  },
-  {
-    id: 'reprocess-protocol-fallback',
-    kind: 'TERMINAL',
-    name: 'Reprocessar protocolo em fallback',
-    description:
-      'Regera o conteúdo de um protocolo que nasceu como fallback e ainda não foi assinado. Segue pendente de assinatura CREF.',
-    file: 'apps/api/src/scripts/reprocess-protocol-fallback.ts',
-    command: 'node --enable-source-maps dist/scripts/reprocess-protocol-fallback.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
-    id: 'resend-protocol-delivery',
-    kind: 'TERMINAL',
-    name: 'Reenviar entrega do protocolo',
-    description: 'Reenvia por WhatsApp a entrega do protocolo ativo de um aluno.',
-    file: 'apps/api/src/scripts/resend-protocol-delivery.ts',
-    command: 'pnpm exec tsx src/scripts/resend-protocol-delivery.ts <telefone>',
+    file: 'apps/api/src/scripts/generate-training-magic-link.ts',
+    command: 'pnpm exec tsx src/scripts/generate-training-magic-link.ts <telefone>',
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
@@ -279,15 +335,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: OPERATOR_ONLY,
   },
   {
-    id: 'db-seed-workout-demo',
-    kind: 'TERMINAL',
-    name: 'Seed de treino de demonstração',
-    description: 'Cria um aluno e um treino de demonstração para testar o diário de treino.',
-    file: 'apps/api/src/core/database/seed-workout-demo.ts',
-    command: 'pnpm --filter @movivo/api db:seed:workout',
-    notRunnableReason: 'Cria dados de demonstração — só em ambiente local.',
-  },
-  {
     id: 'db-backfill-transitions',
     kind: 'TERMINAL',
     name: 'Backfill de transições de status',
@@ -296,16 +343,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     file: 'apps/api/src/core/database/backfill-status-transitions.ts',
     command: 'pnpm --filter @movivo/api db:backfill-transitions',
     notRunnableReason: OPERATOR_ONLY,
-  },
-  {
-    id: 'build-share-card-assets',
-    kind: 'TERMINAL',
-    name: 'Regerar assets do card de compartilhamento',
-    description:
-      'Regera as máscaras e ilustrações musculares do card de treino quando a biblioteca de origem muda.',
-    file: 'apps/api/scripts/build-share-card-assets.mjs',
-    command: 'node apps/api/scripts/build-share-card-assets.mjs',
-    notRunnableReason: 'Grava arquivos no repositório — só no terminal.',
   },
   {
     id: 'build-web',

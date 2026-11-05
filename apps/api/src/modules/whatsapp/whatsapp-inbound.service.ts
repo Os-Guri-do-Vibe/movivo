@@ -33,20 +33,21 @@ import {
   type AudioTranscriptionPort,
 } from '../../core/audio/audio-transcription.port';
 import { AppConfigService } from '../../core/config';
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import {
+  CYCLE_INBOUND_EVENT,
+  MEDIA_INBOUND_EVENT,
   SUBSCRIPTION_INBOUND_EVENT,
-  WORKOUT_INBOUND_EVENT,
-  type CheckinInboundEvent,
-  type SubscriptionInboundEvent,
+  WEARABLE_INBOUND_EVENT,
+  type InboundMediaEvent,
+  type InboundTextEvent,
 } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
@@ -63,10 +64,10 @@ import {
 
 /**
  * Janela de debounce. Concatena a rajada do usuário num só job — ex.: "oi" / "tudo bem?" /
- * "bom dia" mandados em bolhas separadas viram um único turno do AI Coach. Rafael §6
+ * "bom dia" mandados em bolhas separadas viram um único turno da IA. Rafael §6
  * recomendava 3-5s; aumentado para 7s por decisão do fundador (achado 2026-09-12) e para 15s
  * em 2026-10-16, depois de conversas reais em que o aluno escrevia em pedaços (uma reação, e
- * só então a explicação) e o Coach respondia ao primeiro pedaço antes de ele terminar. A
+ * só então a explicação) e a IA respondia ao primeiro pedaço antes de ele terminar. A
  * janela é fixa, contada da primeira mensagem: não reinicia a cada mensagem nova.
  */
 const DEBOUNCE_MS = 15_000;
@@ -79,7 +80,6 @@ const BATCH_TTL_SECONDS = 120;
  * qualquer reconexão plausível.
  */
 const NONCE_TTL_SECONDS = 86_400;
-const INBOUND_ROUTE_TTL_SECONDS = 60;
 
 /**
  * Orçamento de mensagens por titular (Sato: "o controle que realmente importa"). Vale para
@@ -90,6 +90,36 @@ const USER_RATE_LIMIT = 30;
 const USER_RATE_WINDOW_SECONDS = 300;
 
 export const HEALTH_CONSENT_REVOCATION_PHRASE = 'REVOGAR CONSENTIMENTO DE SAUDE';
+
+/** Foto e PDF aceitos (exames). O tipo é conferido de novo pelos bytes depois do download. */
+const MEDIA_TYPES: Readonly<Record<string, InboundMediaEvent['mediaType']>> = {
+  'application/pdf': 'application/pdf',
+  'image/jpeg': 'image/jpeg',
+  'image/png': 'image/png',
+  'image/webp': 'image/webp',
+};
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MEDIA_UNSUPPORTED_MESSAGE =
+  'Por aqui eu consigo ler foto da refeição e exames em PDF (até 8 MB) ou foto. Pode mandar nesse formato?';
+const MEDIA_FAILED_MESSAGE =
+  'Não consegui abrir esse arquivo. Pode mandar de novo em PDF ou uma foto nítida?';
+
+/** Assinatura dos primeiros bytes de cada tipo aceito. */
+function hasSignature(bytes: Buffer, mediaType: InboundMediaEvent['mediaType']): boolean {
+  switch (mediaType) {
+    case 'application/pdf':
+      return bytes.toString('latin1', 0, 5) === '%PDF-';
+    case 'image/jpeg':
+      return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case 'image/png':
+      return bytes.toString('latin1', 1, 4) === 'PNG';
+    case 'image/webp':
+      return (
+        bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP'
+      );
+  }
+}
 
 /**
  * Contrato do job enfileirado em `ai-response`, consumido pelo `AIResponseWorker` (US-3.5).
@@ -123,10 +153,9 @@ export class WhatsappInboundService {
     private readonly queues: QueueManager,
     private readonly healthConsent: HealthConsentService,
     private readonly events: DomainEventBus,
-    private readonly queueEvents: DashboardQueueEventsService,
     private readonly config: AppConfigService,
     private readonly cipher: HealthCipherService,
-    private readonly coachAttendance: CoachAttendanceService,
+    private readonly attendance: AttendanceService,
     private readonly conversationEvents: ConversationEventsService,
     private readonly mirror: WhatsappMirrorService,
     private readonly logger: PinoLogger,
@@ -237,6 +266,19 @@ export class WhatsappInboundService {
       return;
     }
 
+    // Foto ou PDF (exame): caminho próprio, depois do nonce, do titular e do orçamento.
+    if (message.media) {
+      await this.processMedia(
+        message.media,
+        message.messageId,
+        userId,
+        provider,
+        correlationId,
+        message.text ?? null,
+      );
+      return;
+    }
+
     // Mensagem de voz (US audio, 2026-09-14): resolve `text` transcrevendo AGORA — só
     // depois do nonce/titular/orçamento acima, porque transcrição é custo real de
     // terceiro (nunca pago por uma entrega ainda não autenticada ou fora de orçamento).
@@ -252,14 +294,13 @@ export class WhatsappInboundService {
     const isRevocation =
       message.text !== undefined ? isTextRevocation : this.isHealthConsentRevocation(text);
 
-    // .slice(0, 40): igual à correção de `notifyAudioFallback` — o hash cheio (64 chars)
+    // .slice(0, 40): igual à correção de `notifyFallback` — o hash cheio (64 chars)
     // somado ao maior prefixo daqui ("health-consent-inactive-", 24 chars) estourava o
     // limite de 64 chars do RedisKeyBuilder e derrubava a notificação de consentimento.
     const consentCommandId = this.hash(messageId).slice(0, 40);
 
     if (isRevocation) {
       await this.healthConsent.revokeForUser(userId);
-      this.queueEvents.emit('consent');
       await this.queues.enqueue(
         QUEUE.whatsappOutbound,
         'health-consent-revoked',
@@ -281,7 +322,7 @@ export class WhatsappInboundService {
     // Cancelar ou gerenciar a assinatura é assunto de cobrança, não de saúde: responde mesmo sem
     // consentimento de saúde ativo e nunca chega à IA. O titular já foi autenticado pelo canal.
     const subscriptionHandled =
-      (await this.events.request<SubscriptionInboundEvent, boolean>(SUBSCRIPTION_INBOUND_EVENT, {
+      (await this.events.request<InboundTextEvent, boolean>(SUBSCRIPTION_INBOUND_EVENT, {
         userId,
         text,
         messageKey: consentCommandId,
@@ -294,26 +335,26 @@ export class WhatsappInboundService {
       return;
     }
 
+    // Comandos tratados sem LLM: registro do ciclo menstrual (a revogação passa mesmo sem
+    // consentimento de saúde ativo, direito do titular) e conexão com o Strava.
+    for (const event of [CYCLE_INBOUND_EVENT, WEARABLE_INBOUND_EVENT]) {
+      const handled =
+        (await this.events.request<InboundTextEvent, boolean>(event, {
+          userId,
+          text,
+          messageKey: consentCommandId,
+        })) ?? false;
+      if (handled) {
+        this.logger.info(
+          { event: 'command_inbound_handled', command: event, userId, correlationId },
+          'comando tratado sem LLM',
+        );
+        return;
+      }
+    }
+
     if (!(await this.healthConsent.hasActiveForUser(userId))) {
-      await this.queues.enqueue(
-        QUEUE.whatsappOutbound,
-        'health-consent-inactive',
-        {
-          userId,
-          type: 'CONSENT_STATUS',
-          dedupeId: `health-consent-inactive-${consentCommandId}`,
-          text: 'Seu consentimento para uso de dados de saude nao esta ativo. Esta mensagem nao foi processada. Para exercer seus direitos ou solicitar orientacao, contate o Encarregado de Dados indicado na Politica de Privacidade.',
-        },
-        { jobId: `health-consent-inactive-${consentCommandId}` },
-      );
-      this.logger.info(
-        {
-          event: 'health_processing_refused_no_consent',
-          userId,
-          correlationId,
-        },
-        'inbound recusado por ausencia de consentimento vigente',
-      );
+      await this.notifyConsentInactive(userId, consentCommandId, correlationId);
       return;
     }
 
@@ -325,39 +366,16 @@ export class WhatsappInboundService {
       return;
     }
 
-    const routeKey = this.keys.forUser(userId, 'inbound-route', this.hash(messageId));
-    await this.redis.set(
-      routeKey,
-      JSON.stringify({ text, buttonId: message.buttonId }),
-      'EX',
-      INBOUND_ROUTE_TTL_SECONDS,
-    );
-    // Cadeia determinística (US-8.1): só o treino intercepta botão determinístico hoje — o
-    // check-in semanal virou formulário web (achado 2026-09-13), sem botão pra rotear aqui.
-    const handled =
-      (await this.events.request<CheckinInboundEvent, boolean>(WORKOUT_INBOUND_EVENT, {
-        userId,
-        routeKey,
-      })) ?? false;
-    if (handled) {
-      this.logger.info(
-        { event: 'workout_inbound_handled', userId, correlationId },
-        'resposta determinística tratada sem LLM',
-      );
-      return;
-    }
-    await this.redis.del(routeKey);
-
     // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
     await this.trackSecondMessageSameDay(userId, correlationId);
 
     // Atendimento automático pausado pelo profissional (aba "Conversas"): a mensagem fica no
     // histórico para ele ler e responder, e a IA não é acionada. Vem DEPOIS de revogação,
     // consentimento, assinatura e treino de propósito — esses seguem valendo com a pausa.
-    if (await this.coachAttendance.isPaused(userId)) {
+    if (await this.attendance.isPaused(userId)) {
       await this.recordInboundWhilePaused(userId, text);
       this.logger.info(
-        { event: 'inbound_held_coach_paused', userId, correlationId },
+        { event: 'inbound_held_attendance_paused', userId, correlationId },
         'atendimento automático pausado — mensagem registrada, IA não acionada',
       );
       return;
@@ -383,7 +401,7 @@ export class WhatsappInboundService {
         correlationId,
         enqueuedAt: startedAt,
       };
-      await this.queues.enqueue(QUEUE.aiResponse, 'coach-response', job, { delay: DEBOUNCE_MS });
+      await this.queues.enqueue(QUEUE.aiResponse, 'agent-response', job, { delay: DEBOUNCE_MS });
       this.logger.info(
         {
           event: 'webhook_enqueued',
@@ -409,7 +427,7 @@ export class WhatsappInboundService {
    * atrás de um gate de HEALTH PRÓPRIO por fornecedor, sempre separado de
    * `LLM_OPENAI_HEALTH_DATA_APPROVED`.
    *
-   * `null` = descartado. Toda saída `null` já avisou o aluno por `notifyAudioFallback`
+   * `null` = descartado. Toda saída `null` já avisou o aluno por `notifyFallback`
    * antes de retornar — ninguém fica esperando uma resposta que nunca vai chegar.
    *
    * A EvolutionAPI entrega referências de áudio para transcrição após os gates.
@@ -426,7 +444,7 @@ export class WhatsappInboundService {
 
     const maxDuration = this.config.audioTranscription.maxDurationSeconds;
     if (audio.durationSeconds !== undefined && audio.durationSeconds > maxDuration) {
-      await this.notifyAudioFallback(
+      await this.notifyFallback(
         userId,
         message.messageId,
         'Esse áudio é mais longo do que eu consigo ouvir por aqui — pode escrever ou mandar um áudio mais curto?',
@@ -445,7 +463,7 @@ export class WhatsappInboundService {
     }
 
     if (!isAudioTranscriptionConfigured(this.config.audioTranscription)) {
-      await this.notifyAudioFallback(
+      await this.notifyFallback(
         userId,
         message.messageId,
         'Ainda não consigo ouvir áudio por aqui — pode escrever, por favor?',
@@ -459,7 +477,7 @@ export class WhatsappInboundService {
 
     const instanceName = this.evolutionTransport.lastKnownInstanceName();
     if (!instanceName) {
-      await this.notifyAudioFallback(
+      await this.notifyFallback(
         userId,
         message.messageId,
         'Não consegui ouvir esse áudio agora — pode escrever, por favor?',
@@ -509,7 +527,7 @@ export class WhatsappInboundService {
       );
       return transcript;
     } catch (error) {
-      await this.notifyAudioFallback(
+      await this.notifyFallback(
         userId,
         message.messageId,
         'Não consegui entender esse áudio — pode tentar de novo ou escrever?',
@@ -529,22 +547,18 @@ export class WhatsappInboundService {
   }
 
   /**
-   * Avisa o aluno quando um áudio não pôde virar resposta — reusa `COACH_MESSAGE` (texto
+   * Avisa o aluno quando um áudio ou arquivo não pôde virar resposta — reusa `CONVERSATION_MESSAGE` (texto
    * livre, sem cabeçalho especial, ver `whatsapp-outbound.worker.ts::buildText`).
    * `dedupeId` a partir do `messageId` evita duplicar o aviso se o BullMQ reentregar o job.
    */
-  private async notifyAudioFallback(
-    userId: string,
-    messageId: string,
-    text: string,
-  ): Promise<void> {
+  private async notifyFallback(userId: string, messageId: string, text: string): Promise<void> {
     // "audio-fallback-" (15) + 48 = 63 chars, dentro do limite de 64 do RedisKeyBuilder
     // (SEGMENT_PATTERN) — hash cheio (64 chars) estourava o segmento e derrubava o job.
     const dedupeId = `audio-fallback-${this.hash(messageId).slice(0, 48)}`;
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'audio-transcription-fallback',
-      { userId, type: 'COACH_MESSAGE', dedupeId, text },
+      { userId, type: 'CONVERSATION_MESSAGE', dedupeId, text },
       { jobId: dedupeId },
     );
   }
@@ -638,6 +652,89 @@ export class WhatsappInboundService {
   /** Hash do messageId → segmento de chave Redis válido. */
   private hash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+  }
+
+  private async notifyConsentInactive(
+    userId: string,
+    commandId: string,
+    correlationId: string,
+  ): Promise<void> {
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      'health-consent-inactive',
+      {
+        userId,
+        type: 'CONSENT_STATUS',
+        dedupeId: `health-consent-inactive-${commandId}`,
+        text: 'Seu consentimento para uso de dados de saude nao esta ativo. Esta mensagem nao foi processada. Se voce recebeu o convite para atualizar seu cadastro, conclua o formulario do link para voltar a receber seu plano. Para exercer seus direitos, contate o Encarregado de Dados indicado na Politica de Privacidade.',
+      },
+      { jobId: `health-consent-inactive-${commandId}` },
+    );
+    this.logger.info(
+      { event: 'health_processing_refused_no_consent', userId, correlationId },
+      'inbound recusado por ausencia de consentimento vigente',
+    );
+  }
+
+  /**
+   * Foto ou PDF: baixa só depois dos gates (consentimento de saúde e atendimento ativo), confere
+   * tipo e tamanho pelo conteúdo (não pelo que o envelope diz) e entrega ao consumidor de exames.
+   */
+  private async processMedia(
+    media: NonNullable<NormalizedInbound['media']>,
+    messageId: string,
+    userId: string,
+    provider: InboundProvider,
+    correlationId: string,
+    caption: string | null,
+  ): Promise<void> {
+    const commandId = this.hash(messageId).slice(0, 40);
+    if (!(await this.healthConsent.hasActiveForUser(userId))) {
+      await this.notifyConsentInactive(userId, commandId, correlationId);
+      return;
+    }
+    // Atendimento pausado: o profissional já vê a mídia no espelho da conversa.
+    if (await this.attendance.isPaused(userId)) return;
+
+    const mediaType = MEDIA_TYPES[media.mimetype.split(';')[0]?.trim().toLowerCase() ?? ''];
+    const limit = mediaType === 'application/pdf' ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
+    if (!mediaType || (media.fileLength ?? 0) > limit) {
+      await this.notifyFallback(userId, messageId, MEDIA_UNSUPPORTED_MESSAGE);
+      return;
+    }
+    try {
+      const instanceName = this.evolutionTransport.lastKnownInstanceName();
+      if (!instanceName) throw new Error('instância da EvolutionAPI desconhecida');
+      const { base64 } = await this.evolutionTransport.downloadMedia(instanceName, media.mediaKey);
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length === 0 || bytes.length > limit || !hasSignature(bytes, mediaType)) {
+        throw new Error('conteúdo não confere com o tipo declarado');
+      }
+      const handled = await this.events.request<InboundMediaEvent, boolean>(MEDIA_INBOUND_EVENT, {
+        userId,
+        messageKey: commandId,
+        mediaType,
+        bytes,
+        caption,
+      });
+      if (!handled) throw new Error('sem consumidor de mídia');
+      this.logger.info(
+        { event: 'media_inbound_handled', provider, userId, correlationId, mediaType },
+        'arquivo recebido e encaminhado',
+      );
+    } catch (error) {
+      await this.notifyFallback(userId, messageId, MEDIA_FAILED_MESSAGE);
+      this.logger.warn(
+        {
+          event: 'media_inbound_failed',
+          provider,
+          userId,
+          correlationId,
+          err: error instanceof Error ? error.message : 'erro desconhecido',
+        },
+        'download ou entrega de arquivo falhou',
+      );
+    }
   }
 
   private isHealthConsentRevocation(text: string): boolean {

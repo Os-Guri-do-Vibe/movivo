@@ -31,25 +31,25 @@ export function buildFaq(plans: readonly LandingPlan[] = LANDING_PLANS): FaqItem
       id: 'o-que-e',
       question: 'O que é a MOVIVO?',
       answer:
-        'A MOVIVO é uma plataforma de orientação de treino individualizada pelo WhatsApp. Ela combina tecnologia e inteligência artificial com a metodologia e a supervisão de um profissional de Educação Física registrado no CREF.',
+        'A MOVIVO é uma assessoria de movimento, performance e bem-estar pelo WhatsApp. Ela combina a orientação de profissionais registrados nos seus conselhos, ciência e tecnologia (com inteligência artificial como ferramenta de apoio) para ajudar cada pessoa a evoluir com consistência, a partir do próprio ponto de partida.',
     },
     {
       id: 'como-funciona',
       question: 'Como funciona a MOVIVO?',
       answer:
-        'Você responde a uma anamnese com seus objetivos, rotina, experiência, disponibilidade e limitações. Com essas informações, a MOVIVO estrutura um protocolo de treino individualizado, que passa por supervisão profissional antes de chegar até você. A partir daí, o acompanhamento acontece pelo WhatsApp: treino, orientação, feedbacks e ajustes.',
+        'Você responde a uma anamnese com seus objetivos, rotina, experiência, disponibilidade e limitações. Com essas informações, a MOVIVO monta um plano individual de treino (musculação, corrida, HYROX ou uma combinação) e de alimentação. A partir daí, o acompanhamento acontece pelo WhatsApp: o link da sessão do dia, registro do que você fez, check-ins e ajustes ao longo das semanas.',
     },
     {
       id: 'quem-supervisiona',
       question: 'Quem supervisiona o meu treino?',
       answer:
-        'Um responsável técnico com registro no CREF define os critérios da metodologia e revisa os protocolos antes de chegarem até você. A inteligência artificial é uma ferramenta usada por esse profissional, não quem decide sozinha. Exceções e casos sensíveis seguem para avaliação humana.',
+        'Profissionais registrados no CREF, e parceiros das áreas de nutrição e saúde nos respectivos conselhos, escrevem as regras dentro das quais a inteligência artificial trabalha. A IA é uma ferramenta de apoio, não quem decide sozinha. Casos sensíveis, sinais de segurança e situações fora dessas regras seguem para avaliação humana.',
     },
     {
       id: 'saude',
       question: 'A MOVIVO substitui o acompanhamento de um profissional de saúde?',
       answer:
-        'Não. A MOVIVO oferece orientação de treino e não substitui consulta, avaliação ou acompanhamento de profissionais de saúde. Se você tem alguma condição de saúde ou dúvida sobre estar apto a se exercitar, converse com um profissional de saúde antes de começar.',
+        'Não. A MOVIVO oferece orientação de treino e de hábitos alimentares e não substitui consulta, avaliação ou acompanhamento de profissionais de saúde. Se você tem alguma condição de saúde ou dúvida sobre estar apto a se exercitar, converse com um profissional de saúde antes de começar.',
     },
     {
       id: 'teste-gratis',
@@ -65,7 +65,7 @@ export function buildFaq(plans: readonly LandingPlan[] = LANDING_PLANS): FaqItem
       id: 'adaptacao',
       question: 'O treino se adapta quando a minha rotina muda?',
       answer:
-        'Sim. A MOVIVO acompanha seus feedbacks, sua rotina e a carga e a execução observadas para manter o protocolo alinhado ao que você consegue executar, com ajustes ao longo das semanas.',
+        'Sim. A MOVIVO acompanha seus registros, check-ins e a rotina que você informa para manter o plano alinhado ao que você consegue executar, com ajustes ao longo das semanas.',
     },
     {
       id: 'aplicativo',
@@ -76,7 +76,7 @@ export function buildFaq(plans: readonly LandingPlan[] = LANDING_PLANS): FaqItem
       id: 'para-quem',
       question: 'Para quem é a MOVIVO?',
       answer:
-        'Para pessoas maiores de 18 anos que querem orientação de treino individualizada, com acompanhamento pelo WhatsApp. Na anamnese você informa seu contexto de treino, sua disponibilidade e suas limitações, e o protocolo parte dessas informações.',
+        'Para pessoas maiores de 18 anos que querem orientação individualizada de treino e alimentação, com acompanhamento pelo WhatsApp, seja para começar a se movimentar, correr, treinar força ou se preparar para uma prova. Na anamnese você informa seu contexto, sua disponibilidade e suas limitações, e o plano parte dessas informações.',
     },
   ];
 }

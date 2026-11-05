@@ -17,54 +17,32 @@ type ChatItem = {
   /** Parágrafos da mensagem. */
   text: readonly string[];
   time: string;
-  /** Documento anexado (nome do arquivo), exibido acima do texto. */
-  attachment?: string;
 };
 
 /*
- * Conversa ilustrativa: o treino chega em PDF no WhatsApp e a MOVIVO explica a estrutura.
- * O respaldo profissional CREF (guardrail do CLAUDE.md) fica visível nas seções How it
- * works e IA + humano.
+ * Conversa ilustrativa: o link da sessão do dia chega no WhatsApp e a MOVIVO explica o plano.
+ * Sem promessa de resultado; o respaldo profissional (guardrail do produto) fica visível nas
+ * seções How it works e IA + humano.
  */
 const CONVERSATION: readonly ChatItem[] = [
   {
     kind: 'in',
-    attachment: 'seu-treino.pdf',
     text: [
-      'Seu treino está pronto. 💚',
-      'Montamos seu protocolo considerando seus objetivos, sua rotina, sua disponibilidade e tudo o que você compartilhou com a gente.',
+      'Seu plano está pronto. 💚',
+      'Montamos o seu plano considerando seus objetivos, sua rotina, sua disponibilidade e tudo o que você compartilhou com a gente.',
     ],
     time: '07:02',
   },
-  { kind: 'out', text: ['Como está estruturado meu treino, pode me explicar?'], time: '07:15' },
+  { kind: 'out', text: ['Como está estruturada a minha semana, pode me explicar?'], time: '07:15' },
   {
     kind: 'in',
     text: [
-      'Seu plano tá pronto e foi montado pra te levar direto ao emagrecimento com base sólida: cinco treinos por semana, começando por um bloco de hipertrofia que vai preparar seu corpo pra acelerar o gasto calórico. A semana combina peito, costas, pernas e ombros com circuitos metabólicos que elevam a intensidade e mantêm o ritmo lá em cima. Dá uma lida no PDF com calma, porque cada detalhe foi pensado pra você evoluir de forma consistente. Bora pra cima!',
+      'Claro! Você treina quatro vezes por semana: duas sessões de força e duas de corrida leve, com a alimentação organizada em volta delas.',
+      'O treino de hoje está no seu link. Se a rotina apertar, é só me avisar que a gente reorganiza a semana.',
     ],
     time: '07:16',
   },
 ];
-
-/** Documento anexado, como o WhatsApp mostra um PDF recebido. */
-function Attachment({ name }: { name: string }) {
-  return (
-    <span className={styles.attachment}>
-      <span className={styles.fileIcon} aria-hidden="true">
-        <svg viewBox="0 0 24 24">
-          <path d="M7 3h7l5 5v13H7z" />
-          <path d="M14 3v5h5" />
-        </svg>
-        <span>PDF</span>
-      </span>
-      <span className={styles.fileMeta}>
-        <span className="sr-only">Documento anexado: </span>
-        <strong>{name}</strong>
-        <span aria-hidden="true">PDF · Documento</span>
-      </span>
-    </span>
-  );
-}
 
 /*
  * Glifo do WhatsApp (Simple Icons, CC0). Ocupa o viewBox inteiro; a margem de 2 unidades
@@ -79,7 +57,7 @@ function WhatsAppMark(props: SVGProps<SVGSVGElement>) {
 }
 
 const BENEFITS = [
-  { text: 'Treino entregue no WhatsApp.', Icon: WhatsAppMark },
+  { text: 'Sessão do dia no WhatsApp.', Icon: WhatsAppMark },
   { text: 'Dúvidas quando surgirem.', Icon: MessageCircleMore },
   { text: 'Ajustes quando forem necessários.', Icon: ClipboardPen },
 ] as const;
@@ -99,10 +77,10 @@ export function WhatsAppExperience() {
             <RevealLines
               id="whatsapp-title"
               className={cn(landing.h2, styles.title)}
-              lines={['Seu treino não deveria', 'ficar parado enquanto', 'sua vida muda.']}
+              lines={['Seu plano não deveria', 'ficar parado enquanto', 'sua vida muda.']}
             />
             <p className={cn(landing.body, landing.secondaryText)} data-reveal="">
-              A MOVIVO acompanha seus feedbacks, sua rotina e sua evolução para manter o protocolo
+              A MOVIVO acompanha seus registros, sua rotina e sua evolução para manter o plano
               alinhado ao que você realmente consegue executar.
             </p>
             <ul className={styles.benefits}>
@@ -145,7 +123,6 @@ export function WhatsAppExperience() {
                         <span className="sr-only">
                           {item.kind === 'out' ? 'Você: ' : 'MOVIVO: '}
                         </span>
-                        {item.attachment ? <Attachment name={item.attachment} /> : null}
                         {item.text.map((paragraph) => (
                           <p key={paragraph}>{paragraph}</p>
                         ))}

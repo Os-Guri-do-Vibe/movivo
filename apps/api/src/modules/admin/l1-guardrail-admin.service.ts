@@ -12,7 +12,7 @@ import {
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
-import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
+import { L1GuardrailService } from '../../core/attendance-rules/l1-guardrail.service';
 import { aiGuardrailRules, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -21,7 +21,7 @@ import {
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
-import { simulateL1GuardrailConfig } from './config-simulator';
+import { simulateL1GuardrailConfig } from './config-gate';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 

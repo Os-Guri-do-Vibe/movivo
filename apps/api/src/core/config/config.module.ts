@@ -67,11 +67,6 @@ export function getAppConfig(): AppConfig {
   return cached;
 }
 
-/** Apenas para testes: descarta a configuração memoizada. */
-export function resetAppConfigCache(): void {
-  cached = undefined;
-}
-
 @Global()
 @Module({
   providers: [

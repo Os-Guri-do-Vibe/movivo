@@ -2,7 +2,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Teste de integração da imutabilidade de `user_status_transitions` (US-8.3/TASK-8.3.1).
  *
- * Espelha literalmente `agent-config-immutability.int-spec.ts` — o padrão foi provado contra
+ * Espelha literalmente o spec de imutabilidade de `audit_logs` — o padrão foi provado contra
  * Postgres real na Sprint 7 e não há razão para inventar um mecanismo novo. Prova as duas
  * barreiras de `buildStatusTransitionsImmutabilitySql` **separadamente, contra a role certa**:
  *
@@ -15,7 +15,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *       erro é 55000 com o UPDATE de fato nunca aplicado.
  *
  * Sem teardown de DELETE: a própria garantia provada aqui (append-only) torna a linha
- * impossível de apagar por SQL comum — mesmo padrão já aceito em `audit_logs` e `agent_config`.
+ * impossível de apagar por SQL comum — mesmo padrão já aceito em `audit_logs`.
  * O titular é sintético (`+5555…`, ver `seed.ts`) e nunca entra em funil/coorte real de dev
  * além de somar 1 em `TRIAL_STARTED`.
  *

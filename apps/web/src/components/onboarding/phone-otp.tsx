@@ -3,13 +3,7 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
-import {
-  AnamnesisApiError,
-  isSessionReplaced,
-  sendPhoneCode,
-  SESSION_REPLACED_MESSAGE,
-  verifyPhoneCode,
-} from '@/lib/anamnesis-api';
+import { describeAnamnesisError, sendPhoneCode, verifyPhoneCode } from '@/lib/anamnesis-api';
 
 /**
  * Verificação de posse do WhatsApp por código (US-6.5, Sofia §4).
@@ -88,9 +82,11 @@ export function PhoneOtp({
       focusCodeUnlessTypingElsewhere(inputRef.current, anchorId);
     } catch (err) {
       setError(
-        isSessionReplaced(err)
-          ? SESSION_REPLACED_MESSAGE
-          : 'Não conseguimos enviar o código agora. Tente de novo em instantes.',
+        describeAnamnesisError(
+          err,
+          'Não conseguimos enviar o código agora. Tente de novo em instantes.',
+          { trustBadRequest: true },
+        ),
       );
     }
   }, [sessionRef, phoneNumber, anchorId]);
@@ -111,13 +107,12 @@ export function PhoneOtp({
       await verifyPhoneCode(sessionRef, candidate);
       onVerified();
     } catch (err) {
-      if (isSessionReplaced(err)) {
-        setError(SESSION_REPLACED_MESSAGE);
-      } else if (err instanceof AnamnesisApiError && err.status === 410) {
-        setError('Esse código expirou. Peça um novo.');
-      } else {
-        setError('Código incorreto. Confira e tente de novo.');
-      }
+      // O 400 da verificação é redigido à mão na API (código errado × expirado).
+      setError(
+        describeAnamnesisError(err, 'Código incorreto. Confira e tente de novo.', {
+          trustBadRequest: true,
+        }),
+      );
       setCode('');
       setActiveSlot(0);
     } finally {

@@ -72,7 +72,7 @@ describe('SubscriptionAccessService — WhatsApp', () => {
     ).resolves.toBe(true);
     expect(subs.createShortCancelLink).toHaveBeenCalledWith(USER);
     const [job] = sentTo(enqueue);
-    expect(job).toMatchObject({ userId: USER, type: 'COACH_MESSAGE' });
+    expect(job).toMatchObject({ userId: USER, type: 'CONVERSATION_MESSAGE' });
     expect(String(job?.text)).toContain('https://movivo.test/cancelar/novo');
     expect(String(job?.text)).not.toMatch(/diagn[óo]stico|tratamento|cura|resultado garantido/i);
   });

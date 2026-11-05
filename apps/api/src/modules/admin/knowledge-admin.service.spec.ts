@@ -154,6 +154,7 @@ function knowledgeWith(
     knowledge: {
       uploadMaxBytes: 10 * 1024 * 1024,
     },
+    rag: { enabled: false },
   };
   const service = new KnowledgeAdminService(
     db,
@@ -183,7 +184,11 @@ describe('KnowledgeAdminService.list', () => {
       blobAvailable: true,
       chunkCount: 0,
     });
-    expect(response.data.policy).toMatchObject({ quarantineDays: 30, approvedOriginalDays: 365 });
+    expect(response.data.policy).toMatchObject({
+      quarantineDays: 30,
+      approvedOriginalDays: 365,
+      retrievalEnabled: false,
+    });
     expect(audit.append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'knowledge.list' }),
@@ -339,25 +344,33 @@ describe('KnowledgeAdminService.upload', () => {
 describe('KnowledgeAdminService.remove', () => {
   it('exclui de verdade pela função de purga e audita sem conteúdo', async () => {
     const { service, audit, execute } = knowledgeWith({
-      // lock, estado atual, delete_knowledge_document, list().
+      // lock, estado atual, identidade do documento, delete_knowledge_document, list().
       executes: [
         [],
         [{ status: 'PUBLISHED', stage: 'PUBLISHED', error_code: null }],
+        [{ sha256: 'a'.repeat(64), logical_key: 'volume-semanal' }],
         [{ chunks: 12 }],
         [],
       ],
     });
     await service.remove(ACTOR, DOCUMENT_ID);
 
-    const purge = JSON.stringify(execute.mock.calls[2]);
+    const purge = JSON.stringify(execute.mock.calls[3]);
     expect(purge).toContain('delete_knowledge_document');
     expect(audit.append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: 'knowledge.delete',
-        changes: { previousStatus: 'PUBLISHED', chunksRemoved: 12 },
+        // Hash e chave lógica ficam na trilha (a lápide do artigo padrão); título e texto, nunca.
+        changes: {
+          previousStatus: 'PUBLISHED',
+          chunksRemoved: 12,
+          sha256: 'a'.repeat(64),
+          logicalKey: 'volume-semanal',
+        },
       }),
     );
+    expect(JSON.stringify(audit.append.mock.calls)).not.toContain('"title"');
   });
 
   it('também exclui documento arquivado ou com falha', async () => {
@@ -365,6 +378,7 @@ describe('KnowledgeAdminService.remove', () => {
       executes: [
         [],
         [{ status: 'ARCHIVED', stage: 'DELETED', error_code: null }],
+        [{ sha256: 'b'.repeat(64), logical_key: 'antigo' }],
         [{ chunks: 0 }],
         [],
       ],

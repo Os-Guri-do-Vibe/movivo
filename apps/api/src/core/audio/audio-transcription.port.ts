@@ -1,5 +1,5 @@
 /**
- * Porta de transcrição de áudio (STT) do AI Coach — mesmo espírito de `EmbeddingPort`
+ * Porta de transcrição de áudio (STT) da IA — mesmo espírito de `EmbeddingPort`
  * (`core/knowledge/embedding.port.ts`): desacopla `WhatsappInboundService` do(s)
  * fornecedor(es) real(is) (`OpenAiTranscription`/`GroqTranscription`, os únicos arquivos
  * confinados a falar HTTP com eles — ver `llm-sdk-confinement.spec.ts` — combinados numa

@@ -101,7 +101,7 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
       'whatsapp-outbound',
       'payment-confirmed',
       expect.objectContaining({
-        type: 'COACH_MESSAGE',
+        type: 'CONVERSATION_MESSAGE',
         dedupeId: expect.stringMatching(/^payment_[0-9a-f]{56}$/),
         text: expect.stringContaining('https://movivo.test/cancelar/opaque'),
       }),
@@ -133,7 +133,7 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
     expect(enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'dunning',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
     );
   });
 

@@ -17,15 +17,14 @@ export const APP_VERSION = '0.1.0';
 /** Prefixo de versionamento da API REST (regra inegociável §12.10). */
 export const API_VERSION_PREFIX = 'api/v1';
 
+/** Grupo do MOVIVO CLUB no WhatsApp (tela de sucesso e convite junto do primeiro plano). */
+export const MOVIVO_CLUB_URL = 'https://chat.whatsapp.com/J3xNcNWE0UcH4qd9I2uMgR';
+
 export * from './enums';
 export * from './schemas';
 export * from './types';
-export * from './validation/friendly-issues';
 
 export * from './attribution';
-export * from './workout-share-card';
 export * from './whatsapp-bubbles';
-
-export * from './prompts/persona-block';
 
 export * from './rbac/capabilities-by-role';

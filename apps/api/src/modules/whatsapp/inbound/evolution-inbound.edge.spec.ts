@@ -173,15 +173,34 @@ describe('EvolutionInboundEdge.normalize', () => {
     expect(makeEdge().normalize(upsert({ timestamp: elevenHoursAgo }))).toHaveLength(1);
   });
 
-  it('tipo não suportado (imagem/sticker/reaction) → descarte, nunca alimenta o LLM', () => {
+  it('tipo não suportado (sticker/reaction/documento que não é PDF) → descarte', () => {
     for (const message of [
-      { imageMessage: { caption: 'olha meu treino' } },
       { stickerMessage: {} },
       { reactionMessage: { text: '👍' } },
       { protocolMessage: { type: 'REVOKE' } },
+      { documentMessage: { mimetype: 'application/zip' } },
     ]) {
       expect(makeEdge().normalize(upsert({ message }))).toEqual([]);
     }
+  });
+
+  it('foto e PDF (também com legenda) → referência de mídia, sem texto', () => {
+    const photo = makeEdge().normalize(
+      upsert({ message: { imageMessage: { caption: 'meu exame', mimetype: 'image/png' } } }),
+    );
+    expect(photo?.[0]).toMatchObject({ media: { mimetype: 'image/png' } });
+    expect(photo?.[0]?.text).toBeUndefined();
+    const pdf = makeEdge().normalize(
+      upsert({
+        message: {
+          documentWithCaptionMessage: {
+            message: { documentMessage: { mimetype: 'application/pdf', fileLength: '120345' } },
+          },
+        },
+      }),
+    );
+    expect(pdf?.[0]?.media).toMatchObject({ mimetype: 'application/pdf', fileLength: 120345 });
+    expect(JSON.parse(pdf?.[0]?.media?.mediaKey ?? '{}')).toMatchObject({ id: 'WA-MSG-1' });
   });
 
   it('mensagem de voz (audioMessage) → referência de mídia, sem texto', () => {
@@ -245,14 +264,16 @@ describe('EvolutionInboundEdge.capture (espelho da aba Conversas)', () => {
     expect(JSON.parse(out?.mediaKey ?? '{}')).toMatchObject({ remoteJid: JID, id: 'WA-MSG-1' });
   });
 
-  it('imagem → legenda como texto e referência da mídia (a IA segue ignorando imagem)', () => {
+  it('imagem → legenda como texto e referência da mídia (no pipeline vira mídia, não texto)', () => {
     const message = { imageMessage: { caption: ' meu agachamento ', mimetype: 'image/jpeg' } };
     expect(makeEdge().capture(upsert({ message }))).toMatchObject({
       kind: 'IMAGE',
       text: 'meu agachamento',
       mimetype: 'image/jpeg',
     });
-    expect(makeEdge().normalize(upsert({ message }))).toEqual([]);
+    const [normalized] = makeEdge().normalize(upsert({ message })) ?? [];
+    expect(normalized?.text).toBeUndefined();
+    expect(normalized?.media?.mimetype).toBe('image/jpeg');
   });
 
   it('imagem sem legenda → texto vazio', () => {

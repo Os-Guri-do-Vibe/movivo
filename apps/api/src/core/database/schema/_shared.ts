@@ -22,7 +22,7 @@
  * viraria uma fonte silenciosa de bug em horário de verão / servidor em UTC.
  */
 import { sql } from 'drizzle-orm';
-import { customType, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { type AnyPgColumn, check, customType, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * Coluna `bytea` (bytes crus). O `drizzle-kit` não expõe um tipo nativo; declaramos
@@ -82,3 +82,23 @@ export const eventTimestamp = (name: string) =>
  *    não por remoção física (`ARQUITETURA.md` §8).
  */
 export const userIdColumn = () => uuid('user_id');
+
+/**
+ * `CHECK (<coluna> IN (...))` a partir de uma lista do `@movivo/shared` — a lista Zod é a fonte
+ * única dos valores aceitos; o banco só repete a regra. O drizzle-kit escreve os valores como
+ * literais no DDL da migração; a validação abaixo garante que são identificadores de enum.
+ */
+export function checkOneOf(name: string, column: AnyPgColumn, values: readonly string[]) {
+  for (const value of values) {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) {
+      throw new Error(`checkOneOf(${name}): valor de enum inválido "${value}".`);
+    }
+  }
+  return check(
+    name,
+    sql`${column} in (${sql.join(
+      values.map((value) => sql`${value}`),
+      sql`, `,
+    )})`.inlineParams(),
+  );
+}

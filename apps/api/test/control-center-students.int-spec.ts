@@ -2,7 +2,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Regressão do achado 2026-08-25: `${users.id}` interpolado dentro de um `sql` template,
  * em correlação de subquery, NÃO qualifica com a tabela — vira `"id"` cru no SQL gerado.
- * Como toda tabela correlacionada (`subscriptions`, `anamnesis_sessions`, `protocols`, …)
+ * Como toda tabela correlacionada (`subscriptions`, `anamnesis_sessions`, …)
  * tem sua própria coluna `id`, o Postgres resolvia pro escopo mais interno (`s.id`), nunca
  * pro `users.id` externo: `s.user_id = s.id`, sempre falso, sempre `null`, sem erro nenhum.
  * `ControlCenterService.students()`/`.student()` mostravam "Plano" e "Data de inscrição"

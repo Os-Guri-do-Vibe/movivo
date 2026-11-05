@@ -1,7 +1,7 @@
 /**
  * Lock por usuário para a fila `ai-response` (US-3.1 TASK-3.1.2 · Rafael/Sato §9.4).
  *
- * Garante que **só um job de resposta do Coach roda por usuário por vez**: o webhook
+ * Garante que **só um job de resposta da IA roda por usuário por vez**: o webhook
  * coalesce a rajada num único job (debounce NX), e o worker de US-3.5 pega este lock
  * antes de processar. Mensagem que chega com job em curso já foi para o buffer Redis e
  * será drenada pelo job em execução — nunca há processamento paralelo do mesmo titular.

@@ -57,12 +57,10 @@ export interface LlmConfig {
   readonly primaryModel: string;
   readonly fallbackModel: string;
   readonly secondaryFallbackModel: string;
+  /** Modelo (DeepSeek) dos testes do painel. */
+  readonly evalModel: string;
   readonly maxTokens: number;
   readonly timeoutMs: number;
-  /** Timeout só de `PROTOCOL_GENERATION` — job em fila, tolera bem mais que o chat. */
-  readonly protocolTimeoutMs: number;
-  /** Teto de tokens só de `PROTOCOL_GENERATION` — saída maior que a de chat/check-in. */
-  readonly protocolMaxTokens: number;
   readonly userDailyMessageLimit: number;
   readonly dailyCostAlertBrl: number;
   readonly usdBrlRate: number;
@@ -76,7 +74,7 @@ export interface LlmConfig {
 }
 
 export interface WhatsappConfig {
-  /** Base do deep-link da página read-only do protocolo (US-2.6). */
+  /** Base pública dos links enviados por WhatsApp. */
   readonly publicSiteUrl: string;
   /** Destino do alerta de fila do profissional; `undefined` = alerta desligado. */
   readonly staffQueueAlertPhone: string | undefined;
@@ -94,7 +92,7 @@ export interface EvolutionConfig {
 }
 
 /**
- * Config da transcrição de áudio do AI Coach (STT) — cascata (ADR-009, revisão
+ * Config da transcrição de áudio da IA (STT) — cascata (ADR-009, revisão
  * 2026-09-14): OpenAI é a perna PRIMÁRIA de produção, Groq é o FALLBACK automático, em
  * produção e local (`createAudioTranscription`, `core/audio/audio.module.ts`, monta as
  * duas pernas configuradas nessa ordem). Cada uma tem chave e gate de HEALTH próprios —
@@ -256,10 +254,9 @@ export class AppConfigService {
       primaryModel: this.config.LLM_PRIMARY_MODEL,
       fallbackModel: this.config.LLM_FALLBACK_MODEL,
       secondaryFallbackModel: this.config.LLM_SECONDARY_FALLBACK_MODEL,
+      evalModel: this.config.LLM_EVAL_MODEL,
       maxTokens: this.config.LLM_MAX_TOKENS,
       timeoutMs: this.config.LLM_TIMEOUT_MS,
-      protocolTimeoutMs: this.config.LLM_PROTOCOL_TIMEOUT_MS,
-      protocolMaxTokens: this.config.LLM_PROTOCOL_MAX_TOKENS,
       userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
       dailyCostAlertBrl: this.config.LLM_DAILY_COST_ALERT_BRL,
       usdBrlRate: this.config.LLM_USD_BRL_RATE,
@@ -291,7 +288,7 @@ export class AppConfigService {
     };
   }
 
-  /** Config da transcrição de áudio do AI Coach (US audio). Chaves são segredos redigidos. */
+  /** Config da transcrição de áudio da IA (US audio). Chaves são segredos redigidos. */
   get audioTranscription(): AudioTranscriptionConfig {
     return {
       openaiApiKey: this.config.OPENAI_API_KEY,
@@ -308,14 +305,34 @@ export class AppConfigService {
     return this.config.API_PUBLIC_URL;
   }
 
-  /** Config do RAG (US-3.3). Thresholds/top-K do retrieval + rerank. */
+  /** Strava: `null` quando não configurado (integração desligada). Segredos redigidos. */
+  get strava(): {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly webhookVerifyToken: string;
+  } | null {
+    const { STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_WEBHOOK_VERIFY_TOKEN } = this.config;
+    return STRAVA_CLIENT_ID && STRAVA_CLIENT_SECRET && STRAVA_WEBHOOK_VERIFY_TOKEN
+      ? {
+          clientId: STRAVA_CLIENT_ID,
+          clientSecret: STRAVA_CLIENT_SECRET,
+          webhookVerifyToken: STRAVA_WEBHOOK_VERIFY_TOKEN,
+        }
+      : null;
+  }
+
+  /** Config do RAG: liga/desliga e piso de similaridade, top-K e candidatos da busca. */
   get rag(): {
+    readonly enabled: boolean;
+    readonly proactiveEnabled: boolean;
     readonly minCosine: number;
     readonly rerankMinScore: number;
     readonly topK: number;
     readonly candidates: number;
   } {
     return {
+      enabled: this.config.RAG_ENABLED,
+      proactiveEnabled: this.config.RAG_PROACTIVE_ENABLED,
       minCosine: this.config.RAG_MIN_COSINE,
       rerankMinScore: this.config.RAG_RERANK_MIN_SCORE,
       topK: this.config.RAG_TOP_K,

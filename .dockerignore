@@ -53,4 +53,7 @@ VIDEOS-TUTORIAL
 # Únicos documentos jurídicos lidos pelo web (apps/web/src/lib/legal-documents.ts).
 !apps/web/content/legal/termos-de-uso.md
 !apps/web/content/legal/politica-de-privacidade.md
+# Artigos padrão da Base de Conhecimento: o migrate os lê no deploy (default-articles.ts). Sem esta
+# exceção a imagem sai sem eles e o migrate falha.
+!apps/api/assets/knowledge/articles/*.md
 .DS_Store

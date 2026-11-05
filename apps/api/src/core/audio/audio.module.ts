@@ -1,5 +1,5 @@
 /**
- * `AudioModule` — transcrição de áudio (STT) do AI Coach, bloco CORE (mesmo padrão do
+ * `AudioModule` — transcrição de áudio (STT) da IA, bloco CORE (mesmo padrão do
  * `KnowledgeModule` para embedding: `@Global()`, um único `AUDIO_TRANSCRIPTION_PORT`
  * resolvido no boot a partir da config).
  */
