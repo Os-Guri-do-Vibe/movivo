@@ -18,13 +18,27 @@ export type StateSlice =
   | 'training'
   | 'nutrition'
   | 'body'
+  /** Leitura visual por foto (faixa de gordura, comparação e observações), só com consentimento de saúde. */
+  | 'bodyComposition'
   | 'adherence'
   | 'safety'
   | 'recentDecisions'
   /** Última revisão semanal com a leitura dos analistas de recuperação e hábitos. */
   | 'followUp'
   /** Dia e fase estimada do ciclo menstrual (só com consentimento de saúde e do ciclo). */
-  | 'cycle';
+  | 'cycle'
+  /** O que os agentes sabem do aluno além dos números (rotina, motivação, barreiras, jeito de conversar). */
+  | 'memory'
+  /** Últimas mensagens da conversa com o aluno, da mais antiga à mais nova. */
+  | 'conversation'
+  /** O que o aluno contou nos últimos dias (sono, estresse, energia, corpo, viagem…) como dado. */
+  | 'observations'
+  /** Passos combinados com o aluno: os em aberto e o que aconteceu com os últimos. */
+  | 'commitments'
+  /** Contatos que a MOVIVO iniciou nos últimos dias e se o aluno respondeu. */
+  | 'outreach'
+  /** O estudo dos últimos dias: todos os sinais do aluno, dia a dia. */
+  | 'dayDigests';
 
 /** Uma violação encontrada por um validador determinístico. */
 export interface Violation {

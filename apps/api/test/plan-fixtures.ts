@@ -461,7 +461,6 @@ export async function createStudent(
             modality: 'STRENGTH',
             level: 'INTERMEDIATE',
             monthsPracticing: 24,
-            sessionsPerWeek: 3,
             wantsToStart: false,
           },
         ],

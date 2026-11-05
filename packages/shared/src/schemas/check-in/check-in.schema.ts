@@ -25,6 +25,10 @@ export const checkInQuestionSchema = z
     options: z.array(z.string().trim().min(1).max(80)).min(2).max(8).optional(),
     /** Por que a pergunta entrou neste check-in (aparece no painel, não para o aluno). */
     reason: z.string().trim().min(1).max(160),
+    /** Pergunta de acompanhamento: só aparece (e só é cobrada) quando outra resposta é esta. */
+    showIf: z
+      .object({ key: z.string().trim().min(1).max(40), equals: z.union([z.boolean(), z.string()]) })
+      .optional(),
   })
   .refine((q) => (q.type === 'CHOICE') === (q.options !== undefined), {
     message: 'Só perguntas de escolha têm opções, e toda pergunta de escolha precisa delas.',

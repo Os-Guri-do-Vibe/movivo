@@ -16,6 +16,7 @@ import {
   ClipboardCheck,
   Dumbbell,
   History,
+  PersonStanding,
   ShieldAlert,
   UserRound,
 } from 'lucide-react';
@@ -45,6 +46,8 @@ import {
   subscriptionStatus,
 } from './student-labels';
 import { ProtocolReview } from './protocol-review';
+import { PhysiqueAssessmentCard } from './physique-assessment-card';
+import { StudentEvolutionPanel } from './student-evolution-panel';
 import { describeTimelineEvent } from './student-timeline';
 
 const NOT_INFORMED = 'Não informado';
@@ -401,6 +404,16 @@ export function StudentDetail({ id: studentId }: { id: string }) {
         </Section>
       ) : null}
 
+      {student.health ? (
+        <Section
+          title="Avaliação física por foto"
+          hint="Leitura da IA, para auditoria: o que os agentes leram nas fotos e usam no protocolo. As fotos não aparecem aqui."
+          icon={PersonStanding}
+        >
+          <PhysiqueAssessmentCard assessments={student.health.photoAssessment} />
+        </Section>
+      ) : null}
+
       {student.followUp ? (
         <Section
           title="Acompanhamento"
@@ -415,6 +428,16 @@ export function StudentDetail({ id: studentId }: { id: string }) {
           </p>
           <FollowUpReading title="Recuperação" analysis={student.followUp.recovery} />
           <FollowUpReading title="Hábitos" analysis={student.followUp.habits} />
+        </Section>
+      ) : null}
+
+      {student.health ? (
+        <Section
+          title="Evolução e carga"
+          hint="Carga, prontidão, medidas e força que os agentes usam no acompanhamento. Dado de saúde: a leitura fica na auditoria."
+          icon={Activity}
+        >
+          <StudentEvolutionPanel studentId={student.id} />
         </Section>
       ) : null}
 

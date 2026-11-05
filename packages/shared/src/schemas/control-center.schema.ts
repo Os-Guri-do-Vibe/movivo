@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { ControlCenterCapability, ControlCenterRole } from '../enums/control-center';
+import { studentPhotoAssessmentsSchema } from './body/photo-assessment-audit.schema';
 import { expenseCategorySchema } from './expense.schema';
 import { followUpAnalysisSchema } from './progress/review.schema';
 
@@ -741,6 +742,11 @@ export const controlCenterStudentDetailResponseSchema = z.object({
         .object({
           parqState: nullableText,
           painReports: z.array(z.object({ at: z.iso.datetime(), text: z.string() })),
+          /**
+           * Avaliação física por foto (leitura da IA, para auditoria): a mais recente e a
+           * anterior. Só texto e etiquetas, nunca as imagens. Opcional para clientes antigos.
+           */
+          photoAssessment: studentPhotoAssessmentsSchema.optional(),
         })
         .nullable(),
       /**

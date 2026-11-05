@@ -26,6 +26,7 @@ import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
 import {
   anamnesisSessionPhotos,
+  cycleReassessmentPhotos,
   anamnesisSessions,
   bodyPhotos,
   consents,
@@ -195,6 +196,25 @@ export class ConsentService {
       .map((row) => row.type as ConsentTypeWithText);
   }
 
+  /** Há aceite vigente (não revogado) deste tipo para o titular, em qualquer versão do texto. */
+  async hasActive(userId: string, type: ConsentTypeWithText): Promise<boolean> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ id: consents.id })
+        .from(consents)
+        .where(
+          and(
+            eq(consents.userId, userId),
+            eq(consents.consentType, type),
+            eq(consents.accepted, true),
+            isNull(consents.revokedAt),
+          ),
+        )
+        .limit(1),
+    );
+    return rows.length > 0;
+  }
+
   /**
    * Revogação (LGPD art. 8º, §5º): carimba `revoked_at`, jamais apaga a linha.
    *
@@ -229,6 +249,7 @@ export class ConsentService {
         .set({ deletedAt: new Date() })
         .where(and(eq(bodyPhotos.userId, userId), isNull(bodyPhotos.deletedAt)));
       await tx.delete(anamnesisSessionPhotos).where(eq(anamnesisSessionPhotos.userId, userId));
+      await tx.delete(cycleReassessmentPhotos).where(eq(cycleReassessmentPhotos.userId, userId));
     });
   }
 

@@ -1,8 +1,14 @@
 /**
  * Anamnese da v2: 9 etapas, salvas uma a uma (o aluno pode sair e voltar).
  *
- *   1 Cadastro · 2 Objetivos · 3 Modalidades · 4 Rotina · 5 Preferências de treino ·
- *   6 Dores e limitações · 7 Alimentação · 8 Corpo (opcional) · 9 PAR-Q (sempre a última)
+ *   1 Cadastro · 2 Objetivos · 3 Seu treino com a MOVIVO · 4 Sua semana ·
+ *   5 Preferências de treino · 6 Dores e limitações · 7 Alimentação · 8 Corpo (opcional) ·
+ *   9 PAR-Q (sempre a última)
+ *
+ * A 3 é só o que a MOVIVO vai prescrever (modalidade, nível, local). Tudo que descreve a semana
+ * do aluno fica na 4: esporte que ele já pratica por fora, disponibilidade, o teto de treinos,
+ * sono e estresse. As respostas são informação e preferência: quem decide quantos treinos,
+ * quais e em que dias é a MOVIVO.
  *
  * O servidor separa cada etapa em parte comum (JSON) e parte sensível (cifrada): dado de saúde,
  * alergias, medicamentos e TODO texto livre vão só para o bloco cifrado. A anamnese
@@ -46,7 +52,9 @@ export const onboardingGoalsStepSchema = z.object({
 });
 export type OnboardingGoalsStep = z.infer<typeof onboardingGoalsStepSchema>;
 
-// --- 3. Modalidades -----------------------------------------------------------------------
+// --- 3. Seu treino com a MOVIVO -----------------------------------------------------------
+
+const externalSportsSchema = z.array(externalSportPracticeSchema).max(3);
 
 export const onboardingModalitiesStepSchema = z
   .object({
@@ -61,7 +69,11 @@ export const onboardingModalitiesStepSchema = z
       )
       .min(1)
       .max(3),
-    externalSports: z.array(externalSportPracticeSchema).max(3),
+    /**
+     * Legado: o esporte externo mudou para a etapa 4. Só é aceito para não recusar etapas salvas
+     * (ou enviadas por uma aba aberta antes da mudança); a etapa 4 é a fonte quando tem o campo.
+     */
+    externalSports: externalSportsSchema.optional(),
   })
   .refine((v) => new Set(v.modalities.map((m) => m.modality)).size === v.modalities.length, {
     message: 'Cada modalidade aparece uma vez só.',
@@ -69,17 +81,27 @@ export const onboardingModalitiesStepSchema = z
   });
 export type OnboardingModalitiesStep = z.infer<typeof onboardingModalitiesStepSchema>;
 
-// --- 4. Rotina ----------------------------------------------------------------------------
+// --- 4. Sua semana -------------------------------------------------------------------------
 
 const distinctDays = (windows: readonly { weekday: string }[]) =>
   new Set(windows.map((w) => w.weekday)).size;
 
 export const onboardingRoutineStepSchema = z
   .object({
+    /**
+     * Esporte que o aluno já pratica por fora e quer manter (a MOVIVO planeja em volta). Opcional
+     * só no contrato, para etapas salvas antes da mudança (aí vale o da etapa 3); o formulário
+     * sempre envia, mesmo vazio.
+     */
+    externalSports: externalSportsSchema.optional(),
     windows: z.array(availabilityWindowSchema).min(1).max(21),
     variesWeekly: z.boolean(),
-    /** Treinos da MOVIVO por semana, sem contar o esporte externo. */
-    maxSessionsPerWeek: z.number().int().min(1).max(7),
+    /**
+     * Legado: o formulário não pergunta mais quantos treinos o aluno quer. Quantos e quais treinos
+     * entram, quem decide é a MOVIVO, a partir dos dias disponíveis. Só etapas salvas antes da
+     * mudança trazem o valor.
+     */
+    maxSessionsPerWeek: z.number().int().min(1).max(7).optional(),
     /** Sono e estresse; o resto do contexto de vida vem da etapa de alimentação. */
     lifeContext: lifeContextSchema.pick({ sleepHoursTypical: true, stressLevel: true }),
   })
@@ -87,10 +109,13 @@ export const onboardingRoutineStepSchema = z
     message: 'Cada dia aparece uma vez só.',
     path: ['windows'],
   })
-  .refine((v) => v.maxSessionsPerWeek <= distinctDays(v.windows), {
-    message: 'Você escolheu mais treinos do que dias disponíveis.',
-    path: ['maxSessionsPerWeek'],
-  });
+  .refine(
+    (v) => v.maxSessionsPerWeek === undefined || v.maxSessionsPerWeek <= distinctDays(v.windows),
+    {
+      message: 'Você escolheu mais treinos do que dias disponíveis.',
+      path: ['maxSessionsPerWeek'],
+    },
+  );
 export type OnboardingRoutineStep = z.infer<typeof onboardingRoutineStepSchema>;
 
 // --- 5. Preferências de treino e saúde geral -----------------------------------------------

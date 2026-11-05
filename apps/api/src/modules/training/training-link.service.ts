@@ -27,7 +27,10 @@ export class TrainingLinkService {
   /** URL curta (`/hoje/<código>`) que redireciona para o link mágico completo. */
   async shortUrl(
     userId: string,
-    options: { date?: string; next?: '/hoje' | '/alimentacao' | '/evolucao' | '/check-in' } = {},
+    options: {
+      date?: string;
+      next?: '/hoje' | '/alimentacao' | '/evolucao' | '/check-in' | '/reavaliacao';
+    } = {},
   ): Promise<string> {
     const magic = await this.access.createMagicLink(userId, {
       ...options,

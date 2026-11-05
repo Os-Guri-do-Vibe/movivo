@@ -12,6 +12,13 @@ export const professionalInstructionSchema = z.string().trim().min(1).max(1_000)
 export const PROFESSIONAL_INSTRUCTION_RULE =
   'Se "professionalInstruction" vier preenchida, é a orientação do profissional responsável que revisou este protocolo: siga-a com prioridade sobre preferências e escolhas de estilo, mas NUNCA acima da segurança, das limitações do aluno ou dos limites da metodologia.';
 
+/**
+ * A avaliação física visual por foto ("bodyComposition") orienta o foco do treino junto da anamnese
+ * e das medidas. É estimativa em faixa, com margem de erro, e nunca vira diagnóstico.
+ */
+export const BODY_COMPOSITION_RULE =
+  'Se o estado trouxer "bodyComposition" (avaliação física visual por foto: faixa de gordura, "muscleGroups" com pontos fortes e a desenvolver, "posture" e "symmetry" com o alinhamento observado, "strengths", "attentionPoints" e comparação), considere-a junto da anamnese e do objetivo ao distribuir volume, escolher exercícios e dosar o trabalho metabólico (por exemplo, mais trabalho de força e atividade geral quando a gordura estimada é alta e o objetivo é composição corporal; mais volume e frequência nos grupos TO_DEVELOP, manutenção nos STRENGTH). Hierarquia: o objetivo declarado pelo aluno e a ênfase muscular que ele escolheu na anamnese ("emphasisMuscleGroups") vêm primeiro; a avaliação por foto complementa (grupos TO_DEVELOP, assimetrias) e não muda o objetivo nem substitui a ênfase escolhida. Postura e simetria orientam a escolha de exercícios e a ordem do trabalho (por exemplo, fortalecimento escapular e de glúteo médio, mobilidade de quadril ou torácica, unilaterais quando há assimetria) dentro da sessão e da metodologia; não viram restrição de treino por si, a menos que a segurança ou o profissional que audita peçam. É estimativa por foto, com margem de erro: não escreva o percentual no texto do protocolo e nunca nomeie condição clínica nem trate observação como diagnóstico. Alteração marcante pode ser dita ao aluno como percepção, com a recomendação de buscar avaliação profissional fora da MOVIVO, nunca como defeito.';
+
 /** Remove acentos e baixa a caixa — comparação de texto livre em português. */
 export function fold(text: string): string {
   return text

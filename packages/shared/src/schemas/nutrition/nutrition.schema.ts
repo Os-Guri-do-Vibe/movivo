@@ -111,6 +111,28 @@ export const plannedMealSchema = z.object({
 });
 export type PlannedMeal = z.infer<typeof plannedMealSchema>;
 
+/** Uma refeição livre pré-planejada: o que é, quanto vale e como encaixar no resto do dia. */
+export const freeMealOptionSchema = z.object({
+  title: z.string().trim().min(1).max(40),
+  description: z.string().trim().min(1).max(110),
+  /** Energia aproximada da refeição inteira. */
+  energyKcal: z.number().int().min(300).max(2_000),
+  fitTip: z.string().trim().min(1).max(120),
+});
+export type FreeMealOption = z.infer<typeof freeMealOptionSchema>;
+
+/**
+ * Refeições livres do plano: quantas por semana e SEMPRE três opções prévias. O aluno pode
+ * escolher outra e pedir à MOVIVO no WhatsApp como encaixá-la. Ausente nos planos anteriores e
+ * quando o perfil de saúde não recomenda (ex.: histórico de transtorno alimentar).
+ */
+export const freeMealsSchema = z.object({
+  perWeek: z.number().int().min(1).max(3),
+  options: z.array(freeMealOptionSchema).length(3),
+  guidance: z.string().trim().min(1).max(300),
+});
+export type FreeMeals = z.infer<typeof freeMealsSchema>;
+
 const supplementSchema = z.object({
   name: z.string().trim().min(1).max(60),
   guidance: z.string().trim().min(1).max(200),
@@ -127,6 +149,8 @@ export const nutritionPlanBaseSchema = z.object({
   guidelines: z.array(z.string().trim().min(1).max(300)).min(1).max(10),
   /** Suplementos apenas no âmbito permitido pela metodologia do nutricionista. */
   supplements: z.array(supplementSchema).max(5),
+  /** Refeições livres planejadas (frequência semanal e 3 opções prévias). */
+  freeMeals: freeMealsSchema.optional(),
   /** Custo estimado de um dia seguindo o cardápio (média das opções), em reais. */
   estimatedDailyCostBrl: z.number().min(0).max(1_000).optional(),
 });

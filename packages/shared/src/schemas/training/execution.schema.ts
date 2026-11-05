@@ -68,6 +68,10 @@ export const painReportSchema = z.object({
   /** 0–10. */
   intensity: z.number().int().min(0).max(10),
   during: z.enum(['DURING', 'AFTER', 'NEXT_DAY']),
+  /** Como é a dor: muscular (cansaço de treino), articular, pontada ou queimação. */
+  character: z.enum(['MUSCLE', 'JOINT', 'SHARP', 'BURNING', 'OTHER']).optional(),
+  /** A dor limita o movimento ou o apoio. */
+  limitsMovement: z.boolean().optional(),
 });
 export type PainReport = z.infer<typeof painReportSchema>;
 
@@ -96,6 +100,24 @@ export const saveSetsRequestSchema = z.object({
 });
 export type SaveSetsRequest = z.infer<typeof saveSetsRequestSchema>;
 
+/**
+ * Check-in do dia, junto do fechamento do treino: o que os agentes precisam para entender o dia
+ * a dia do aluno (disposição, sono, corpo, ânimo e alimentação). Tudo opcional e em um toque.
+ */
+export const dailyCheckInSchema = z.object({
+  /** 1 = péssimo, 5 = ótimo. */
+  energy: z.number().int().min(1).max(5).nullable().optional(),
+  sleep: z.number().int().min(1).max(5).nullable().optional(),
+  /** 1 = muito dolorido, 5 = sem dor muscular. */
+  soreness: z.number().int().min(1).max(5).nullable().optional(),
+  mood: z.number().int().min(1).max(5).nullable().optional(),
+  /** 1 = sem estresse, 5 = muito estressado. */
+  stress: z.number().int().min(1).max(5).nullable().optional(),
+  /** Como foi a alimentação do dia em relação ao plano. */
+  nutrition: z.enum(['ON_TRACK', 'PARTIAL', 'OFF']).nullable().optional(),
+});
+export type DailyCheckIn = z.infer<typeof dailyCheckInSchema>;
+
 /** Fechamento: o aluno só informa o que a modalidade pede (esforço, tempo, dor, gosto). */
 export const finishExecutionRequestSchema = z.object({
   status: executionStatusSchema.exclude(['IN_PROGRESS']),
@@ -103,6 +125,7 @@ export const finishExecutionRequestSchema = z.object({
   durationMinutes: z.number().int().min(1).max(600).nullable(),
   painReports: z.array(painReportSchema).max(6),
   enjoyment: z.number().int().min(1).max(5).nullable(),
+  checkIn: dailyCheckInSchema.optional(),
 });
 export type FinishExecutionRequest = z.infer<typeof finishExecutionRequestSchema>;
 

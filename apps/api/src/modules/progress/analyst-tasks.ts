@@ -37,7 +37,32 @@ const DATA_KEYS = new Set([
   'key_sessions',
   'food_log',
   'weight',
+  'acwr',
+  'monotony',
+  'strain',
+  'readiness',
 ]);
+
+/** Carga e prontidão derivadas dos registros diários (ver `load-metrics.ts`). */
+export const loadMetricsViewSchema = z.object({
+  weeklyLoad: z.number(),
+  previousWeeklyLoad: z.number(),
+  plannedLoad7d: z.number(),
+  adherenceRatio: z.number().nullable(),
+  acwr: z.number().nullable(),
+  monotony: z.number().nullable(),
+  strain: z.number().nullable(),
+  activeDays7d: z.number().int(),
+  readiness: z.object({
+    score: z.number().nullable(),
+    baseline: z.number().nullable(),
+    delta: z.number().nullable(),
+    sleepAvg7d: z.number().nullable(),
+    stressAvg7d: z.number().nullable(),
+  }),
+  risks: z.array(z.object({ kind: z.string(), detail: z.string() })).max(9),
+});
+export type LoadMetricsView = z.infer<typeof loadMetricsViewSchema>;
 
 export const analystInputSchema = z.object({
   weekStart: z.iso.date(),
@@ -51,6 +76,8 @@ export const analystInputSchema = z.object({
   signals: z.array(reviewSignalSchema).min(1).max(11),
   /** Até 3 trechos de artigos curados sobre o assunto dos sinais; ausente quando nada serviu. */
   evidence: evidenceListSchema,
+  /** Carga, razão aguda:crônica, monotonia, strain e prontidão dos últimos dias; ausente sem registros. */
+  loadMetrics: loadMetricsViewSchema.optional(),
 });
 export type AnalystInput = z.infer<typeof analystInputSchema>;
 
@@ -122,14 +149,14 @@ export const recoveryValidators: Validator<AnalystInput, FollowUpAnalysis>[] = [
 export const recoveryTask = defineAgentTask<AnalystInput, FollowUpAnalysis>({
   id: 'recovery.analyze_week',
   role: 'Analista de recuperação da MOVIVO. Você lê sono, energia, dores, esforço percebido e carga das últimas semanas para entender se o aluno está recuperando bem do que o plano pede.',
-  instructions: `Leia as semanas (inclusive "checkIn": sono, energia e corpo após a força em 1 a 5, 1 = pior) e os sinais.
+  instructions: `Leia as semanas (inclusive "checkIn": sono, energia e corpo após a força em 1 a 5, 1 = pior) e os sinais. Quando existir "loadMetrics", use: razão aguda:crônica (acwr: acima de 1,3 a carga subiu rápido; abaixo de 0,8 caiu), monotonia (acima de 2 = dias muito parecidos), strain, prontidão (0 a 100, comparada ao normal do próprio aluno) e "risks". São orientações de acompanhamento, não diagnóstico.
 
 ${RULES}
 6. Recuperação baixa sugere segurar a progressão ou aliviar a semana, não cortar o treino de vez. Dor relatada é assunto do profissional: aponte, não interprete a causa.
 7. "cycle", quando existir, é a fase ESTIMADA do ciclo menstrual pelo calendário: é contexto possível para queda de energia ou de sono, sempre como hipótese, nunca como causa certa.`,
   tier: 'STANDARD',
   methodology: ['RECOVERY', 'STRENGTH', 'RUNNING'],
-  state: ['training', 'restrictions', 'cycle'],
+  state: ['training', 'restrictions', 'cycle', 'memory'],
   input: analystInputSchema,
   output: followUpAnalysisSchema,
   validators: recoveryValidators,
@@ -145,7 +172,7 @@ ${RULES}
 6. Procure padrões (dias ou tipos de sessão que caem, rotina que mudou) e sugira o MENOR passo possível que caiba na rotina. Você não faz psicoterapia: se os dados sugerirem sofrimento emocional, diga só que vale o profissional conversar com o aluno.`,
   tier: 'STANDARD',
   methodology: ['ADHERENCE', 'COMMUNICATION'],
-  state: ['goals', 'preferences', 'adherence'],
+  state: ['goals', 'preferences', 'adherence', 'memory'],
   input: analystInputSchema,
   output: followUpAnalysisSchema,
   validators: analystValidators,

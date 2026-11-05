@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
+import { Info } from 'lucide-react';
 
-import { FieldLabel, QuestionStack } from './fields';
+import { FieldHelp, FieldLabel, QuestionField, QuestionStack } from './fields';
 
 /**
  * Quadro comum das etapas 2–8: título, texto de apoio aqui em cima e a barra de ações embaixo
@@ -37,14 +38,23 @@ export function StepFrame({
 
   return (
     <QuestionStack>
-      <div className="text-center">
-        <h1 ref={titleRef} tabIndex={-1} className="text-h2 font-bold outline-none">
+      <div className="pb-1 text-center">
+        <h1
+          ref={titleRef}
+          tabIndex={-1}
+          className="text-balance text-h2 font-bold text-petroleo outline-none sm:text-[1.75rem] sm:leading-[1.2] sm:tracking-[-0.015em]"
+        >
           {title}
         </h1>
-        {description && <p className="mt-2 text-body text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="mx-auto mt-2.5 max-w-[34rem] text-pretty text-body text-muted-foreground">
+            {description}
+          </p>
+        )}
       </div>
       {notice && (
-        <p className="rounded-xl border border-border bg-muted/40 p-3 text-label text-muted-foreground">
+        <p className="flex items-start gap-2.5 rounded-xl bg-nevoa px-4 py-3 text-label text-muted-foreground">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-petroleo" />
           {notice}
         </p>
       )}
@@ -86,17 +96,17 @@ export function Labeled({
   id: string;
   label: string;
   help?: string;
-  /** Resposta opcional; sem isto a pergunta é marcada como obrigatória. */
+  /** Resposta opcional (marcada como "Opcional"); sem isto a pergunta é obrigatória. */
   optional?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <QuestionField>
       <FieldLabel htmlFor={id} optional={optional}>
         {label}
       </FieldLabel>
-      {help && <p className="text-label text-muted-foreground">{help}</p>}
+      {help && <FieldHelp>{help}</FieldHelp>}
       {children}
-    </div>
+    </QuestionField>
   );
 }

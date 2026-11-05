@@ -47,8 +47,6 @@ export const modalityExperienceSchema = z.object({
   venue: trainingVenueSchema.optional(),
   /** Há quantos meses pratica, quando se sabe (a anamnese não pergunta mais). */
   monthsPracticing: z.number().int().min(0).max(600).optional(),
-  /** Dias por semana em que pratica a modalidade. */
-  sessionsPerWeek: z.number().int().min(0).max(14),
   /** Corrida: km por semana hoje. */
   weeklyKm: z.number().min(0).max(300).optional(),
   /** Corrida: melhor tempo recente em 5 km, em segundos. */

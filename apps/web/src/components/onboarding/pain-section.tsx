@@ -6,6 +6,7 @@ import { PAIN_REGION_LABELS, type PainRegion, type PainTrend } from '@movivo/sha
 
 import {
   ChoiceGroup,
+  FieldHelp,
   FieldLabel,
   FieldValidation,
   QuestionField,
@@ -53,9 +54,9 @@ const REGION_ITEMS = (Object.keys(PAIN_REGION_LABELS) as PainRegion[]).map((valu
 
 export const TREND_ITEMS: { value: PainTrend; label: string }[] = [
   { value: 'IMPROVING', label: 'Melhorando' },
-  { value: 'STABLE', label: 'Estável' },
+  { value: 'STABLE', label: 'Sem mudança' },
   { value: 'WORSENING', label: 'Piorando' },
-  { value: 'UNKNOWN', label: 'Não sei informar' },
+  { value: 'UNKNOWN', label: 'Não sei dizer' },
 ];
 
 /**
@@ -101,18 +102,19 @@ export function PainSection({
   return (
     <QuestionStack>
       <YesNo
-        legend="Você sente alguma dor hoje que atrapalha ou preocupa na hora de treinar?"
+        legend="Hoje, você sente alguma dor ou desconforto que atrapalha ou te preocupa na hora de treinar?"
         value={data.hasPain}
         onChange={(hasPain) => onChange({ ...EMPTY_PAIN, hasPain })}
       />
 
       {data.hasPain && (
         <>
-          <p className="rounded-xl bg-secondary p-4 text-body text-petroleo">
-            Obrigado por contar. Isso é o que deixa seu treino seguro.
+          <p className="-mt-2 rounded-xl bg-accent/70 px-4 py-3 text-body text-petroleo">
+            Obrigado por contar. Com essas respostas, o treino já começa respeitando o que você
+            sente.
           </p>
           <ChoiceGroup<PainRegion>
-            legend="Em qual região você sente dor, desconforto ou limitação?"
+            legend="Em quais regiões do corpo?"
             items={REGION_ITEMS}
             selected={regionValues}
             onToggle={toggleRegion}
@@ -126,7 +128,7 @@ export function PainSection({
                 error={
                   data.points.find((point) => point.region === 'OTHER')?.regionOther.trim()
                     ? undefined
-                    : 'Informe qual é a outra região.'
+                    : 'Escreva qual é a região.'
                 }
               >
                 <TextInput
@@ -143,13 +145,13 @@ export function PainSection({
           {data.points.map((point) => (
             <QuestionField
               key={point.region}
-              className="rounded-xl border border-border bg-secondary p-4"
+              className="rounded-2xl border border-border bg-white p-4 shadow-[0_1px_2px_rgba(6,48,42,0.05)] sm:p-5"
             >
               <FieldLabel htmlFor={`intensity-${point.region}`} hint="Deslize de 0 a 10">
-                Intensidade do desconforto em{' '}
                 {point.region === 'OTHER' && point.regionOther.trim()
                   ? point.regionOther.trim()
                   : PAIN_REGION_LABELS[point.region]}
+                : quanto incomoda hoje?
               </FieldLabel>
               <input
                 id={`intensity-${point.region}`}
@@ -160,12 +162,13 @@ export function PainSection({
                 value={point.intensity}
                 onChange={(e) => setIntensity(point.region, Number(e.target.value))}
                 aria-valuetext={`${point.intensity} de 10`}
-                className="h-2 w-full accent-primary"
+                className="onboarding-range"
+                style={{ '--range-fill': `${point.intensity * 10}%` } as React.CSSProperties}
               />
               <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 text-label text-muted-foreground">
-                <span>0 · Nenhuma dor</span>
+                <span>0 · Não incomoda</span>
                 <span
-                  className="font-mono text-h3 font-semibold text-foreground"
+                  className="font-mono text-h2 font-semibold leading-none tabular-nums text-petroleo"
                   aria-hidden="true"
                 >
                   {point.intensity}
@@ -176,7 +179,7 @@ export function PainSection({
           ))}
 
           <ChoiceGroup<PainTrend>
-            legend="Esse desconforto está:"
+            legend="Nas últimas semanas, como esse desconforto tem evoluído?"
             items={TREND_ITEMS}
             selected={data.trend ? [data.trend] : []}
             onToggle={(trend) => onChange({ ...data, trend })}
@@ -184,8 +187,9 @@ export function PainSection({
 
           <QuestionField>
             <FieldLabel htmlFor="trigger" optional>
-              Quais movimentos ou situações provocam o desconforto?
+              O que costuma provocar ou piorar o desconforto?
             </FieldLabel>
+            <FieldHelp>Ex.: agachar, correr na descida, ficar muito tempo sentado.</FieldHelp>
             <TextArea
               id="trigger"
               value={data.trigger}
@@ -195,7 +199,7 @@ export function PainSection({
           </QuestionField>
 
           <YesNo
-            legend="Algum profissional de saúde já te explicou o que é essa dor?"
+            legend="Algum profissional de saúde já te explicou o que é esse desconforto?"
             value={data.hasProfessionalExplanation}
             onChange={(hasProfessionalExplanation) =>
               onChange({ ...data, hasProfessionalExplanation })
@@ -203,9 +207,8 @@ export function PainSection({
           />
           {data.hasProfessionalExplanation && (
             <QuestionField className="border-l-2 border-primary pl-4">
-              <FieldLabel htmlFor="professionalExplanation">
-                O que ele te disse? Com suas palavras, tudo bem não lembrar o nome exato.
-              </FieldLabel>
+              <FieldLabel htmlFor="professionalExplanation">O que foi explicado?</FieldLabel>
+              <FieldHelp>Com as suas palavras. Tudo bem não lembrar o nome exato.</FieldHelp>
               <TextArea
                 id="professionalExplanation"
                 value={data.professionalExplanation}
@@ -218,13 +221,13 @@ export function PainSection({
           )}
 
           <YesNo
-            legend="Você está fazendo acompanhamento médico ou fisioterapêutico?"
+            legend="Hoje, você faz acompanhamento com médico ou fisioterapeuta por causa disso?"
             value={data.underMedicalFollowUp}
             onChange={(underMedicalFollowUp) => onChange({ ...data, underMedicalFollowUp })}
           />
 
           <YesNo
-            legend="Algum profissional recomendou evitar movimentos ou exercícios específicos?"
+            legend="Algum profissional de saúde pediu para você evitar algum movimento ou exercício por causa disso?"
             value={data.hasAvoidanceRecommendation}
             onChange={(hasAvoidanceRecommendation) =>
               onChange({ ...data, hasAvoidanceRecommendation })
@@ -232,9 +235,7 @@ export function PainSection({
           />
           {data.hasAvoidanceRecommendation && (
             <QuestionField className="border-l-2 border-primary pl-4">
-              <FieldLabel htmlFor="avoid">
-                Quais movimentos ou exercícios devem ser evitados?
-              </FieldLabel>
+              <FieldLabel htmlFor="avoid">O que foi pedido para evitar?</FieldLabel>
               <TextArea
                 id="avoid"
                 value={data.avoidanceRecommendation}

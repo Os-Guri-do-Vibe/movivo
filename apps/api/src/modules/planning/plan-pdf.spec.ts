@@ -272,6 +272,45 @@ describe('protocol-pdf com cardápio', () => {
     const pdf = await nutritionPlanPdf(withMenu);
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(pdf.length).toBeGreaterThan(20_000);
+
+    // Com refeições livres o documento ganha a seção; plano antigo (sem o campo) segue igual.
+    const structure = withMenu.nutrition?.structure;
+    if (!structure || !withMenu.nutrition) throw new Error('fixture sem plano alimentar');
+    const withFree = await nutritionPlanPdf({
+      ...withMenu,
+      nutrition: {
+        ...withMenu.nutrition,
+        structure: {
+          ...structure,
+          freeMeals: {
+            perWeek: 1,
+            options: [
+              {
+                title: 'Combo de hambúrguer',
+                description: 'Hambúrguer artesanal com batata frita média',
+                energyKcal: 950,
+                fitTip: 'No dia, capriche na proteína do almoço e deixe o lanche leve.',
+              },
+              {
+                title: 'Pizza',
+                description: '3 fatias (calabresa, margherita, frango com catupiry)',
+                energyKcal: 850,
+                fitTip: 'Salada grande antes e jantar simples depois.',
+              },
+              {
+                title: 'Sushi',
+                description: '14 peças variadas e 1 temaki',
+                energyKcal: 800,
+                fitTip: 'Café da manhã leve no dia.',
+              },
+            ],
+            guidance: 'Pode escolher outra: me conte no WhatsApp e eu ajudo a encaixar.',
+          },
+        },
+      },
+    });
+    expect(withFree.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(withFree.length).toBeGreaterThan(pdf.length);
   });
 
   it('descreve a quantidade com a medida caseira quando há', () => {

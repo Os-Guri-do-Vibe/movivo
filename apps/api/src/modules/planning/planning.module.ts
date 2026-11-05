@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { BodyAssessmentModule } from '../body-assessment/body-assessment.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CoachingModule } from '../coaching/coaching.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
@@ -13,6 +14,8 @@ import { PlanController } from './plan.controller';
 import { PlanDelivery } from './plan-delivery.service';
 import { PlanGenerationService } from './plan-generation.service';
 import { PlanGenerationWorker } from './plan-generation.worker';
+import { PlanRolloverScheduler } from './plan-rollover.scheduler';
+import { PlanRolloverService } from './plan-rollover.service';
 import { PlanPublisher } from './plan-publisher.service';
 import { PlanViewService } from './plan-view.service';
 import { ProtocolReviewService } from './protocol-review.service';
@@ -24,6 +27,7 @@ import { ProtocolReviewService } from './protocol-review.service';
 @Module({
   imports: [
     PlanningTasksModule,
+    BodyAssessmentModule,
     CatalogModule,
     CoachingModule,
     DomainEventsModule,
@@ -36,6 +40,8 @@ import { ProtocolReviewService } from './protocol-review.service';
   providers: [
     PlanGenerationService,
     PlanGenerationWorker,
+    PlanRolloverScheduler,
+    PlanRolloverService,
     PlanApprovalHandler,
     PlanDelivery,
     PlanPublisher,

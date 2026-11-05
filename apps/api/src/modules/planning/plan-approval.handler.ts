@@ -63,7 +63,10 @@ export class PlanApprovalHandler implements OnModuleInit {
     if (!activated) return;
     await this.outbox.flushSoon();
     this.logger.info({ userId, planType: action.type }, 'plano aprovado pela equipe publicado');
-    await this.delivery.sendWhenComplete(userId);
+    await this.delivery.sendAfterPublish(
+      userId,
+      action.type === 'PUBLISH_TRAINING_PLAN' ? 'TRAINING' : 'NUTRITION',
+    );
   }
 
   /** Ação de publicar plano liberada na fila; `null` para qualquer outra decisão. */

@@ -7,7 +7,7 @@
  * entram decifrados com consentimento de saúde ATIVO no momento da leitura.
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, isNull, lte, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lte, ne } from 'drizzle-orm';
 
 import {
   healthRecordPayloadSchema,
@@ -21,9 +21,12 @@ import type { StateSlice } from '../../core/agents/agent-task';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import {
+  agentOutreaches,
+  bodyAssessments,
   bodyMeasurements,
   coachingDecisions,
   coachingProposals,
+  conversations,
   foodLogs,
   goalMilestones,
   goalTasks,
@@ -32,9 +35,13 @@ import {
   safetyEvents,
   scheduledSessions,
   sessionExecutions,
+  studentCommitments,
   studentConstraints,
+  studentDayDigests,
   studentGoals,
   studentHealthRecords,
+  studentMemories,
+  studentReports,
   studentPreferences,
   studentProfiles,
   studentStateSnapshots,
@@ -50,6 +57,15 @@ import { cycleView } from './menstrual-cycle';
 import { hasCycleConsent, loadCycleStarts } from './menstrual-cycle.service';
 
 const DAY_MS = 86_400_000;
+const MEMORY_LIMIT = 30;
+const OBSERVATION_DAYS = 14;
+const OBSERVATION_LIMIT = 60;
+const COMMITMENT_LIMIT = 8;
+const OUTREACH_LIMIT = 8;
+const DIGEST_DAYS = 7;
+const CONVERSATION_TURNS = 12;
+const CONVERSATION_DAYS = 14;
+const TURN_CHARS = 500;
 /** Até quando a revisão semanal ainda vale como contexto (semana revisada + a corrente). */
 const FOLLOW_UP_DAYS = 21;
 
@@ -82,7 +98,12 @@ export class StudentStateReader {
   ): Promise<StateContext> {
     const wanted = new Set(slices);
     const healthAllowed =
-      wanted.has('safety') || wanted.has('cycle')
+      wanted.has('safety') ||
+      wanted.has('cycle') ||
+      wanted.has('bodyComposition') ||
+      wanted.has('memory') ||
+      wanted.has('observations') ||
+      wanted.has('conversation')
         ? await this.consent.hasActiveForUser(userId)
         : false;
     return this.db.runAsUser(userId, 'USER', async (tx) => {
@@ -124,6 +145,8 @@ export class StudentStateReader {
         return this.nutrition(tx, userId, now);
       case 'body':
         return this.body(tx, userId);
+      case 'bodyComposition':
+        return this.bodyComposition(tx, userId, healthAllowed);
       case 'adherence':
         return this.adherence(tx, userId, now);
       case 'safety':
@@ -134,6 +157,18 @@ export class StudentStateReader {
         return this.followUp(tx, userId, now);
       case 'cycle':
         return this.cycle(tx, userId, today, healthAllowed);
+      case 'memory':
+        return this.memory(tx, userId, healthAllowed);
+      case 'conversation':
+        return this.conversation(tx, userId, now, healthAllowed);
+      case 'observations':
+        return this.observations(tx, userId, today, healthAllowed);
+      case 'commitments':
+        return this.commitments(tx, userId);
+      case 'outreach':
+        return this.outreach(tx, userId);
+      case 'dayDigests':
+        return this.dayDigests(tx, userId, today);
     }
   }
 
@@ -335,7 +370,27 @@ export class StudentStateReader {
       : null;
     return {
       activePlan: plan
-        ? { planId: plan.id, version: plan.version, strategy: plan.structure.strategy, targets }
+        ? {
+            planId: plan.id,
+            version: plan.version,
+            strategy: plan.structure.strategy,
+            targets,
+            freeMeals: plan.structure.freeMeals ?? null,
+            // Cardápio compacto (alimento e quantidade): é o que o nutricionista precisa para
+            // ensinar o preparo de uma refeição do plano pelo WhatsApp.
+            meals: plan.structure.meals.map((meal) => ({
+              slot: meal.slot,
+              guidance: meal.guidance,
+              options: (meal.options ?? []).map((option) => ({
+                title: option.title,
+                items: option.items.map((item) => ({
+                  name: item.name,
+                  grams: item.grams,
+                  ...(item.units === undefined ? {} : { units: item.units, unit: item.unit }),
+                })),
+              })),
+            })),
+          }
         : null,
       last7Days: [...byDay.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
@@ -367,6 +422,38 @@ export class StudentStateReader {
     return byKind;
   }
 
+  /**
+   * Avaliação física visual mais recente e a anterior: faixa de gordura corporal, comparação e
+   * pontos de atenção. É estimativa por foto (faixa, nunca número exato); os agentes de plano a
+   * usam junto da anamnese e das medidas para escolher estratégia energética e foco de treino.
+   */
+  private async bodyComposition(tx: TenantTransaction, userId: string, healthAllowed: boolean) {
+    if (!healthAllowed) return null;
+    const rows = await tx
+      .select({ assessedOn: bodyAssessments.assessedOn, result: bodyAssessments.result })
+      .from(bodyAssessments)
+      .where(eq(bodyAssessments.userId, userId))
+      .orderBy(desc(bodyAssessments.assessedOn), desc(bodyAssessments.createdAt))
+      .limit(2);
+    const [latest, previous] = rows;
+    if (!latest) return null;
+    const physique = latest.result.physique;
+    return {
+      assessedOn: latest.assessedOn,
+      bodyFatRangePercent: latest.result.bodyFatRange,
+      confidence: latest.result.confidence,
+      comparisonWithPrevious: latest.result.comparison?.summary ?? null,
+      observations: latest.result.observationsForProfessional,
+      previousBodyFatRangePercent: previous?.result.bodyFatRange ?? null,
+      // Avaliação física completa (ausente nas avaliações anteriores à ampliação).
+      muscleGroups: physique?.muscleGroups ?? [],
+      posture: (physique?.posture ?? []).filter((p) => p.degree !== 'NONE_VISIBLE'),
+      symmetry: physique?.symmetry ?? null,
+      strengths: physique?.strengths ?? [],
+      attentionPoints: physique?.attentionPoints ?? [],
+    };
+  }
+
   private async adherence(tx: TenantTransaction, userId: string, now: Date) {
     const since = isoDay(new Date(now.getTime() - 28 * DAY_MS));
     const scheduled = await tx
@@ -391,6 +478,150 @@ export class StudentStateReader {
       keySessionsPlanned: key.length,
       keySessionsDone: key.filter((s) => s.status === 'DONE' || s.status === 'PARTIAL').length,
     };
+  }
+
+  /** Fatos que o acompanhamento já aprendeu do aluno; contexto de saúde só com consentimento ativo. */
+  private async memory(tx: TenantTransaction, userId: string, healthAllowed: boolean) {
+    const rows = await tx
+      .select({
+        kind: studentMemories.kind,
+        content: studentMemories.content,
+        importance: studentMemories.importance,
+        recordedAt: studentMemories.recordedAt,
+      })
+      .from(studentMemories)
+      .where(and(eq(studentMemories.userId, userId), isNull(studentMemories.retiredAt)))
+      .orderBy(desc(studentMemories.importance), desc(studentMemories.recordedAt))
+      .limit(MEMORY_LIMIT);
+    const items = [];
+    for (const row of rows) {
+      if (row.kind === 'HEALTH_CONTEXT' && !healthAllowed) continue;
+      items.push({
+        kind: row.kind,
+        importance: row.importance,
+        since: isoDay(row.recordedAt),
+        text: await this.cipher.decryptHealth(row.content),
+      });
+    }
+    return { items };
+  }
+
+  /** O que o aluno contou nos últimos 14 dias; o texto só com consentimento de saúde ativo. */
+  private async observations(
+    tx: TenantTransaction,
+    userId: string,
+    today: string,
+    healthAllowed: boolean,
+  ) {
+    const from = isoDay(new Date(Date.parse(`${today}T00:00:00Z`) - OBSERVATION_DAYS * DAY_MS));
+    const rows = await tx
+      .select()
+      .from(studentReports)
+      .where(and(eq(studentReports.userId, userId), gte(studentReports.onDate, from)))
+      .orderBy(desc(studentReports.recordedAt))
+      .limit(OBSERVATION_LIMIT);
+    const items = [];
+    for (const row of rows.reverse()) {
+      items.push({
+        date: row.onDate,
+        kind: row.kind,
+        score: row.score,
+        value: row.valueNum,
+        phase: row.phase,
+        source: row.source,
+        ...(healthAllowed && row.note ? { note: await this.cipher.decryptHealth(row.note) } : {}),
+      });
+    }
+    return { items };
+  }
+
+  /** Passos combinados: em aberto e os últimos resolvidos (o que ele cumpriu e o que não). */
+  private async commitments(tx: TenantTransaction, userId: string) {
+    const rows = await tx
+      .select()
+      .from(studentCommitments)
+      .where(eq(studentCommitments.userId, userId))
+      .orderBy(desc(studentCommitments.createdOn))
+      .limit(COMMITMENT_LIMIT);
+    return {
+      items: rows.map((r) => ({
+        source: r.source,
+        text: r.text,
+        status: r.status,
+        createdOn: r.createdOn,
+        dueOn: r.dueOn,
+        ...(r.evidence ? { evidence: r.evidence } : {}),
+      })),
+    };
+  }
+
+  /** Contatos recentes iniciados pela MOVIVO e se o aluno respondeu (para não repetir o que falhou). */
+  private async outreach(tx: TenantTransaction, userId: string) {
+    const rows = await tx
+      .select()
+      .from(agentOutreaches)
+      .where(eq(agentOutreaches.userId, userId))
+      .orderBy(desc(agentOutreaches.sentAt))
+      .limit(OUTREACH_LIMIT);
+    return {
+      items: rows.map((r) => ({
+        kind: r.kind,
+        level: r.level,
+        strategy: r.strategy,
+        sentAt: r.sentAt.toISOString(),
+        respondedAfterHours: r.respondedAt
+          ? Math.max(0, Math.round((r.respondedAt.getTime() - r.sentAt.getTime()) / 3_600_000))
+          : null,
+      })),
+    };
+  }
+
+  /** O estudo dos últimos dias: cada dia com todos os sinais do aluno. */
+  private async dayDigests(tx: TenantTransaction, userId: string, today: string) {
+    const from = isoDay(new Date(Date.parse(`${today}T00:00:00Z`) - DIGEST_DAYS * DAY_MS));
+    const rows = await tx
+      .select({ date: studentDayDigests.onDate, digest: studentDayDigests.digest })
+      .from(studentDayDigests)
+      .where(and(eq(studentDayDigests.userId, userId), gte(studentDayDigests.onDate, from)))
+      .orderBy(asc(studentDayDigests.onDate));
+    return { days: rows.map((r) => ({ date: r.date, ...r.digest })) };
+  }
+
+  /** Conversa recente com o aluno: quem fala com ele precisa lembrar do que já foi dito. */
+  private async conversation(
+    tx: TenantTransaction,
+    userId: string,
+    now: Date,
+    healthAllowed: boolean,
+  ) {
+    if (!healthAllowed) return { turns: [] };
+    const rows = await tx
+      .select({
+        direction: conversations.direction,
+        content: conversations.content,
+        at: conversations.createdAt,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.userId, userId),
+          eq(conversations.mirror, false),
+          gte(conversations.createdAt, new Date(now.getTime() - CONVERSATION_DAYS * DAY_MS)),
+        ),
+      )
+      .orderBy(desc(conversations.createdAt))
+      .limit(CONVERSATION_TURNS);
+    const turns = [];
+    for (const row of rows.reverse()) {
+      const text = (await this.cipher.decryptText(row.content)).slice(0, TURN_CHARS);
+      turns.push({
+        from: row.direction === 'INBOUND' ? 'student' : 'coach',
+        at: row.at.toISOString(),
+        agoMinutes: Math.max(0, Math.round((now.getTime() - row.at.getTime()) / 60_000)),
+        text,
+      });
+    }
+    return { turns };
   }
 
   private async safety(tx: TenantTransaction, userId: string, healthAllowed: boolean) {

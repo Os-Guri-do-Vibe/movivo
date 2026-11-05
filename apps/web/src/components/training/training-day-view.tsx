@@ -19,6 +19,7 @@ import {
 } from '@/lib/training-api';
 
 import { EnduranceSession } from './endurance-session';
+import { RestDayCheckIn } from './rest-day-check-in';
 import { ExternalLogForm } from './external-log-form';
 import { FinishForm } from './finish-form';
 import { dateLabel } from './format';
@@ -206,11 +207,14 @@ export function TrainingDayView({ date }: { date?: string }) {
       </nav>
 
       {day.selected.length === 0 ? (
-        <p className="text-body text-muted-foreground">
-          {day.hasPlan
-            ? 'Dia de descanso: recuperar também é parte do plano.'
-            : 'Seu plano ainda está sendo preparado. Assim que ficar pronto, avisamos por aqui.'}
-        </p>
+        <>
+          <p className="text-body text-muted-foreground">
+            {day.hasPlan
+              ? 'Dia de descanso: recuperar também é parte do plano.'
+              : 'Seu plano ainda está sendo preparado. Assim que ficar pronto, avisamos por aqui.'}
+          </p>
+          {day.hasPlan && day.date === day.today && <RestDayCheckIn />}
+        </>
       ) : (
         day.selected.map((session) => (
           <SessionCard

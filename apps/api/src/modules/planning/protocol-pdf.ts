@@ -26,6 +26,8 @@ import {
   MEAL_SLOT_LABELS,
   SESSION_MODALITY_LABELS,
   type DailyTargets,
+  type FreeMealOption,
+  type FreeMeals,
   type MealOption,
   type NutritionPlanStructure,
   type PlanRead,
@@ -825,6 +827,158 @@ function targetsCards(s: NutritionPlanStructure): Content {
   };
 }
 
+/** Largura útil de cada um dos 3 cartões de refeição livre (miolo menos respiros e padding). */
+const FREE_CARD_WIDTH = (CONTENT_WIDTH - 2 * 10 - 6 * 12) / 3;
+
+const FREE_MEALS_HINT =
+  'Elas fazem parte do plano, não são uma pausa nele. As calorias são aproximadas, só para você ter uma referência.';
+const FREE_MEALS_GUIDANCE =
+  'Tudo bem escolher outra refeição livre. Conte no WhatsApp da MOVIVO o que você está pensando, e a gente te ajuda a encaixar no seu dia.';
+
+function freeMealCard(option: FreeMealOption, index: number): Content {
+  return {
+    stack: [
+      {
+        text: String(index + 1).padStart(2, '0'),
+        font: 'JetBrainsMono',
+        fontSize: 11,
+        bold: true,
+        color: COLOR.petroleo,
+      },
+      {
+        text: t(option.title),
+        fontSize: 10.5,
+        bold: true,
+        color: COLOR.grafite,
+        lineHeight: 1.2,
+        margin: [0, 4, 0, 3],
+      },
+      { text: t(option.description), fontSize: 8.5, color: COLOR.grafite, lineHeight: 1.3 },
+      {
+        text: [
+          {
+            text: `~${kcal(option.energyKcal)}`,
+            font: 'JetBrainsMono',
+            bold: true,
+            fontSize: 13,
+            color: COLOR.petroleo,
+          },
+          { text: '  kcal', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
+        ],
+        margin: [0, 8, 0, 8],
+      },
+      {
+        canvas: [
+          {
+            type: 'line',
+            x1: 0,
+            y1: 0,
+            x2: FREE_CARD_WIDTH,
+            y2: 0,
+            lineWidth: 0.5,
+            lineColor: COLOR.musgoTenue,
+          },
+        ],
+        margin: [0, 0, 0, 6],
+      },
+      caps('Como encaixar', COLOR.musgo),
+      {
+        text: t(option.fitTip),
+        fontSize: 8,
+        color: COLOR.musgo,
+        lineHeight: 1.3,
+        margin: [0, 3, 0, 0],
+      },
+    ],
+  };
+}
+
+/**
+ * Refeições livres: frequência semanal e três opções prévias lado a lado, mais a orientação de
+ * escolher outra com a ajuda da MOVIVO. Bloco indivisível: nenhum cartão sai cortado.
+ */
+function freeMealsSection(free: FreeMeals): Content {
+  return {
+    unbreakable: true,
+    stack: [
+      {
+        columns: [
+          { text: 'Refeições livres', style: 'h2', width: 'auto' },
+          {
+            width: 'auto',
+            margin: [0, 2, 0, 0],
+            table: { body: [[caps(`${free.perWeek}x por semana`, COLOR.pulso)]] },
+            layout: {
+              fillColor: () => COLOR.petroleo,
+              hLineWidth: () => 0,
+              vLineWidth: () => 0,
+              paddingLeft: () => 7,
+              paddingRight: () => 7,
+              paddingTop: () => 3,
+              paddingBottom: () => 3,
+            },
+          },
+        ],
+        columnGap: 8,
+        margin: [0, 22, 0, 3],
+      },
+      {
+        canvas: [{ type: 'rect', x: 0, y: 0, w: 28, h: 2.5, color: COLOR.pulso }],
+        margin: [0, 0, 0, 5],
+      },
+      { text: FREE_MEALS_HINT, style: 'muted', margin: [0, 0, 0, 10] },
+      {
+        table: {
+          widths: [FREE_CARD_WIDTH, FREE_CARD_WIDTH, FREE_CARD_WIDTH],
+          dontBreakRows: true,
+          body: [free.options.map((option, index) => freeMealCard(option, index))],
+        },
+        layout: {
+          fillColor: () => COLOR.nevoa,
+          hLineWidth: () => 0,
+          vLineWidth: (i: number) => (i === 1 || i === 2 ? 10 : 0),
+          vLineColor: () => COLOR.branco,
+          paddingLeft: () => 12,
+          paddingRight: () => 12,
+          paddingTop: () => 12,
+          paddingBottom: () => 12,
+        },
+      },
+      {
+        margin: [0, 10, 0, 0],
+        table: {
+          widths: [4, '*'],
+          body: [
+            [
+              { text: '', fillColor: COLOR.pulso },
+              {
+                fillColor: COLOR.nevoa,
+                stack: [
+                  caps('E se der vontade de outra coisa?', COLOR.petroleo),
+                  {
+                    text: t(free.guidance.trim() || FREE_MEALS_GUIDANCE),
+                    fontSize: 9,
+                    lineHeight: 1.35,
+                    margin: [0, 5, 0, 0],
+                  },
+                ],
+              },
+            ],
+          ],
+        },
+        layout: {
+          hLineWidth: () => 0,
+          vLineWidth: () => 0,
+          paddingLeft: (i: number) => (i === 1 ? 16 : 0),
+          paddingRight: () => 0,
+          paddingTop: () => 12,
+          paddingBottom: () => 12,
+        },
+      },
+    ],
+  };
+}
+
 /**
  * Uma refeição = uma tabela: barra petróleo com o nome e a meta, a orientação e, uma abaixo da
  * outra, as opções (A, B, C) com os alimentos e a quantidade. As trocas ficam sob o alimento.
@@ -1018,6 +1172,7 @@ export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
         : 'Como distribuir o seu dia. Os exemplos são ideias, não obrigações.',
     ),
     ...s.meals.map(mealTable),
+    ...(s.freeMeals ? [freeMealsSection(s.freeMeals)] : []),
     ...sectionTitle('Orientações', undefined, 14),
     guidelinesTable(s.guidelines),
     ...(s.supplements.length > 0

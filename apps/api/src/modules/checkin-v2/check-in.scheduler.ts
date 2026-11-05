@@ -1,5 +1,5 @@
 /**
- * Varredura por minuto: no domingo, às 18:00 do fuso de cada aluno, abre o check-in da semana e
+ * Varredura por minuto: no domingo, às 15:00 do fuso de cada aluno, abre o check-in da semana e
  * manda o link por WhatsApp. Idempotente pela marca da semana (Redis) e pelo `jobId` do envio.
  */
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
@@ -18,7 +18,7 @@ import { TrainingLinkService } from '../training/training-link.service';
 import { CheckInService } from './check-in.service';
 
 type CheckInJob = { kind: 'SCAN'; force?: boolean };
-const SEND_TIME = '18:00';
+const SEND_TIME = '15:00';
 const MARKER_TTL_SECONDS = 8 * 86_400;
 
 @Injectable()

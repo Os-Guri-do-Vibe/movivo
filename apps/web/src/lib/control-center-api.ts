@@ -1,4 +1,6 @@
 import {
+  studentEvolutionSchema,
+  type StudentEvolution,
   tacoCatalogResponseSchema,
   tacoFoodsResponseSchema,
   type ImportTacoInput,
@@ -963,4 +965,8 @@ export async function amendActiveProtocol(
         ? EXCEPTION_MESSAGES.forbidden
         : 'Não foi possível salvar a emenda do protocolo.';
   throw new ProtocolEditError(response.status, message, issues);
+}
+
+export function getStudentEvolution(id: string, signal?: AbortSignal): Promise<StudentEvolution> {
+  return request(`students/${encodeURIComponent(id)}/evolution`, studentEvolutionSchema, signal);
 }

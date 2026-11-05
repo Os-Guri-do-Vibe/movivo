@@ -9,6 +9,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 
 import type {
+  DailyCheckIn,
   EnduranceMetrics,
   ExecutionView,
   FinishExecutionRequest,
@@ -40,6 +41,7 @@ import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { OutboxRelay } from '../domain-events/outbox-relay';
 import { addDays, mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
+import { saveDailyCheckIn } from './daily-check-in';
 import { FitParseError, parseFit } from './import/fit-parser';
 import { applyAdjustment } from './session-adjustment';
 import { GpxParseError, parseGpx } from './import/gpx-parser';
@@ -59,6 +61,31 @@ export class ExecutionService {
     private readonly policies: PublishedPolicies,
     private readonly runner: AgentRunner,
   ) {}
+
+  /** Check-in do dia sem treino: o aluno responde rápido e os agentes leem junto do resto. */
+  async saveRestDayCheckIn(
+    userId: string,
+    checkIn: DailyCheckIn,
+    now: Date = new Date(),
+  ): Promise<{ onDate: string }> {
+    const saved = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [user] = await tx
+        .select({ timezone: users.timezone })
+        .from(users)
+        .where(eq(users.id, userId));
+      const onDate = todayIn(user?.timezone ?? null, now);
+      await saveDailyCheckIn(tx, userId, onDate, checkIn, 'DAILY');
+      // Os especialistas leem o dia assim que o check-in chega, não na revisão da semana.
+      await this.events.record(tx, {
+        userId,
+        type: 'CheckInSubmitted',
+        payload: { scope: 'DAILY', onDate },
+      });
+      return { onDate };
+    });
+    await this.outbox.flushSoon();
+    return saved;
+  }
 
   // --- Leitura ---------------------------------------------------------------------------
 
@@ -365,6 +392,7 @@ export class ExecutionService {
           })
           .where(eq(scheduledSessions.id, execution.scheduledSessionId));
       }
+      await saveDailyCheckIn(tx, userId, execution.performedOn, request.checkIn, 'SESSION');
       await this.afterClose(tx, userId, { ...execution, load }, request);
       const [updated] = await tx
         .select()
@@ -537,6 +565,9 @@ export class ExecutionService {
         modality: execution.modality,
         status: request.status,
         load: execution.load,
+        // O agente de recuperação só é chamado quando há dor para interpretar.
+        painCount: request.painReports.length,
+        maxPain: request.painReports.reduce((max, report) => Math.max(max, report.intensity), 0),
       },
     });
     if (request.painReports.length === 0) return;

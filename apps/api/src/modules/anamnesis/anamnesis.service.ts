@@ -72,7 +72,12 @@ import {
 } from '../student-state/onboarding-projection';
 import { BodyPhotoService } from './body-photo.service';
 import { ConsentService } from './consent.service';
-import { legacyPrefill, withModalityVenues, withSessionsWithinDays } from './legacy-prefill';
+import {
+  legacyPrefill,
+  withExternalSportsInWeek,
+  withModalityVenues,
+  withSessionsWithinDays,
+} from './legacy-prefill';
 import { evaluateParq } from './parq';
 import { PhoneVerificationService, type SendCodeResult } from './phone-verification.service';
 
@@ -85,8 +90,8 @@ const COMPLEMENTARY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const ANAMNESIS_STEP_TITLES: Readonly<Record<OnboardingStepNumber, string>> = {
   1: 'Cadastro',
   2: 'Objetivos',
-  3: 'Modalidades',
-  4: 'Rotina',
+  3: 'Seu treino com a MOVIVO',
+  4: 'Sua semana',
   5: 'Preferências de treino e saúde geral',
   6: 'Dores e limitações',
   7: 'Alimentação',
@@ -383,6 +388,14 @@ export class AnamnesisService {
       const { common, sensitive } = splitStep(step, payload);
       const key = BLOCK_KEY[step];
       const blocks = { ...row.blocks };
+      if (step === 3) {
+        // A etapa 3 nova não traz o esporte externo: o da 3 antiga vai para a 4 já salva.
+        const moved = withExternalSportsInWeek(
+          blocks.modalities as Record<string, unknown> | undefined,
+          blocks.routine as Record<string, unknown> | undefined,
+        );
+        if (moved.routine) blocks.routine = moved.routine;
+      }
       if (common) blocks[key] = common;
       else delete blocks[key];
       const secret = await this.readSensitive(row.sensitive);
@@ -676,11 +689,12 @@ export class AnamnesisService {
         ...(secret[key] as Record<string, unknown> | undefined),
       };
     };
+    const week = withExternalSportsInWeek(merged(3), merged(4));
     return {
       registration: ONBOARDING_STEP_SCHEMAS[1].parse(merged(1)),
       goals: ONBOARDING_STEP_SCHEMAS[2].parse(merged(2)),
-      modalities: ONBOARDING_STEP_SCHEMAS[3].parse(withModalityVenues(merged(3))),
-      routine: ONBOARDING_STEP_SCHEMAS[4].parse(withSessionsWithinDays(merged(4))),
+      modalities: ONBOARDING_STEP_SCHEMAS[3].parse(withModalityVenues(week.modalities ?? {})),
+      routine: ONBOARDING_STEP_SCHEMAS[4].parse(withSessionsWithinDays(week.routine ?? {})),
       preferences: ONBOARDING_STEP_SCHEMAS[5].parse(merged(5)),
       pain: ONBOARDING_STEP_SCHEMAS[6].parse(merged(6)),
       nutrition: ONBOARDING_STEP_SCHEMAS[7].parse(merged(7)),
@@ -706,12 +720,15 @@ export class AnamnesisService {
     if (!row) return null;
     const secret = await this.readSensitive(row.sensitive);
     const steps: AnamnesisAnswersView['steps'] = [];
+    const mergedOf = (step: OnboardingStepNumber): Record<string, unknown> => ({
+      ...(row.blocks[BLOCK_KEY[step]] as Record<string, unknown> | undefined),
+      ...(secret[BLOCK_KEY[step]] as Record<string, unknown> | undefined),
+    });
+    // Anamnese antiga: o esporte externo aparece na semana (etapa 4), como no formulário atual.
+    const week = withExternalSportsInWeek(mergedOf(3), mergedOf(4));
     for (const step of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
-      const key = BLOCK_KEY[step];
-      const merged = {
-        ...(row.blocks[key] as Record<string, unknown> | undefined),
-        ...(secret[key] as Record<string, unknown> | undefined),
-      };
+      const merged =
+        step === 3 ? (week.modalities ?? {}) : step === 4 ? (week.routine ?? {}) : mergedOf(step);
       if (Object.keys(merged).length === 0) continue;
       const parsed = ONBOARDING_STEP_SCHEMAS[step].safeParse(
         step === 3

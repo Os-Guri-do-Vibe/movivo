@@ -36,6 +36,11 @@ describe('jobs.config', () => {
         // Check-in adaptativo semanal (v2).
         'check-in',
         'weekly-review',
+        // Agenda de treino sempre à frente (completa as semanas seguintes).
+        'plan-rollover',
+        'cycle-reassessment',
+        // Acompanhamento em tempo real (dor relatada no treino).
+        'student-follow-up',
         // Outbox de eventos de domínio: relé + despacho aos consumidores.
         'outbox-relay',
         'domain-events',

@@ -124,6 +124,28 @@ export const goalIndicatorSchema = z.object({
 });
 export type GoalIndicator = z.infer<typeof goalIndicatorSchema>;
 
+/**
+ * Quantas sessões próprias por semana o aluno faz e como se dividem entre as modalidades em foco.
+ * Decisão da MOVIVO (agente de estratégia) a partir do que o aluno informou; o aluno não escolhe.
+ */
+export const sessionPlanSchema = z.object({
+  /** Total de sessões próprias por semana (sem o esporte externo). */
+  weekly: z.number().int().min(1).max(14),
+  /** Quantas sessões de cada modalidade em foco; a soma é igual a `weekly`. */
+  byModality: z
+    .array(
+      z.object({
+        modality: coachedModalitySchema,
+        sessions: z.number().int().min(1).max(6),
+      }),
+    )
+    .min(1)
+    .max(3),
+  /** Por que esta frequência e esta divisão, em uma ou duas frases. */
+  reason: z.string().trim().min(1).max(400),
+});
+export type SessionPlan = z.infer<typeof sessionPlanSchema>;
+
 /** A estratégia que o Motor de Objetivos escolheu e explicou. */
 export const goalStrategySchema = z.object({
   /** Nome curto da estratégia em linguagem do aluno (ex.: "Recomposição corporal"). */
@@ -139,6 +161,8 @@ export const goalStrategySchema = z.object({
   openQuestions: z.array(z.string().trim().min(1).max(200)).max(5),
   /** Explicação para o aluno, em linguagem clara (aparece em `/plano`). */
   studentMessage: z.string().trim().min(1).max(800).optional(),
+  /** Frequência semanal decidida pela estratégia; estratégias anteriores não têm. */
+  sessionPlan: sessionPlanSchema.optional(),
 });
 export type GoalStrategy = z.infer<typeof goalStrategySchema>;
 

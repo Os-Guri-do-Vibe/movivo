@@ -57,6 +57,34 @@ describe('CheckInForm', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/Obrigado/);
   });
 
+  it('a pergunta de acompanhamento só aparece quando a anterior pede e sai junto se a resposta mudar', async () => {
+    api.getCurrentCheckIn.mockResolvedValue({
+      id: CHECK_IN.id,
+      questions: [
+        { key: 'pain', prompt: 'Sentiu alguma dor?', type: 'YES_NO' as const, reason: 'segurança' },
+        {
+          key: 'pain_where',
+          prompt: 'Onde foi?',
+          type: 'CHOICE' as const,
+          options: ['Joelho', 'Ombro'],
+          showIf: { key: 'pain', equals: true },
+          reason: 'localiza',
+        },
+      ],
+    });
+    render(<CheckInForm />);
+    await screen.findByText('Sentiu alguma dor?');
+    expect(screen.queryByText('Onde foi?')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Sim' }));
+    await userEvent.click(await screen.findByRole('radio', { name: 'Joelho' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Não' }));
+    expect(screen.queryByText('Onde foi?')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.answerCheckIn).toHaveBeenCalled());
+    expect(api.answerCheckIn).toHaveBeenCalledWith(CHECK_IN.id, { pain: false });
+  });
+
   it('sem check-in aberto avisa que o WhatsApp chama na hora certa', async () => {
     api.getCurrentCheckIn.mockResolvedValue(null);
     render(<CheckInForm />);

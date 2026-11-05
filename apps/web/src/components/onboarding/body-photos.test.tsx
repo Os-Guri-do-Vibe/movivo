@@ -91,7 +91,7 @@ describe('BodyPhotosField', () => {
     expect(screen.getByText('Sobre as fotos do seu corpo')).toBeInTheDocument();
     expect(screen.getByText('As fotos do corpo são opcionais.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Enviar fotos' })).toBeDisabled();
-    expect(screen.getByText(/Autorize o uso das fotos acima/)).toBeInTheDocument();
+    expect(screen.getByText(/Para enviar fotos, marque a autorização acima/)).toBeInTheDocument();
     await user.click(screen.getByLabelText('Autorizo a MOVIVO a armazenar as fotos.'));
     await waitFor(() => expect(onSetConsent).toHaveBeenCalledWith(true));
     expect(screen.getByRole('button', { name: 'Enviar fotos' })).toBeEnabled();

@@ -25,7 +25,7 @@ const LOAD_SPIKE_RATIO = 1.5;
 const PLATEAU_KG_PER_WEEK = 0.1;
 const WRONG_WAY_KG_PER_WEEK = 0.15;
 const RAPID_KG_PER_WEEK = 1;
-const MIN_WEIGHT_POINTS = 4;
+const MIN_WEIGHT_POINTS = 3;
 /** Escala do check-in em que a resposta já é sinal (1 = péssimo, 5 = ótimo). */
 const LOW_SCALE = 2;
 const HEAVY = 'Pesado demais';
@@ -153,10 +153,13 @@ export function computeSignals(
         ['sono', checkIn.sleep],
         ['energia', checkIn.energy],
         ['corpo após a força', checkIn.soreness],
+        ['motivação', checkIn.motivation ?? null],
       ] as const
     ).filter(([, value]) => value !== null && value <= LOW_SCALE);
-    if (low.length > 0 || checkIn.intensityFeel === HEAVY) {
+    const stressed = checkIn.stress !== null && checkIn.stress !== undefined && checkIn.stress >= 4;
+    if (low.length > 0 || stressed || checkIn.intensityFeel === HEAVY) {
       const parts = low.map(([label, value]) => `${label} ${value}/5`);
+      if (stressed) parts.push(`estresse ${checkIn.stress}/5`);
       if (checkIn.intensityFeel === HEAVY) parts.push('treinos sentidos como pesados demais');
       found.push(signal('RECOVERY_LOW', `No check-in da semana: ${parts.join(', ')}.`));
     }

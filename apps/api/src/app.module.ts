@@ -37,6 +37,7 @@ import { CoachingModule } from './modules/coaching/coaching.module';
 import { MethodologyModule } from './modules/methodology/methodology.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { CheckInModule } from './modules/checkin-v2/check-in.module';
+import { ReassessmentModule } from './modules/reassessment/reassessment.module';
 import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { TrainingModule } from './modules/training/training.module';
 import { StudentStateModule } from './modules/student-state/student-state.module';
@@ -72,6 +73,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     TrainingModule,
     NutritionModule,
     CheckInModule,
+    ReassessmentModule,
     AdminModule,
   ],
 })

@@ -101,9 +101,9 @@ const MEDIA_TYPES: Readonly<Record<string, InboundMediaEvent['mediaType']>> = {
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MEDIA_UNSUPPORTED_MESSAGE =
-  'Por aqui eu consigo ler exames em PDF (até 8 MB) ou foto. Pode mandar nesse formato?';
+  'Por aqui eu consigo ler foto da refeição e exames em PDF (até 8 MB) ou foto. Pode mandar nesse formato?';
 const MEDIA_FAILED_MESSAGE =
-  'Não consegui abrir esse arquivo. Pode mandar de novo em PDF ou uma foto nítida do exame?';
+  'Não consegui abrir esse arquivo. Pode mandar de novo em PDF ou uma foto nítida?';
 
 /** Assinatura dos primeiros bytes de cada tipo aceito. */
 function hasSignature(bytes: Buffer, mediaType: InboundMediaEvent['mediaType']): boolean {
@@ -268,7 +268,14 @@ export class WhatsappInboundService {
 
     // Foto ou PDF (exame): caminho próprio, depois do nonce, do titular e do orçamento.
     if (message.media) {
-      await this.processMedia(message.media, message.messageId, userId, provider, correlationId);
+      await this.processMedia(
+        message.media,
+        message.messageId,
+        userId,
+        provider,
+        correlationId,
+        message.text ?? null,
+      );
       return;
     }
 
@@ -679,6 +686,7 @@ export class WhatsappInboundService {
     userId: string,
     provider: InboundProvider,
     correlationId: string,
+    caption: string | null,
   ): Promise<void> {
     const commandId = this.hash(messageId).slice(0, 40);
     if (!(await this.healthConsent.hasActiveForUser(userId))) {
@@ -707,6 +715,7 @@ export class WhatsappInboundService {
         messageKey: commandId,
         mediaType,
         bytes,
+        caption,
       });
       if (!handled) throw new Error('sem consumidor de mídia');
       this.logger.info(

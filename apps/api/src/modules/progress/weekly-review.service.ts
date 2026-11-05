@@ -28,13 +28,16 @@ import { DecisionExecutor } from '../coaching/decision/decision-executor.service
 import { ConversationStore } from '../conversation/conversation-store';
 import { DomainCommands } from '../conversation/domain-commands.service';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
-import { addDays, mondayOf } from '../planning/calc/week-planner';
+import { addDays } from '../planning/calc/week-planner';
+import { reviewWeekStart } from './review-week';
 import { todayIn } from '../planning/plan-generation.service';
 import { PublishedPolicies } from '../coaching/policy/published-policies';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { loadMetricsView } from './load-metrics';
+import { collectLoadMetrics } from './load-metrics-data';
 import { collectWeeks } from './review-data';
 import { collectEvidence } from './review-evidence';
 import {
@@ -63,7 +66,7 @@ export type ReviewResult =
       executed: number;
     };
 
-const GOAL_DIRECTION: Partial<Record<DeclaredGoalKind, GoalDirection>> = {
+export const GOAL_DIRECTION: Partial<Record<DeclaredGoalKind, GoalDirection>> = {
   FAT_LOSS: 'LOSE',
   BODY_DEFINITION: 'LOSE',
   HYPERTROPHY: 'GAIN',
@@ -97,9 +100,9 @@ export class WeeklyReviewService {
     const stateRead = await this.state.read(userId, ['identity', 'goals'], now);
     const timezone = (stateRead.slices.identity as { timezone?: string | null } | null)?.timezone;
     const today = todayIn(timezone ?? null, now);
-    const weekStart = options.weekStart ?? addDays(mondayOf(today), -7);
+    const weekStart = options.weekStart ?? reviewWeekStart(today);
 
-    const { weeks, hasNutritionPlan, already } = await this.db.runAsUser(
+    const { weeks, hasNutritionPlan, already, loadMetrics } = await this.db.runAsUser(
       userId,
       'USER',
       async (tx) => {
@@ -115,6 +118,7 @@ export class WeeklyReviewService {
           already: existing !== undefined,
           hasNutritionPlan: plan !== undefined,
           weeks: await collectWeeks(tx, userId, weekStart, HISTORY_WEEKS),
+          loadMetrics: await collectLoadMetrics(tx, userId, addDays(weekStart, 6)),
         };
       },
     );
@@ -146,6 +150,7 @@ export class WeeklyReviewService {
         modalities: await this.modalitiesOf(userId, now),
         weeks,
         signals,
+        loadMetrics: loadMetricsView(loadMetrics),
       };
       analyses = await this.analyze(userId, analystInput, now);
       const run = await this.runner.run(

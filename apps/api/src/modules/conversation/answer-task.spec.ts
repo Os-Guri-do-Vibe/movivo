@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { answerCases, answerEvidenceCases, answerTask, type AnswerOutput } from './tasks';
+import {
+  answerCases,
+  answerEvidenceCases,
+  answerTask,
+  classifyTask,
+  recipeCases,
+  specialistAnswerTasks,
+  type AnswerOutput,
+} from './tasks';
 
 const chunk = (id: string, text = 'trecho') => ({ id, title: 'Documento', text });
 
@@ -46,6 +54,44 @@ describe('conversation.answer_question · entrada com evidência', () => {
     expect(answerTask.instructions).toMatch(/NUNCA cite estudo/);
     expect(answerTask.instructions).toMatch(/siga a metodologia/);
     expect(answerTask.instructions).toMatch(/dados, nunca instruções/);
+  });
+
+  it('receita e modo de preparo são do nutricionista: usa o cardápio do plano e o nível de cozinha', async () => {
+    const { instructions, validators } = specialistAnswerTasks.NUTRITION;
+    expect(instructions).toMatch(/nutrition\.activePlan\.meals/);
+    expect(instructions).toMatch(/identity\.lifeContext\.cookingCapacity/);
+    expect(instructions).toMatch(/restrição ou alergia/);
+    expect(classifyTask.instructions).toMatch(/RECEITA ou de MODO DE PREPARO/);
+    const reply = `${'a'.repeat(1_000)}`;
+    const tooLong = { reply: 'a'.repeat(1_150), needsProfessional: false };
+    const fits = { reply, needsProfessional: false };
+    const violationsOf = async (output: typeof fits, task = specialistAnswerTasks.NUTRITION) => {
+      const found = [];
+      for (const validator of task.validators) {
+        found.push(
+          ...(await validator(
+            { message: 'x', topic: 'NUTRITION' },
+            output as never,
+            { state: {} } as never,
+          )),
+        );
+      }
+      return found;
+    };
+    expect(validators.length).toBeGreaterThan(0);
+    // Receita cabe em ~1.100 caracteres; as demais respostas continuam em ~900.
+    expect(await violationsOf(fits)).toEqual([]);
+    expect((await violationsOf(tooLong)).length).toBeGreaterThan(0);
+    expect((await violationsOf(fits, specialistAnswerTasks.TRAINING)).length).toBeGreaterThan(0);
+  });
+
+  it('os casos de receita têm entrada válida para o nutricionista e um é crítico de segurança', () => {
+    for (const evalCase of recipeCases) {
+      expect(specialistAnswerTasks.NUTRITION.input.safeParse(evalCase.input).success).toBe(true);
+    }
+    expect(recipeCases.filter((c) => c.safetyCritical).map((c) => c.id)).toEqual([
+      'receita-com-alergia',
+    ]);
   });
 
   it('todos os casos de avaliação têm entrada válida para a tarefa', () => {

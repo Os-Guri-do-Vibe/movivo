@@ -15,6 +15,7 @@ import { runningRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
 import {
   outputLanguageViolations,
+  BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
 } from './common';
@@ -237,10 +238,11 @@ Regras de montagem:
 4. Cada trecho tem distância OU duração e UM alvo: zona, ritmo, frequência cardíaca ou PSE. Para quem não tem relógio ou referência, prefira PSE/zona. Ritmos só quando "recent5kSeconds" existir, sempre sustentáveis.
 5. Com prova ("race"), respeite a fase (BASE, BUILD, PEAK, TAPER) e coloque a sessão que simula o esforço da prova como KEY quando fizer sentido. Sem prova, foque em consistência.
 6. notes: como progredir de uma semana para a outra e sinais para reduzir (cansaço fora do normal, dor que muda a passada). summary: 2 a 3 frases claras, sem prometer tempo nem resultado.
-7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
+7. ${BODY_COMPOSITION_RULE}
+8. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['RUNNING'],
-  state: ['identity', 'goals', 'preferences', 'training'],
+  state: ['identity', 'goals', 'preferences', 'training', 'bodyComposition'],
   input: runningInputSchema,
   output: blockOutputSchema,
   validators: runningValidators,

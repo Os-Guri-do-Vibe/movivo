@@ -10,7 +10,7 @@ vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   getExceptionAnamnesis,
 }));
 
-import { AnamnesisAnswersButton } from './anamnesis-answers';
+import { AnamnesisAnswersButton, AnamnesisAnswersContent } from './anamnesis-answers';
 
 beforeEach(() => getExceptionAnamnesis.mockReset());
 
@@ -61,5 +61,41 @@ describe('AnamnesisAnswersButton', () => {
       '11111111-1111-4111-8111-111111111111',
       expect.anything(),
     );
+  });
+
+  it('mostra o esporte externo dentro da semana, com rótulos legíveis', () => {
+    render(
+      <AnamnesisAnswersContent
+        view={{
+          submittedAt: null,
+          flow: 'INITIAL',
+          steps: [
+            {
+              step: 4,
+              title: 'Sua semana',
+              data: {
+                externalSports: [
+                  {
+                    sport: 'SWIMMING',
+                    label: 'Natação',
+                    sessionsPerWeek: 2,
+                    minutesPerSession: 60,
+                    typicalRpe: 5,
+                    fixedDays: ['TUE'],
+                  },
+                ],
+                maxSessionsPerWeek: 3,
+              },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByRole('region', { name: 'Sua semana' })).toBeVisible();
+    expect(screen.getByText('Natação')).toBeVisible();
+    expect(screen.getByText('Minutos por sessão')).toBeVisible();
+    expect(screen.getByText('Dias fixos')).toBeVisible();
+    expect(screen.getByText('Terça')).toBeVisible();
+    expect(screen.getByText('Máximo de treinos por semana que topa')).toBeVisible();
   });
 });

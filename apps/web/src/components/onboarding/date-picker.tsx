@@ -381,7 +381,7 @@ export function DatePicker({
       <div
         className={cn(
           'flex h-[52px] w-full overflow-hidden rounded-xl border border-input bg-white transition-colors',
-          'focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-white',
+          'hover:border-petroleo/60 focus-within:border-petroleo focus-within:ring-[3px] focus-within:ring-primary/40',
           (error || typedInvalid) && 'border-destructive',
         )}
       >

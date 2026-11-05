@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   saveMetrics: vi.fn(),
   uploadActivityFile: vi.fn(),
   logExternal: vi.fn(),
+  saveCheckIn: vi.fn(),
 }));
 vi.mock('@/lib/training-api', () => ({
   ...api,
@@ -172,6 +173,48 @@ describe('TrainingDayView', () => {
       durationMinutes: 45,
       enjoyment: null,
       painReports: [],
+      checkIn: {
+        energy: null,
+        sleep: null,
+        soreness: null,
+        mood: null,
+        stress: null,
+        nutrition: null,
+      },
+    });
+  });
+
+  it('o check-in do dia segue junto do fechamento, com os detalhes da dor', async () => {
+    api.getTrainingDay.mockResolvedValue(dayWith(STRENGTH, execution()));
+    api.finishExecution.mockResolvedValue(execution({ status: 'COMPLETED' }));
+    render(<TrainingDayView />);
+    await screen.findByRole('button', { name: 'Concluí' });
+
+    await userEvent.click(screen.getByRole('radio', { name: '7' }));
+    const minutes = screen.getByLabelText('Quantos minutos durou?');
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, '50');
+    const pick = (group: string, value: string) =>
+      userEvent.click(
+        within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: value }),
+      );
+    await pick('Disposição', '2');
+    await pick('Sono da noite passada', '3');
+    await pick('Corpo', '4');
+    await pick('Ânimo', '5');
+    await pick('Estresse', '2');
+    await userEvent.click(screen.getByRole('radio', { name: 'Mais ou menos' }));
+    await userEvent.click(screen.getByLabelText('Sim, senti dor'));
+    await userEvent.selectOptions(screen.getByLabelText('Como é a dor'), 'SHARP');
+    await userEvent.click(screen.getByLabelText('Atrapalha o movimento'));
+    await userEvent.click(screen.getByRole('button', { name: 'Concluí' }));
+
+    await waitFor(() => expect(api.finishExecution).toHaveBeenCalled());
+    expect(api.finishExecution.mock.calls[0]?.[1]).toMatchObject({
+      checkIn: { energy: 2, sleep: 3, soreness: 4, mood: 5, stress: 2, nutrition: 'PARTIAL' },
+      painReports: [
+        { region: 'ombro', during: 'DURING', character: 'SHARP', limitsMovement: true },
+      ],
     });
   });
 
@@ -226,6 +269,38 @@ describe('TrainingDayView', () => {
     api.getTrainingDay.mockResolvedValue({ ...dayWith(STRENGTH), selected: [], hasPlan: false });
     render(<TrainingDayView />);
     expect(await screen.findByText(/ainda está sendo preparado/)).toBeInTheDocument();
+  });
+
+  it('no dia de descanso o aluno responde o check-in em segundos', async () => {
+    api.getTrainingDay.mockResolvedValue({ ...dayWith(STRENGTH), selected: [] });
+    api.saveCheckIn.mockResolvedValue(undefined);
+    render(<TrainingDayView />);
+    await screen.findByText(/Dia de descanso/);
+
+    const send = screen.getByRole('button', { name: 'Enviar' });
+    expect(send).toBeDisabled();
+    await userEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'Sono da noite passada' })).getByRole('radio', {
+        name: '4',
+      }),
+    );
+    await userEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'Estresse' })).getByRole('radio', {
+        name: '2',
+      }),
+    );
+    await userEvent.click(send);
+    await waitFor(() =>
+      expect(api.saveCheckIn).toHaveBeenCalledWith({
+        energy: null,
+        sleep: 4,
+        soreness: null,
+        mood: null,
+        stress: 2,
+        nutrition: null,
+      }),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent(/Obrigado/);
   });
 
   it('sessão sem acesso (401) pede o link do WhatsApp', async () => {

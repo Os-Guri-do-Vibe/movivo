@@ -85,6 +85,7 @@ import { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
 import { summarizeCostDistribution } from './cost-distribution';
 import { buildFinancialProjection } from './financial-projection';
+import { readStudentPhotoAssessments } from './student-photo-assessment.reader';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 const MINIMUM_SEGMENT_SIZE = 10;
@@ -1415,6 +1416,10 @@ export class ControlCenterService {
     });
     if (!raw) throw new NotFoundException('Aluno não encontrado.');
     const { row } = raw;
+    // Avaliação física por foto: só com a capability de saúde, a autorização das fotos e a RLS.
+    const photoAssessment = canReadHealth
+      ? await readStudentPhotoAssessments(this.db, actor, studentId)
+      : null;
 
     // Origem do primeiro toque: a sessão mais antiga é a que traz o cadastro.
     const firstSession = raw.anamnesisRows.at(-1) ?? null;
@@ -1589,7 +1594,10 @@ export class ControlCenterService {
             blocked: raw.quality?.blocked ?? 0,
             validated: raw.quality?.validated ?? 0,
           },
-          health: canReadHealth ? { parqState: row.parqState, painReports } : null,
+          health:
+            canReadHealth && photoAssessment
+              ? { parqState: row.parqState, painReports, photoAssessment }
+              : null,
           followUp: raw.followUp
             ? {
                 weekStart: raw.followUp.weekStart,

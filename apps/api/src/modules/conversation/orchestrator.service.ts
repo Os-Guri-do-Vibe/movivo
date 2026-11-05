@@ -14,8 +14,6 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import {
-  MEAL_SLOT_LABELS,
-  type MealSlot,
   PERSONAS,
   personaOf,
   type CoachingProposal,
@@ -28,8 +26,8 @@ import {
 
 import type { AgentContextSources } from '../../core/agents/agent-context';
 import type { StateSlice } from '../../core/agents/agent-task';
-import { AgentRunner, AgentTaskError } from '../../core/agents/agent-runner';
-import { nutritionPlans, planSessions, scheduledSessions } from '../../core/database/schema';
+import { AgentRunner } from '../../core/agents/agent-runner';
+import { planSessions, scheduledSessions } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
@@ -50,15 +48,18 @@ import { SafetyService } from '../coaching/safety/safety.service';
 import { signalOf } from '../coaching/safety/sentinel-rules';
 import { OutboxRelay } from '../domain-events/outbox-relay';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
-import { FoodCandidatesService } from '../nutrition/food-candidates.service';
-import { FoodLogService } from '../nutrition/food-log.service';
-import { mealSuggestionTask } from '../nutrition/meal-suggestion-task';
-import { buildOption, mealTarget, quantityLabel, tokensOf } from '../planning/calc/menu';
+import { FoodChatService } from './food-chat.service';
+import { MealCoachService } from './meal-coach.service';
+import type { FollowUpJob } from '../jobs/follow-up.contract';
+import { QUEUE } from '../jobs/jobs.config';
+import { QueueManager } from '../jobs/queue-manager.service';
+import { WHATSAPP_BUBBLE_SEPARATOR } from '../jobs/whatsapp-outbound.contract';
 import { addDays, mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 import { catalogProfileOf, contraindicationsOf, exercisePreference } from '../planning/inputs';
 import { fold } from '../planning/tasks/common';
 import { parseStateView } from '../planning/state-view';
+import { ObservationService } from '../student-state/observation.service';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { ScheduleService } from '../training/schedule.service';
 import { shortenFactor } from '../training/session-adjustment';
@@ -68,42 +69,17 @@ import * as msg from './messages';
 import { textSignals } from './safety-text-rules';
 import { declinesSwap, swapScopeOf, type SwapScope } from './swap-scope';
 import { KnowledgeRetrievalService } from '../../core/knowledge/knowledge-retrieval.service';
-import { answerTask, classifyTask, riskTask, substituteTask, type ClassifyOutput } from './tasks';
+import {
+  classifyTask,
+  riskTask,
+  specialistAnswerTasks,
+  substituteTask,
+  type ClassifyOutput,
+} from './tasks';
 
 const PROCESSED_TTL_SECONDS = 86_400;
 
-/** Refeição que faz sentido pela hora local, entre as do plano do aluno. */
-export function mealByClock(
-  slots: readonly MealSlot[],
-  now: Date,
-  timezone: string | null,
-): MealSlot | null {
-  let hour: number;
-  try {
-    hour = Number(
-      new Intl.DateTimeFormat('en-GB', {
-        hour: '2-digit',
-        hourCycle: 'h23',
-        timeZone: timezone ?? 'America/Sao_Paulo',
-      }).format(now),
-    );
-  } catch {
-    return null;
-  }
-  const wanted: MealSlot =
-    hour >= 5 && hour < 10
-      ? 'BREAKFAST'
-      : hour < 12
-        ? 'MORNING_SNACK'
-        : hour < 15
-          ? 'LUNCH'
-          : hour < 18
-            ? 'AFTERNOON_SNACK'
-            : hour < 22
-              ? 'DINNER'
-              : 'SUPPER';
-  return slots.includes(wanted) ? wanted : null;
-}
+export { mealByClock } from './meal-clock';
 /** Uma troca "só hoje ou no protocolo?" nasce de uma situação do momento: passadas horas, caduca. */
 const PENDING_SWAP_TTL_SECONDS = 3 * 3600;
 
@@ -173,10 +149,12 @@ export class ConversationOrchestrator {
     private readonly schedule: ScheduleService,
     private readonly commands: DomainCommands,
     private readonly catalog: ExerciseCatalogProvider,
-    private readonly foods: FoodLogService,
-    private readonly foodCandidates: FoodCandidatesService,
+    private readonly foodChat: FoodChatService,
+    private readonly mealCoach: MealCoachService,
     private readonly links: TrainingLinkService,
     private readonly outbox: OutboxRelay,
+    private readonly observations: ObservationService,
+    private readonly queues: QueueManager,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly faq: FaqService,
@@ -239,6 +217,8 @@ export class ConversationOrchestrator {
       { userId, intent: intent.intent, event: 'conversation_classified' },
       'mensagem classificada',
     );
+    // O que o aluno conta do dia dele (sono, estresse, energia…) vira dado, em qualquer intenção.
+    await this.captureReports(userId, intent, today, input.correlationId);
 
     // Dor e lesão não travam a conversa: o alerta já foi aberto para o profissional e a troca de
     // exercício segue (o catálogo seguro já exclui o que é contraindicado para o aluno).
@@ -260,29 +240,33 @@ export class ConversationOrchestrator {
       case 'EXERCISE_SWAP':
         return this.exerciseSwap(userId, text, intent, view, today, now);
       case 'MEAL_SUGGESTION':
-        return this.mealSuggestion(
-          userId,
-          text,
-          intent,
-          view,
-          stateRead.slices.identity,
-          sources,
-          now,
-          timezone ?? null,
-        );
+        return this.mealSuggestion(userId, text, intent, view, now, timezone ?? null);
       case 'FOOD_LOG': {
-        const draft = await this.foods.draftFromText(userId, { text }, now);
-        if (draft.items.length === 0) {
-          return {
-            status: 'ASKED',
-            reply: draft.needsClarification ?? msg.FOOD_CLARIFICATION_FALLBACK,
-            intent: intent.intent,
-          };
+        const logged = await this.foodChat.logText(userId, text, now);
+        return {
+          status: logged.status === 'LOGGED' ? 'INFORMED' : 'ASKED',
+          reply: logged.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
+          intent: intent.intent,
+        };
+      }
+      case 'FOOD_CORRECTION': {
+        const corrected =
+          (await this.foodChat.correctLast(userId, text, now)) ??
+          (await this.foodChat.logText(userId, text, now));
+        return {
+          status: corrected.status === 'LOGGED' ? 'INFORMED' : 'ASKED',
+          reply: corrected.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
+          intent: intent.intent,
+        };
+      }
+      case 'WATER_LOG': {
+        if (!intent.waterMl) {
+          return { status: 'ASKED', reply: msg.ASK_WATER_AMOUNT_MESSAGE, intent: intent.intent };
         }
-        const link = await this.links.shortUrl(userId, { next: '/alimentacao' });
+        const water = await this.foodChat.addWater(userId, intent.waterMl, now);
         return {
           status: 'INFORMED',
-          reply: msg.foodDraftMessage(draft.items, link),
+          reply: water.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
           intent: intent.intent,
         };
       }
@@ -307,6 +291,9 @@ export class ConversationOrchestrator {
           'HIGH',
         );
         return { status: 'ESCALATED', reply: msg.HUMAN_REVIEW_MESSAGE, intent: intent.intent };
+      case 'WELLBEING_REPORT':
+        // Quem responde é o especialista, em tempo real, com o relato já lido como dado.
+        return { status: 'INFORMED', reply: null, intent: intent.intent };
       case 'GREETING':
         return {
           status: 'INFORMED',
@@ -320,6 +307,50 @@ export class ConversationOrchestrator {
       case 'FOOD_DIFFICULTY':
       case 'MOTIVATION':
         return this.answer(userId, text, intent, sources, persona);
+    }
+  }
+
+  /**
+   * Grava os relatos do dia como observações e acorda os especialistas. Relato puro
+   * (WELLBEING_REPORT) é respondido por eles na hora; relato dentro de outro assunto só é lido.
+   * Falhar aqui nunca atrapalha o atendimento.
+   */
+  private async captureReports(
+    userId: string,
+    intent: ClassifyOutput,
+    today: string,
+    correlationId: string,
+  ): Promise<void> {
+    const reports = intent.reports ?? [];
+    const pure = intent.intent === 'WELLBEING_REPORT';
+    if (reports.length === 0 && !pure) return;
+    try {
+      if (reports.length > 0) {
+        await this.observations.record(
+          userId,
+          today,
+          reports.map((r) => ({
+            kind: r.kind,
+            score: r.score ?? null,
+            valueNum: r.valueNum ?? null,
+            phase: r.phase ?? 'NONE',
+            note: r.note ?? null,
+          })),
+          'CHAT',
+        );
+      }
+      const job: FollowUpJob = {
+        kind: 'SPECIALIST_DAILY',
+        userId,
+        source: 'CHAT',
+        replyAlways: pure,
+      };
+      await this.queues.enqueue(QUEUE.studentFollowUp, 'specialist-daily-chat', job, {
+        jobId: `specialist-chat_${userId}_${correlationId}`,
+        delay: 2_000,
+      });
+    } catch (err: unknown) {
+      this.logger.warn({ userId, err, event: 'wellbeing_capture_failed' }, 'relatos não gravados');
     }
   }
 
@@ -648,100 +679,32 @@ export class ConversationOrchestrator {
     text: string,
     intent: ClassifyOutput,
     view: ReturnType<typeof parseStateView>,
-    identity: unknown,
-    sources: AgentContextSources,
     now: Date,
     timezone: string | null,
   ): Promise<HandleResult> {
-    const [plan] = await this.db.runAsUser(userId, 'USER', (tx) =>
-      tx
-        .select({ structure: nutritionPlans.structure })
-        .from(nutritionPlans)
-        .where(and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.status, 'ACTIVE'))),
-    );
-    if (!plan) {
-      return { status: 'INFORMED', reply: msg.NO_NUTRITION_PLAN_MESSAGE, intent: intent.intent };
-    }
-    const structure = plan.structure;
-    // Sem refeição na mensagem, vale a que está na hora (café, almoço, lanche, jantar).
-    const slot =
-      intent.mealSlot ??
-      mealByClock(
-        structure.meals.map((m) => m.slot),
-        now,
-        timezone,
-      );
-    const meal = structure.meals.find((m) => m.slot === slot);
-    if (!meal) {
-      return {
-        status: 'ASKED',
-        reply: msg.askMealMessage(structure.meals.map((m) => MEAL_SLOT_LABELS[m.slot])),
-        intent: intent.intent,
-      };
-    }
-    // O alimento que o aluno não tem ou não quer hoje sai da lista antes de o agente escolher.
-    const avoid = tokensOf(intent.mealAvoid);
-    const allowed = (await this.foodCandidates.forStudent(userId, view.dietaryRestrictions)).filter(
-      (food) => !avoid.some((token) => fold(food.name).includes(token)),
-    );
-    if (allowed.length === 0) {
-      return {
-        status: 'INFORMED',
-        reply: msg.MEAL_SUGGESTION_FAILED_MESSAGE,
-        intent: intent.intent,
-      };
-    }
-    const target = mealTarget(meal, structure);
-    const budget = (
-      identity as { lifeContext?: { foodBudgetMonthlyBrl?: number | null } } | undefined
-    )?.lifeContext?.foodBudgetMonthlyBrl;
-    const input = {
-      message: text,
-      meal: {
-        slot: meal.slot,
-        targetKcal: Math.round(target.energyKcal),
-        targetProteinG: meal.proteinG,
-        maxCostBrl:
-          typeof budget === 'number'
-            ? Math.round((budget / 30) * meal.energyShare * 100) / 100
-            : null,
-      },
-      plannedOptions: (meal.options ?? []).map((o) => o.title),
+    const coached = await this.mealCoach.handle({
+      userId,
+      text,
+      slot: intent.mealSlot ?? null,
+      avoid: intent.mealAvoid ?? null,
+      pantry: intent.mealAvailable ?? null,
       dietaryRestrictions: view.dietaryRestrictions,
-      foods: allowed,
-      count: 1,
-    };
-    try {
-      const run = await this.runner.run(mealSuggestionTask, input, { userId, sources });
-      const foods = new Map(allowed.map((food) => [food.id, food]));
-      const options = run.output.suggestions.map((suggestion, index) => {
-        const built = buildOption(
-          suggestion,
-          { energyKcal: input.meal.targetKcal, proteinG: input.meal.targetProteinG },
-          foods,
-          `suggestions.${index}`,
-        ).option;
-        return {
-          title: built.title,
-          items: built.items.map((item) => `${quantityLabel(item)} de ${item.name}`),
-          totals: built.totals,
-          costBrl: built.estimatedCostBrl,
-        };
-      });
-      return {
-        status: 'ANSWERED',
-        reply: msg.mealSuggestionMessage(MEAL_SLOT_LABELS[meal.slot], options),
-        intent: intent.intent,
-      };
-    } catch (error) {
-      if (!(error instanceof AgentTaskError)) throw error;
-      this.logger.warn({ userId, taskId: error.taskId }, 'sugestão de refeição sem saída válida');
-      return {
-        status: 'INFORMED',
-        reply: msg.MEAL_SUGGESTION_FAILED_MESSAGE,
-        intent: intent.intent,
-      };
+      timezone,
+      now,
+    });
+    // A orientação passa pelas mesmas travas de segurança das respostas de dúvida.
+    const flags = await this.guardrails.evaluate('', coached.reply);
+    if (flags.length > 0) {
+      await this.openCase(
+        userId,
+        'NO_APPLICABLE_POLICY',
+        'NUTRITION',
+        `Orientação de refeição retida por regra de segurança (${flags.map((f) => f.label).join(', ')}).`,
+        'NORMAL',
+      );
+      return { status: 'ESCALATED', reply: msg.ESCALATED_MESSAGE, intent: intent.intent };
     }
+    return { status: coached.status, reply: coached.reply, intent: intent.intent };
   }
 
   private async answer(
@@ -774,7 +737,7 @@ export class ConversationOrchestrator {
     const run = inputFlags.length
       ? null
       : await this.runner.run(
-          answerTask,
+          specialistAnswerTasks[topic],
           { message: text, topic, ...(evidence.length > 0 ? { evidence } : {}) },
           { userId, sources, persona },
         );

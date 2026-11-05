@@ -12,6 +12,7 @@ import { strengthRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
 import {
   outputLanguageViolations,
+  BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
 } from './common';
@@ -200,6 +201,48 @@ export const strengthValidators: Validator<StrengthInput, BlockOutput>[] = [
     return violations;
   },
 
+  // Ênfase que o aluno escolheu na anamnese: cada grupo escolhido recebe ao menos o volume médio
+  // dos demais grupos principais (dentro do teto da metodologia). A foto complementa, não substitui.
+  (input, output, context) => {
+    const emphasis = input.emphasisMuscleGroups ?? [];
+    if (emphasis.length === 0 || input.sessionsPerWeek < 2) return [];
+    const rules = strengthRules(context.methodology.STRENGTH, input.level);
+    const byId = new Map(input.candidates.map((c) => [c.id, c]));
+    const weekly = new Map<string, number>();
+    for (const session of output.sessions) {
+      if (session.content.modality !== 'STRENGTH') continue;
+      for (const exercise of session.content.exercises) {
+        const primary = byId.get(exercise.exerciseId)?.muscleGroups[0];
+        if (primary) {
+          weekly.set(primary, (weekly.get(primary) ?? 0) + exercise.sets * session.weeklyFrequency);
+        }
+      }
+    }
+    const optionsPerGroup = new Map<string, number>();
+    for (const c of input.candidates) {
+      const group = c.muscleGroups[0];
+      if (group) optionsPerGroup.set(group, (optionsPerGroup.get(group) ?? 0) + 1);
+    }
+    const viable = (group: string) => (optionsPerGroup.get(group) ?? 0) >= MIN_OPTIONS_TO_REQUIRE;
+    const others = MAJOR_GROUPS.filter((group) => !emphasis.includes(group) && viable(group));
+    if (others.length === 0) return [];
+    const average =
+      others.reduce((sum, group) => sum + (weekly.get(group) ?? 0), 0) / others.length;
+    const ceiling = rules.weeklySetsPerMuscle?.max ?? Number.POSITIVE_INFINITY;
+    const target = Math.min(Math.ceil(average), ceiling);
+    const violations: Violation[] = [];
+    for (const group of emphasis.filter(viable)) {
+      const sets = weekly.get(group) ?? 0;
+      if (sets < target) {
+        violations.push({
+          path: 'sessions',
+          message: `${group} é ênfase pedida pelo aluno e tem ${sets} séries/semana, abaixo da média dos demais grupos principais (${target}). Dê mais volume e frequência a ${group}.`,
+        });
+      }
+    }
+    return violations;
+  },
+
   // Esforço, repetições e descanso dentro das faixas da metodologia.
   (input, output, context) => {
     const rules = strengthRules(context.methodology.STRENGTH, input.level);
@@ -302,12 +345,13 @@ Regras de montagem:
 4. Cada sessão tem de caber em "minutesPerSession": séries × (execução + descanso) + aquecimento. Estime estimatedMinutes honestamente; estimatedRpe (CR-10) coerente com o esforço.
 5. Ordem: multiarticulares primeiro, isolados depois. Ofereça progressão clara em "notes" (como e quando subir carga) em linguagem simples.
 6. priority: marque como KEY as sessões que não podem faltar na semana (as de maior volume do foco principal). Exercício por tempo usa durationSeconds, nunca reps.
-7. Se "emphasisMuscleGroups" vier preenchida, dê a esses grupos mais volume e frequência, sempre DENTRO das faixas da metodologia e sem sacrificar os demais grupos principais.
+7. Se "emphasisMuscleGroups" vier preenchida, é a ênfase que o ALUNO escolheu e ela vem SEMPRE em primeiro lugar: dê a esses grupos mais volume e frequência (ao menos a média dos demais grupos principais), sempre DENTRO das faixas da metodologia e sem sacrificar os demais grupos principais. Os grupos "TO_DEVELOP" da avaliação por foto ("bodyComposition") vêm depois: complementam a ênfase sem tirar volume dela; se o aluno não escolheu ênfase (corpo todo), eles passam a orientar onde dar mais volume.
 8. phases descrevem o bloco (nome, foco, semanas; endsWithDeload quando a metodologia pedir recuperação). summary: 2 a 3 frases claras para o aluno, sem prometer resultado.
-9. ${PROFESSIONAL_INSTRUCTION_RULE}`,
+9. ${BODY_COMPOSITION_RULE}
+10. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['STRENGTH'],
-  state: ['identity', 'goals', 'preferences', 'training'],
+  state: ['identity', 'goals', 'preferences', 'training', 'bodyComposition'],
   input: strengthInputSchema,
   output: blockOutputSchema,
   validators: strengthValidators,

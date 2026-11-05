@@ -253,9 +253,10 @@ export function BodyPhotosField({
       </div>
 
       <p className="text-label text-muted-foreground">
-        As fotos são opcionais e a escolha é sua. Quanto mais o corpo estiver à mostra, mais precisa
-        é a leitura do profissional. Só você e os profissionais responsáveis veem as imagens, que
-        ficam criptografadas e nunca são usadas em divulgação.
+        As fotos são opcionais e a escolha é sua. Elas ajudam o profissional a comparar a sua
+        evolução ao longo do tempo: quanto mais o corpo estiver à mostra, mais precisa é a leitura.
+        Só você e os profissionais responsáveis veem as imagens, que ficam criptografadas e nunca
+        são usadas em divulgação.
       </p>
       <ul className="flex list-disc flex-col gap-1 pl-5 text-label text-muted-foreground">
         {instructions().map((instruction) => (
@@ -304,8 +305,8 @@ export function BodyPhotosField({
       </button>
       <p className="text-center text-label text-muted-foreground">
         {consentAccepted
-          ? 'Escolha de uma vez, na ordem: frontal, lado direito, costas e lado esquerdo.'
-          : 'Autorize o uso das fotos acima para poder enviá-las.'}
+          ? 'Selecione as fotos de uma vez, nesta ordem: frontal, lado direito, costas e lado esquerdo.'
+          : 'Para enviar fotos, marque a autorização acima.'}
       </p>
       {selectionError && (
         <p role="alert" className="text-center text-label text-petroleo">

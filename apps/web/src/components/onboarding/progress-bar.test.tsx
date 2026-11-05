@@ -8,15 +8,15 @@ describe('ProgressBar', () => {
     render(<ProgressBar currentStep={3} completedSteps={[1, 2]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 3 de 9: Modalidades',
+      'Etapa 3 de 9: Treino',
     );
-    expect(screen.getByText('Etapa 3 de 9 · Modalidades')).toBeInTheDocument();
+    expect(screen.getByText('Etapa 3 de 9 · Treino')).toBeInTheDocument();
   });
 
   it('marca concluídas as etapas salvas e a atual como atual', () => {
     render(<ProgressBar currentStep={4} completedSteps={[1, 2, 3]} />);
     expect(screen.getByLabelText('Etapa 2: Objetivo, concluída')).toBeInTheDocument();
-    expect(screen.getByLabelText('Etapa 4: Rotina, atual')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByLabelText('Etapa 4: Semana, atual')).toHaveAttribute('aria-current', 'step');
     expect(screen.getByLabelText('Etapa 6: Dores')).toBeInTheDocument();
   });
 

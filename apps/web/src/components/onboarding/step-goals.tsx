@@ -26,23 +26,53 @@ import {
 } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
 
+/** Uma linha por objetivo, para separar os que parecem iguais (ex.: emagrecer x definir). */
+const GOAL_DESCRIPTIONS: Readonly<Record<DeclaredGoalKind, string>> = {
+  HYPERTROPHY: 'Ganhar massa muscular.',
+  STRENGTH: 'Levantar mais carga nos exercícios.',
+  FAT_LOSS: 'Perder gordura corporal.',
+  BODY_DEFINITION: 'Deixar os músculos mais aparentes, perdendo gordura sem perder massa.',
+  CONDITIONING: 'Ter mais fôlego e disposição no dia a dia e nos treinos.',
+  HEALTH: 'Cuidar do corpo e da mente, sem foco em estética ou desempenho.',
+  START_TRAINING: 'Nunca treinei com constância e quero criar o hábito.',
+  RETURN_TO_TRAINING: 'Já treinei antes, parei e quero retomar.',
+  BODYBUILDING_COMPETITION: 'Preparar o físico para subir no palco.',
+  RUNNING_PERFORMANCE: 'Correr mais rápido ou mais longe, sem prova marcada.',
+  RACE_PREPARATION: 'Treinar para uma prova de corrida com data definida.',
+  HYROX_PREPARATION: 'Treinar para uma prova de HYROX.',
+  SPORT_PERFORMANCE: 'Usar o treino para jogar ou competir melhor em outro esporte.',
+};
+
 const GOAL_ITEMS = (Object.keys(DECLARED_GOAL_LABELS) as DeclaredGoalKind[]).map((value) => ({
   value,
   label: DECLARED_GOAL_LABELS[value],
+  description: GOAL_DESCRIPTIONS[value],
 }));
 
-const EMPHASIS_ITEMS: { value: GoalEmphasis; label: string }[] = [
-  { value: 'AESTHETICS', label: 'Estética e composição corporal' },
-  { value: 'PERFORMANCE', label: 'Desempenho' },
-  { value: 'HEALTH', label: 'Saúde e qualidade de vida' },
-  { value: 'BALANCED', label: 'Um pouco de tudo' },
+const EMPHASIS_ITEMS: { value: GoalEmphasis; label: string; description: string }[] = [
+  {
+    value: 'AESTHETICS',
+    label: 'Estética e composição corporal',
+    description: 'Como o corpo fica: mais músculo, menos gordura.',
+  },
+  {
+    value: 'PERFORMANCE',
+    label: 'Desempenho',
+    description: 'O que o corpo faz: mais força, velocidade ou resistência.',
+  },
+  {
+    value: 'HEALTH',
+    label: 'Saúde e qualidade de vida',
+    description: 'Como você se sente: energia, disposição e bem-estar.',
+  },
+  { value: 'BALANCED', label: 'Um pouco de tudo', description: 'Sem prioridade entre os três.' },
 ];
 
 const EVENT_ITEMS: { value: EventKind; label: string }[] = [
   { value: 'RUNNING_RACE', label: 'Corrida' },
   { value: 'HYROX_RACE', label: 'HYROX' },
-  { value: 'STRENGTH_EVENT', label: 'Musculação' },
-  { value: 'OTHER_EVENT', label: 'Outra modalidade' },
+  { value: 'STRENGTH_EVENT', label: 'Fisiculturismo ou força' },
+  { value: 'OTHER_EVENT', label: 'Outro esporte' },
 ];
 
 /** Hoje, no calendário do aluno: um evento futuro não pode ser anterior a isso. */
@@ -70,10 +100,10 @@ export function StepGoals({
   return (
     <StepFrame
       title="Seus objetivos"
-      description="A MOVIVO usa isso para montar a estratégia, não para te encaixar num treino pronto."
+      description="O que você quer conquistar define a estratégia do seu treino e da sua alimentação. Nada de plano pronto."
       notice={
         resumed
-          ? 'O que você escreveu em texto livre fica guardado em sigilo e não aparece de novo. Deixe em branco para manter, ou escreva outra vez para substituir.'
+          ? 'Por sigilo, o que você escreveu nos campos de texto não aparece de novo. Deixe em branco para manter o que já foi salvo, ou escreva outra vez para substituir.'
           : undefined
       }
       canContinue={goalsComplete(data)}
@@ -83,17 +113,19 @@ export function StepGoals({
     >
       <Combobox
         id="goal-primary"
-        legend="Qual seu objetivo?"
+        legend="Qual é o seu objetivo principal?"
+        help="Escolha o que mais pesa para você hoje. É ele que guia o plano."
         items={GOAL_ITEMS}
         value={data.primary}
         onChange={(primary) =>
           onChange({ ...data, primary, secondary: data.secondary.filter((g) => g !== primary) })
         }
-        placeholder="Selecione o seu objetivo"
+        placeholder="Selecione o objetivo principal"
       />
       <Combobox
         id="goal-secondary"
-        legend="Você tem mais algum objetivo?"
+        legend="Tem outros objetivos além do principal?"
+        help="Eles entram como complemento, sem tirar a prioridade do principal."
         items={secondaryItems}
         multiple
         max={3}
@@ -110,39 +142,41 @@ export function StepGoals({
         optional
       />
       <ChoiceGroup
-        legend="Nos resultados, o que você quer priorizar agora?"
+        legend="Que tipo de resultado mais importa para você?"
+        help="Ajuda a decidir quando os seus objetivos puxam para lados diferentes."
         items={EMPHASIS_ITEMS}
         selected={data.emphasis ? [data.emphasis] : []}
         onToggle={(emphasis) => onChange({ ...data, emphasis })}
         layout="stack"
       />
       <YesNo
-        legend="Você tem uma prova, competição ou data importante pela frente?"
+        legend="Você tem alguma prova ou competição com data marcada?"
         value={data.hasEvent}
         onChange={(hasEvent) => onChange({ ...data, hasEvent })}
       />
       {data.hasEvent && (
         <div className="flex flex-col gap-6 border-l-2 border-primary pl-4">
           <ChoiceGroup
-            legend="Qual a modalidade?"
+            legend="De qual modalidade é a prova?"
             items={EVENT_ITEMS}
             selected={data.eventKind ? [data.eventKind] : []}
             onToggle={(eventKind) => onChange({ ...data, eventKind })}
           />
-          <Labeled id="event-name" label="Nome do evento">
+          <Labeled id="event-name" label="Qual é o nome da prova?">
             <FieldValidation
-              error={data.eventName.trim() === '' ? 'Informe o nome do evento.' : undefined}
+              error={data.eventName.trim() === '' ? 'Escreva o nome da prova.' : undefined}
             >
               <TextInput
                 id="event-name"
                 value={data.eventName}
                 onChange={(eventName) => onChange({ ...data, eventName })}
+                placeholder="Ex.: Meia Maratona do Rio"
                 maxLength={120}
               />
             </FieldValidation>
           </Labeled>
           <QuestionField>
-            <FieldLabel htmlFor="event-date">Qual é a data?</FieldLabel>
+            <FieldLabel htmlFor="event-date">Quando é a prova?</FieldLabel>
             <DatePicker
               id="event-date"
               value={data.eventDate}
@@ -154,7 +188,7 @@ export function StepGoals({
             <FieldError message={eventDateError(data.eventDate)} />
           </QuestionField>
           {data.eventKind === 'RUNNING_RACE' && (
-            <Labeled id="event-distance" label="Qual a distância da prova?" optional>
+            <Labeled id="event-distance" label="Qual é a distância da prova?" optional>
               <FieldValidation error={eventDistanceError(data.eventDistanceKm)}>
                 <UnitInput
                   id="event-distance"
@@ -172,7 +206,7 @@ export function StepGoals({
       <Labeled
         id="motivation"
         label="O que fez você procurar acompanhamento agora?"
-        help="Ajuda a gente a falar a sua língua."
+        help="Em poucas palavras. Ajuda a MOVIVO a conversar com você do seu jeito e a lembrar o seu porquê nos dias difíceis."
         optional
       >
         <TextArea

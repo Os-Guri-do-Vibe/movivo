@@ -1,23 +1,12 @@
 'use client';
 
-import {
-  EXTERNAL_SPORT_LABELS,
-  SESSION_MODALITY_LABELS,
-  VENUES_BY_MODALITY,
-  type ExternalSport,
-  type TrainingVenue,
-  type Weekday,
-} from '@movivo/shared';
+import { SESSION_MODALITY_LABELS, VENUES_BY_MODALITY, type TrainingVenue } from '@movivo/shared';
 
-import { DAYS_PER_WEEK_ITEMS } from './choice-items';
 import {
   ChoiceGroup,
   ClockInput,
   Combobox,
-  FieldError,
-  FieldLabel,
   FieldValidation,
-  QuestionField,
   UnitInput,
   YesNo,
   selectionHint,
@@ -25,20 +14,15 @@ import {
 } from './fields';
 import {
   fiveKError,
-  fixedDaysExceedSessions,
   hyroxBestError,
   hyroxRacesError,
   modalitiesComplete,
-  newExternalSport,
-  sportDurationError,
   weeklyKmError,
   type CoachedModalityKey,
-  type ExternalSportDraft,
   type ModalitiesDraft,
   type ModalityDraft,
 } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
-import { WEEKDAY_ITEMS } from './weekday-items';
 import { cn } from '@/lib/utils';
 
 const MODALITY_KEYS: CoachedModalityKey[] = ['STRENGTH', 'RUNNING', 'HYROX'];
@@ -77,7 +61,7 @@ const LEVEL_ITEMS: Record<CoachedModalityKey, LevelItem[]> = {
       value: 'ADVANCED',
       label: 'Avançado',
       description:
-        'Treino há mais de 2 anos, com constância, e entendo sobre controle de cargas e progressão corretamente.',
+        'Treino com constância há mais de 2 anos e sei ajustar carga e progressão por conta própria.',
     },
   ],
   RUNNING: [
@@ -89,7 +73,7 @@ const LEVEL_ITEMS: Record<CoachedModalityKey, LevelItem[]> = {
     {
       value: 'INTERMEDIATE',
       label: 'Intermediário',
-      description: 'Corro 5km abaixo de 25 minutos e treino toda semana.',
+      description: 'Treino toda semana e corro 5 km em menos de 25 minutos.',
     },
     {
       value: 'ADVANCED',
@@ -138,25 +122,22 @@ const VENUE_LABELS: Record<CoachedModalityKey, Partial<Record<TrainingVenue, str
   },
 };
 
-const SPORT_ITEMS = (Object.keys(EXTERNAL_SPORT_LABELS) as ExternalSport[]).map((value) => ({
-  value,
-  label: EXTERNAL_SPORT_LABELS[value],
-}));
-
-const RPE_ITEMS = [
-  { value: '3', label: 'Leve', description: 'Dá para conversar sem esforço.' },
-  { value: '5', label: 'Moderada', description: 'Respiração acelerada, mas confortável.' },
-  { value: '7', label: 'Intensa', description: 'Desafiadora, só consigo falar frases curtas.' },
-  { value: '9', label: 'Muito intensa', description: 'Perto do meu limite, saio exausto(a).' },
-];
-
-const MAX_EXTERNAL_SPORTS = 3;
-
-/** Liga/desliga o dia e devolve a lista na ordem da semana. */
-function toggleDay(days: Weekday[], day: Weekday): Weekday[] {
-  const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day];
-  return WEEKDAY_ITEMS.map((item) => item.value).filter((value) => next.includes(value));
-}
+/** O que cada local oferece: é o que define os exercícios possíveis. */
+const VENUE_DESCRIPTIONS: Record<CoachedModalityKey, Partial<Record<TrainingVenue, string>>> = {
+  STRENGTH: {
+    FULL_GYM: 'Máquinas, cabos, barras e pesos livres.',
+    CONDO_GYM: 'Poucos aparelhos e halteres mais leves.',
+    HOME: 'Peso do corpo e o que você tiver em casa.',
+    OUTDOOR: 'Peso do corpo e barras de praça.',
+  },
+  RUNNING: {},
+  HYROX: {
+    HYROX_GYM: 'Trenó, remo, ski erg e wall ball.',
+    FULL_GYM: 'Máquinas e pesos, sem todo o equipamento da prova.',
+    CONDO_GYM: 'Poucos aparelhos e halteres mais leves.',
+    HOME: 'Peso do corpo e o que você tiver em casa.',
+  },
+};
 
 function ModalityCards({
   selected,
@@ -168,7 +149,7 @@ function ModalityCards({
   return (
     <fieldset className="min-w-0">
       <legend className="text-body font-semibold text-foreground">
-        Quais modalidades você treina ou quer treinar?
+        Quais destas você quer treinar com a MOVIVO?
       </legend>
       <div className="mt-0.5">
         <QuestionMeta hint={selectionHint(true, undefined)} />
@@ -243,7 +224,7 @@ function ModalityFields({
     <div className="flex flex-col gap-6 rounded-xl border border-border p-4">
       <p className="text-body font-semibold">{SESSION_MODALITY_LABELS[modality]}</p>
       <YesNo
-        legend={`Você já pratica ${name}?`}
+        legend={`Você já pratica ${name} hoje?`}
         value={data.practicing ?? undefined}
         onChange={(practicing) => onChange({ ...data, practicing })}
       />
@@ -251,23 +232,20 @@ function ModalityFields({
         <>
           <Combobox
             id={`${modality}-level`}
-            legend="Qual seu nível atual?"
+            legend={`Qual é o seu nível em ${name}?`}
+            help="Escolha a descrição mais parecida com você hoje. Ela define o ponto de partida do treino."
             items={LEVEL_ITEMS[modality]}
             value={data.level}
             onChange={(level) => onChange({ ...data, level })}
-          />
-          <Combobox
-            id={`${modality}-sessions`}
-            legend={`Hoje, quantos dias por semana você pratica ${name}?`}
-            help="É o seu ponto de partida. Quantos treinos você vai fazer com a MOVIVO, você escolhe na próxima etapa."
-            items={DAYS_PER_WEEK_ITEMS}
-            value={data.sessions || null}
-            onChange={(sessions) => onChange({ ...data, sessions })}
-            placeholder="Selecione a quantidade de dias"
+            placeholder="Selecione o seu nível"
           />
           {modality === 'RUNNING' && (
             <>
-              <Labeled id="run-km" label="Em média, quantos km você corre por semana?">
+              <Labeled
+                id="run-km"
+                label="Em média, quantos km você corre por semana?"
+                help="Some as corridas de uma semana comum. Ex.: 3 treinos de 5 km = 15 km."
+              >
                 <FieldValidation error={weeklyKmError(data.weeklyKm)}>
                   <UnitInput
                     id="run-km"
@@ -280,7 +258,12 @@ function ModalityFields({
                   />
                 </FieldValidation>
               </Labeled>
-              <Labeled id="run-5k" label="Qual seu tempo atual nos 5 km?" optional>
+              <Labeled
+                id="run-5k"
+                label="Quanto tempo você leva hoje para correr 5 km?"
+                help="Em minutos e segundos (ex.: 28:30). Uma estimativa recente serve. Se nunca mediu, deixe em branco."
+                optional
+              >
                 <FieldValidation error={fiveKError(data.fiveK)}>
                   <ClockInput
                     id="run-5k"
@@ -295,7 +278,11 @@ function ModalityFields({
           )}
           {modality === 'HYROX' && (
             <>
-              <Labeled id="hyrox-races" label="Quantas provas de HYROX você já fez?">
+              <Labeled
+                id="hyrox-races"
+                label="Quantas provas de HYROX você já fez?"
+                help="Se ainda não fez nenhuma, coloque 0."
+              >
                 <FieldValidation error={hyroxRacesError(data.hyroxRaces)}>
                   <UnitInput
                     id="hyrox-races"
@@ -308,7 +295,12 @@ function ModalityFields({
                 </FieldValidation>
               </Labeled>
               {Number(data.hyroxRaces) > 0 && (
-                <Labeled id="hyrox-best" label="Qual seu melhor no HYROX completo?" optional>
+                <Labeled
+                  id="hyrox-best"
+                  label="Qual é o seu melhor tempo numa prova completa de HYROX?"
+                  help="Em horas, minutos e segundos (ex.: 01:25:00)."
+                  optional
+                >
                   <FieldValidation error={hyroxBestError(data.hyroxBest)}>
                     <ClockInput
                       id="hyrox-best"
@@ -326,99 +318,18 @@ function ModalityFields({
       )}
       <ChoiceGroup
         legend={`Onde você vai fazer a maior parte dos treinos de ${name}?`}
+        help={
+          modality === 'RUNNING' ? undefined : 'Define quais equipamentos entram no seu treino.'
+        }
         items={VENUES_BY_MODALITY[modality].map((value) => ({
           value,
           label: VENUE_LABELS[modality][value] ?? value,
+          description: VENUE_DESCRIPTIONS[modality][value],
         }))}
         selected={data.venue ? [data.venue] : []}
         onToggle={(venue) => onChange({ ...data, venue })}
         layout="stack"
       />
-    </div>
-  );
-}
-
-function ExternalSportFields({
-  index,
-  sport,
-  unavailable,
-  onChange,
-  onRemove,
-}: {
-  index: number;
-  sport: ExternalSportDraft;
-  /** Esportes já escolhidos nos outros cartões: cada esporte aparece uma vez só. */
-  unavailable: readonly (ExternalSport | null)[];
-  onChange: (next: ExternalSportDraft) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-6 rounded-2xl border border-border bg-secondary/40 p-5">
-      <p className="text-body font-semibold text-petroleo">Outro esporte {index + 1}</p>
-      <Combobox
-        id={`sport-name-${index}`}
-        legend="Qual esporte?"
-        items={SPORT_ITEMS.filter((item) => !unavailable.includes(item.value))}
-        value={sport.sport}
-        onChange={(value) => onChange({ ...sport, sport: value })}
-        placeholder="Selecione o esporte"
-      />
-      <Combobox
-        id={`sport-sessions-${index}`}
-        legend="Quantos dias na semana você pratica?"
-        items={DAYS_PER_WEEK_ITEMS}
-        value={sport.sessions || null}
-        onChange={(sessions) => onChange({ ...sport, sessions })}
-        placeholder="Selecione a quantidade de dias"
-      />
-      <div className="flex flex-col gap-2">
-        <Combobox
-          id={`sport-fixed-days-${index}`}
-          legend="Em quais dias você pratica esse esporte?"
-          items={WEEKDAY_ITEMS}
-          multiple
-          value={sport.fixedDays}
-          onChange={(day) => onChange({ ...sport, fixedDays: toggleDay(sport.fixedDays, day) })}
-          placeholder="Nenhum dia fixo"
-          optional
-        />
-        <FieldError
-          message={
-            fixedDaysExceedSessions(sport.sessions, sport.fixedDays)
-              ? 'Você marcou mais dias fixos do que dias por semana.'
-              : undefined
-          }
-        />
-      </div>
-      <QuestionField>
-        <FieldLabel htmlFor={`sport-duration-${index}`}>
-          Qual a duração média das sessões de treino?
-        </FieldLabel>
-        <FieldValidation error={sportDurationError(sport.duration)}>
-          <ClockInput
-            id={`sport-duration-${index}`}
-            kind="race"
-            placeholder="45:00"
-            value={sport.duration}
-            onChange={(duration) => onChange({ ...sport, duration })}
-          />
-        </FieldValidation>
-      </QuestionField>
-      <Combobox
-        id={`sport-rpe-${index}`}
-        legend="Qual a intensidade média dessa prática?"
-        items={RPE_ITEMS}
-        value={sport.rpe === null ? null : String(sport.rpe)}
-        onChange={(rpe) => onChange({ ...sport, rpe: Number(rpe) })}
-        placeholder="Selecione a intensidade"
-      />
-      <button
-        type="button"
-        onClick={onRemove}
-        className="self-start text-label font-semibold underline underline-offset-4"
-      >
-        Remover este esporte
-      </button>
     </div>
   );
 }
@@ -439,8 +350,8 @@ export function StepModalities({
   const selected = MODALITY_KEYS.filter((key) => data.modalities[key].selected);
   return (
     <StepFrame
-      title="O que você treina ou quer treinar?"
-      description="Pode escolher mais de uma. A MOVIVO organiza tudo junto na sua semana."
+      title="Seu treino com a MOVIVO"
+      description="Escolha o que você quer treinar com a gente e conte de onde você parte: é isso que define o ponto de partida e os exercícios do seu treino. Esporte que você pratica por fora entra na próxima etapa."
       canContinue={modalitiesComplete(data)}
       saving={saving}
       onContinue={onContinue}
@@ -468,61 +379,6 @@ export function StepModalities({
           }
         />
       ))}
-
-      <YesNo
-        legend="Você pratica outro esporte que quer manter (luta, natação, futebol…)?"
-        value={data.practicesOtherSport}
-        onChange={(yes) =>
-          onChange({
-            ...data,
-            practicesOtherSport: yes,
-            externalSports: yes
-              ? data.externalSports.length > 0
-                ? data.externalSports
-                : [newExternalSport()]
-              : [],
-          })
-        }
-      />
-      {data.practicesOtherSport && (
-        <div className="flex flex-col gap-4">
-          {data.externalSports.map((sport, index) => (
-            <ExternalSportFields
-              key={index}
-              index={index}
-              sport={sport}
-              unavailable={data.externalSports
-                .filter((_, other) => other !== index)
-                .map((s) => s.sport)}
-              onChange={(next) =>
-                onChange({
-                  ...data,
-                  externalSports: data.externalSports.map((s, i) => (i === index ? next : s)),
-                })
-              }
-              onRemove={() => {
-                const externalSports = data.externalSports.filter((_, i) => i !== index);
-                onChange({
-                  ...data,
-                  externalSports,
-                  practicesOtherSport: externalSports.length > 0,
-                });
-              }}
-            />
-          ))}
-          {data.externalSports.length > 0 && data.externalSports.length < MAX_EXTERNAL_SPORTS && (
-            <button
-              type="button"
-              onClick={() =>
-                onChange({ ...data, externalSports: [...data.externalSports, newExternalSport()] })
-              }
-              className="self-start text-label font-semibold underline underline-offset-4"
-            >
-              Adicionar outro esporte
-            </button>
-          )}
-        </div>
-      )}
     </StepFrame>
   );
 }

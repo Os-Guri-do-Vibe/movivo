@@ -268,6 +268,20 @@ function NutritionView({ structure }: { structure: NutritionPlanStructure }) {
           {brl(structure.estimatedDailyCostBrl * 30)} no mês), estimativa do nutricionista de IA.
         </p>
       ) : null}
+      {structure.freeMeals ? (
+        <div>
+          <h3 className="text-label font-semibold">
+            Refeições livres · {structure.freeMeals.perWeek}x por semana
+          </h3>
+          <ul className="mt-1 list-disc pl-5 text-xs">
+            {structure.freeMeals.options.map((o) => (
+              <li key={o.title}>
+                <strong>{o.title}</strong>: {o.description} (~{o.energyKcal} kcal). {o.fitTip}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div>
         <h3 className="text-label font-semibold">Orientações</h3>
         <ul className="mt-1 list-disc pl-5 text-xs">

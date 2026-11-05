@@ -245,10 +245,10 @@ describe('OnboardingWizard — retomada', () => {
         initial={{ ...SESSION, phoneVerified: true, completedSteps: [1, 2, 3] }}
       />,
     );
-    expect(screen.getByText('Como é a sua semana?')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sua semana' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 4 de 9: Rotina',
+      'Etapa 4 de 9: Semana',
     );
   });
 
@@ -262,9 +262,9 @@ describe('OnboardingWizard — retomada', () => {
         }}
       />,
     );
-    expect(screen.getByRole('combobox', { name: 'Qual seu objetivo?' })).toHaveTextContent(
-      'Emagrecimento',
-    );
+    expect(
+      screen.getByRole('combobox', { name: 'Qual é o seu objetivo principal?' }),
+    ).toHaveTextContent('Emagrecimento');
   });
 
   it('texto sigiloso em branco: mantém o salvo ao retomar e só apaga o que foi visto nesta aba', async () => {
@@ -321,10 +321,10 @@ describe('OnboardingWizard — anamnese complementar', () => {
       />,
     );
     expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeInTheDocument();
-    expect(screen.queryByText('Como é a sua semana?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Sua semana' })).not.toBeInTheDocument();
   });
 
-  it('rotina usa as modalidades e o esporte externo da etapa 3 e salva o que a API aceita', async () => {
+  it('semana de sessão antiga herda o esporte externo da etapa 3 e salva tudo na etapa 4', async () => {
     const user = userEvent.setup();
     render(
       <OnboardingWizard
@@ -337,7 +337,6 @@ describe('OnboardingWizard — anamnese complementar', () => {
                 {
                   modality: 'RUNNING',
                   level: 'NONE',
-                  sessionsPerWeek: 0,
                   wantsToStart: true,
                   venue: 'OUTDOOR',
                 },
@@ -357,33 +356,48 @@ describe('OnboardingWizard — anamnese complementar', () => {
         }}
       />,
     );
-    expect(screen.getByText(/A MOVIVO distribui corrida nesses dias/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/a MOVIVO decide quantos treinos de corrida fazem sentido/),
+    ).toBeInTheDocument();
+    // O esporte salvo na etapa 3 antiga reaparece já respondido, no topo da semana.
+    expect(
+      within(screen.getByRole('group', { name: /pratica algum esporte por fora/ })).getByRole(
+        'radio',
+        { name: 'Sim' },
+      ),
+    ).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Qual esporte?' })).toHaveTextContent('Natação');
     await user.click(screen.getByRole('combobox', { name: 'Em quais dias você pode treinar?' }));
     await user.click(screen.getByRole('option', { name: 'Segunda-feira' }));
     await user.click(screen.getByRole('option', { name: 'Quinta-feira' }));
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('radio', { name: 'Manhã' }));
-    await user.click(screen.getByRole('radio', { name: 'Aproximadamente 45 minutos' }));
-    const sessions = screen.getByRole('combobox', {
-      name: 'Quantos treinos da MOVIVO por semana você quer fazer?',
-    });
-    expect(sessions).toHaveAccessibleDescription(/^Sem contar natação:/);
-    await user.click(sessions);
-    await user.click(screen.getByRole('option', { name: '2 treinos' }));
+    await user.click(screen.getByRole('radio', { name: 'Cerca de 45 minutos' }));
     await user.click(
       within(
-        screen.getByRole('group', { name: 'Sua rotina muda de uma semana para outra?' }),
+        screen.getByRole('group', {
+          name: 'Esses dias e horários mudam de uma semana para outra, por escala, plantão ou viagem?',
+        }),
       ).getByRole('radio', { name: 'Não' }),
     );
     await user.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() =>
       expect(patchStep).toHaveBeenCalledWith('tok', 4, {
+        externalSports: [
+          {
+            sport: 'SWIMMING',
+            label: 'Natação',
+            sessionsPerWeek: 2,
+            minutesPerSession: 60,
+            typicalRpe: 5,
+            fixedDays: [],
+          },
+        ],
         windows: [
           { weekday: 'MON', slot: 'MORNING', maxMinutes: 45 },
           { weekday: 'THU', slot: 'MORNING', maxMinutes: 45 },
         ],
         variesWeekly: false,
-        maxSessionsPerWeek: 2,
         lifeContext: {},
       }),
     );
@@ -416,10 +430,9 @@ describe('OnboardingWizard — anamnese complementar', () => {
     submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'READY' });
     render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6])} />);
 
-    await user.click(screen.getByRole('radio', { name: 'Cozinho o básico' }));
+    await user.click(screen.getByRole('radio', { name: /^Cozinho o básico/ }));
     await user.type(screen.getByLabelText(/refeições por semana você faz fora/i), '3');
-    await user.type(screen.getByLabelText(/orçamento mensal para alimentação/i), '120000');
-    await user.type(screen.getByLabelText(/quantas refeições você faz por dia/i), '4');
+    await user.type(screen.getByLabelText(/gastar por mês com a sua alimentação/i), '120000');
     await user.click(screen.getByRole('button', { name: 'Almoço' }));
     const allergy = screen.getByRole('group', {
       name: 'Você tem alguma alergia ou intolerância alimentar?',
@@ -432,7 +445,7 @@ describe('OnboardingWizard — anamnese complementar', () => {
         'tok',
         7,
         expect.objectContaining({
-          mealsPerDay: 4,
+          mealsPerDay: 1,
           usualMeals: ['LUNCH'],
           hunger: 'NORMAL',
           cookingCapacity: 'BASIC',
@@ -442,7 +455,7 @@ describe('OnboardingWizard — anamnese complementar', () => {
       ),
     );
 
-    expect(await screen.findByText('Quer acompanhar suas medidas?')).toBeInTheDocument();
+    expect(await screen.findByText('Quer registrar o seu ponto de partida?')).toBeInTheDocument();
     // Etapa opcional: "Continuar" já vem habilitado e, sem medidas, só segue (nada é salvo).
     expect(screen.queryByRole('button', { name: 'Pular esta etapa' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continuar' }));
@@ -465,7 +478,7 @@ describe('OnboardingWizard — anamnese complementar', () => {
   it('medidas preenchidas são salvas antes do PAR-Q', async () => {
     const user = userEvent.setup();
     render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7])} />);
-    await screen.findByText('Quer acompanhar suas medidas?');
+    await screen.findByText('Quer registrar o seu ponto de partida?');
     await user.type(screen.getByLabelText('Cintura'), '92');
     await user.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() =>

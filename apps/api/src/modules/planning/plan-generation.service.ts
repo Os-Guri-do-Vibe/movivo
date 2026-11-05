@@ -15,7 +15,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import {
   type CoachedModality,
   type CoachingProposal,
+  POSTURE_REGION_LABELS,
   type GoalStrategy,
+  type PostureRegion,
+  type SessionPlan,
   type NutritionPlanStructure,
   type PlanSession,
   type TrainingPlanStructure,
@@ -36,15 +39,15 @@ import {
 } from '../../core/database/tenant-database.service';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { DecisionPipeline } from '../coaching/decision/decision-pipeline.service';
+import { PhysiqueAssessmentService } from '../body-assessment/physique-assessment.service';
 import { OutboxRelay } from '../domain-events/outbox-relay';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { checkTrainingPlan, type PlanCheckContext } from './calc/plan-check';
-import { nutritionRules, hyroxRules } from './calc/params';
+import { nutritionRules, hybridRules, hyroxRules } from './calc/params';
 import {
-  allocateSessions,
-  coachedBudget,
   externalSessionsOf,
+  fallbackSessionPlan,
   hyroxInputOf,
   levelOf,
   nutritionInputOf,
@@ -81,8 +84,17 @@ export const PLAN_STATE_SLICES: readonly StateSlice[] = [
   'preferences',
   'training',
   'body',
+  'bodyComposition',
   'safety',
 ];
+
+/** Próximo ciclo: a reavaliação do aluno e a análise dos agentes orientam os dois protocolos novos. */
+export interface PlanRenewal {
+  trainingInstruction: string;
+  nutritionInstruction: string;
+  /** Contexto para quem audita o protocolo na Fila (resumo do ciclo, pontos de saúde). */
+  notes: string[];
+}
 
 export type PlanGenerationResult =
   | { status: 'PUBLISHED'; trainingPlanId: string; nutritionPlanId: string; linkSent: boolean }
@@ -98,6 +110,23 @@ class PlanningBlocked extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Alinhamento e simetria que a IA observou nas fotos, para o profissional que audita o protocolo.
+ * Vão na justificativa do protocolo; ao aluno chegam como percepção, nunca como diagnóstico.
+ */
+export function physiqueNotesOf(view: StateView): string[] {
+  const composition = view.bodyComposition;
+  if (!composition) return [];
+  const posture = composition.posture.map(
+    (p) => `${POSTURE_REGION_LABELS[p.region as PostureRegion] ?? p.region}: ${p.finding}`,
+  );
+  const symmetry = composition.symmetry ? [`Simetria: ${composition.symmetry}`] : [];
+  const lines = [...posture, ...symmetry];
+  return lines.length === 0
+    ? []
+    : [`Avaliação postural por foto (leitura da IA, para auditoria): ${lines.join('; ')}.`];
 }
 
 /** Data de hoje no fuso do aluno (padrão: São Paulo). */
@@ -127,6 +156,7 @@ export class PlanGenerationService {
     private readonly foods: FoodCandidatesService,
     private readonly delivery: PlanDelivery,
     private readonly outbox: OutboxRelay,
+    private readonly physique: PhysiqueAssessmentService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(PlanGenerationService.name);
@@ -134,11 +164,11 @@ export class PlanGenerationService {
 
   async generate(
     userId: string,
-    options: { triggerEventId?: string | null; now?: Date } = {},
+    options: { triggerEventId?: string | null; now?: Date; renewal?: PlanRenewal } = {},
   ): Promise<PlanGenerationResult> {
     const triggerEventId = options.triggerEventId ?? null;
     return this.withFailureCase(userId, triggerEventId, () =>
-      this.run(userId, triggerEventId, options.now ?? new Date()),
+      this.run(userId, triggerEventId, options.now ?? new Date(), options.renewal),
     );
   }
 
@@ -185,6 +215,21 @@ export class PlanGenerationService {
   }
 
   /**
+   * Um especialista pede o ajuste do protocolo durante o acompanhamento semanal: o agente refaz o
+   * treino ou a alimentação com a instrução dele, a partir da estratégia já salva. O rascunho
+   * passa pelas políticas como qualquer outro (liberação automática com janela de revisão, ou
+   * Fila do Profissional quando a política pede).
+   */
+  adjustByInstruction(
+    userId: string,
+    domain: 'TRAINING' | 'NUTRITION',
+    instruction: string,
+    options: { triggerEventId?: string | null; now?: Date } = {},
+  ): Promise<PlanGenerationResult> {
+    return this.adjust(userId, domain, instruction, options);
+  }
+
+  /**
    * Refaz só um dos protocolos (treino ou alimentação) com a orientação do profissional que o
    * revisou na fila, a partir da estratégia já salva. O novo rascunho passa pelo motor de
    * políticas como na geração inicial.
@@ -213,9 +258,20 @@ export class PlanGenerationService {
 
       const proposed =
         domain === 'TRAINING'
-          ? await this.buildTraining(view, userId, strategy.modalityFocus, today, instruction).then(
-              (built) => this.db.runAsSystem((tx) => this.proposeTraining(tx, ctx, built)),
-            )
+          ? await this.buildTraining(
+              view,
+              userId,
+              strategy.modalityFocus,
+              // Estratégia anterior à decisão de frequência: respaldo calculado em código.
+              strategy.sessionPlan ??
+                fallbackSessionPlan(
+                  view,
+                  strategy.modalityFocus,
+                  hybridRules((await this.requireDomain('HYBRID', 'TRAINING')).parameters),
+                ),
+              today,
+              instruction,
+            ).then((built) => this.db.runAsSystem((tx) => this.proposeTraining(tx, ctx, built)))
           : await this.buildNutrition(
               view,
               userId,
@@ -233,7 +289,7 @@ export class PlanGenerationService {
           exceptionCaseIds: proposed.exceptionCaseId ? [proposed.exceptionCaseId] : [],
         };
       }
-      await this.delivery.sendWhenComplete(userId);
+      await this.delivery.sendAfterPublish(userId, domain);
       return { status: 'ADJUSTED', planId: proposed.planId };
     });
   }
@@ -299,27 +355,44 @@ export class PlanGenerationService {
     userId: string,
     triggerEventId: string | null,
     now: Date,
+    renewal?: PlanRenewal,
   ): Promise<PlanGenerationResult> {
-    const { state, view, today } = await this.readState(userId, now);
+    const first = await this.readState(userId, now);
 
-    if (!view.goal) throw new PlanningBlocked('GENERAL', 'o aluno não tem objetivo registrado');
-    if (view.training.modalities.length === 0 || !view.availability) {
+    if (!first.view.goal) {
+      throw new PlanningBlocked('GENERAL', 'o aluno não tem objetivo registrado');
+    }
+    if (first.view.training.modalities.length === 0 || !first.view.availability) {
       throw new PlanningBlocked('GENERAL', 'faltam modalidades ou disponibilidade na anamnese');
     }
     // Só a emergência impede a geração. Os demais sinais (PAR-Q de risco, dor, lesão) entram no
     // planejamento como restrição e o protocolo completo vai para a fila do profissional.
-    if (view.safety.signals.some((s) => s.severity === 'EMERGENCY')) {
+    if (first.view.safety.signals.some((s) => s.severity === 'EMERGENCY')) {
       return { status: 'SKIPPED', reason: 'SAFETY_SIGNAL' };
     }
-    if (await this.alreadyPlanned(userId, view.goal.goalId)) {
+    if (!renewal && (await this.alreadyPlanned(userId, first.view.goal.goalId))) {
       return { status: 'SKIPPED', reason: 'ALREADY_PLANNED' };
     }
 
+    // Primeira avaliação: as fotos da anamnese viram avaliação física (grupos musculares, postura,
+    // faixa de gordura) ANTES da estratégia, para treino, alimentação e recuperação partirem dela.
+    // Falta de foto, de consentimento ou de leitura válida não trava o protocolo.
+    const { state, view, today } =
+      !renewal && (await this.physique.assessInitial(userId, first.today))
+        ? await this.readState(userId, now)
+        : first;
+    if (!view.goal) throw new PlanningBlocked('GENERAL', 'o aluno não tem objetivo registrado');
+
     const nutritionDoc = await this.requireDomain('NUTRITION', 'NUTRITION');
-    await this.requireDomain('HYBRID', 'TRAINING');
+    const hybridDoc = await this.requireDomain('HYBRID', 'TRAINING');
 
     // 1. Estratégia -------------------------------------------------------------------
-    const strategyInput = strategyInputOf(view, nutritionRules(nutritionDoc.parameters), today);
+    const strategyInput = strategyInputOf(
+      view,
+      nutritionRules(nutritionDoc.parameters),
+      today,
+      hybridRules(hybridDoc.parameters),
+    );
     if (!strategyInput)
       throw new PlanningBlocked('GENERAL', 'dados insuficientes para a estratégia');
     const strategyRun = await this.execute(strategyTask, userId, strategyInput);
@@ -371,19 +444,41 @@ export class PlanGenerationService {
 
     // 2–4. Treino (blocos + integração + verificação) e alimentação ---------------------
     const focus = strategy.strategy.modalityFocus;
+    // Quantas sessões e como se dividem: decisão da estratégia (já validada contra o teto e o descanso).
+    const { sessionPlan } = strategy.strategy;
     const nutritionFor = (built: BuiltTraining) => ({
       strategy: strategy.strategy.energyStrategy,
       sessions: built.structure.sessions,
       enduranceFocus: built.activeFocus[0] !== 'STRENGTH',
     });
-    let training = await this.buildTraining(view, userId, focus, today);
-    let nutrition = await this.buildNutrition(view, userId, nutritionFor(training));
+    const withRenewal = (instruction: string | undefined, base: string | undefined) =>
+      [base, instruction].filter(Boolean).join('\n') || undefined;
+    let training = await this.buildTraining(
+      view,
+      userId,
+      focus,
+      sessionPlan,
+      today,
+      renewal?.trainingInstruction,
+    );
+    let nutrition = await this.buildNutrition(
+      view,
+      userId,
+      nutritionFor(training),
+      renewal?.nutritionInstruction,
+    );
 
     // 4b. Coordenador: parecer sobre o protocolo inteiro e uma rodada de ajuste, se pedir.
     const review = await this.coordinate(userId, strategy.strategy, training, nutrition);
-    const notes = review
-      ? [`Coordenador: ${review.professionalNote}`]
-      : ['Coordenador sem parecer nesta geração: confira a coerência entre treino e alimentação.'];
+    const notes = [
+      ...(renewal?.notes ?? []),
+      ...physiqueNotesOf(view),
+      ...(review
+        ? [`Coordenador: ${review.professionalNote}`]
+        : [
+            'Coordenador sem parecer nesta geração: confira a coerência entre treino e alimentação.',
+          ]),
+    ];
     const adjustments = [...(review?.adjustments ?? [])].sort((a) =>
       a.target === 'TRAINING' ? -1 : 1,
     );
@@ -392,13 +487,20 @@ export class PlanGenerationService {
         `Ajuste pedido pelo coordenador (${adjustment.target}): ${adjustment.instruction}`,
       );
       if (adjustment.target === 'TRAINING') {
-        training = await this.buildTraining(view, userId, focus, today, adjustment.instruction);
+        training = await this.buildTraining(
+          view,
+          userId,
+          focus,
+          sessionPlan,
+          today,
+          withRenewal(adjustment.instruction, renewal?.trainingInstruction),
+        );
       } else {
         nutrition = await this.buildNutrition(
           view,
           userId,
           nutritionFor(training),
-          adjustment.instruction,
+          withRenewal(adjustment.instruction, renewal?.nutritionInstruction),
         );
       }
     }
@@ -470,12 +572,15 @@ export class PlanGenerationService {
     view: StateView,
     userId: string,
     focus: readonly CoachedModality[],
+    sessionPlan: SessionPlan,
     today: string,
     instruction?: string,
   ): Promise<BuiltTraining> {
     const hybridDoc = await this.requireDomain('HYBRID', 'TRAINING');
     const external = externalSessionsOf(view);
-    const allocation = allocateSessions(focus, coachedBudget(view, focus.length));
+    const allocation: Record<string, number> = Object.fromEntries(
+      sessionPlan.byModality.map((item) => [item.modality, item.sessions]),
+    );
     const activeFocus = focus.filter((m) => allocation[m] !== undefined);
     const domains = await this.requireFocusDomains(activeFocus);
 
@@ -502,6 +607,7 @@ export class PlanGenerationService {
       hybridDoc.parameters,
       runningParameters,
       today,
+      sessionPlan.weekly,
     );
     const structure = await this.integrate({
       userId,

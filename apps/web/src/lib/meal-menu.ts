@@ -1,7 +1,8 @@
 import type { MealOption } from '@movivo/shared';
 
 /** Líquidos que o aluno mede em ml (leite, bebida vegetal, suco). */
-const LIQUID = /^(leite(?!,? (condensado|em p[oó]))|bebida|suco|[aá]gua|caldo|vitamina|refresco|caf[eé]|ch[aá])\b/i;
+const LIQUID =
+  /^(leite(?!,? (condensado|em p[oó]))|bebida|suco|[aá]gua|caldo|vitamina|refresco|caf[eé]|ch[aá])\b/i;
 
 /**
  * Quantidade como o aluno mede: unidades inteiras para o que se conta ("3 ovos"), ml para

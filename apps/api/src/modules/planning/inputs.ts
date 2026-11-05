@@ -15,6 +15,7 @@ import {
   type MethodologyParameters,
   type MuscleEmphasisRegion,
   type PlanSession,
+  type SessionPlan,
   type TrainingVenue,
   type Weekday,
 } from '@movivo/shared';
@@ -37,6 +38,7 @@ import {
   rulesLevel,
   runningRules,
   strengthRules,
+  type HybridRules,
   type NutritionRules,
   type RulesLevel,
 } from './calc/params';
@@ -45,9 +47,8 @@ import { preferenceOf, usualMealsOf, type StateView } from './state-view';
 import type { HyroxInput } from './tasks/hyrox';
 import type { NutritionInput } from './tasks/nutrition';
 import type { RunningInput } from './tasks/running';
-import type { StrategyInput } from './tasks/strategy';
+import type { SessionLimits, StrategyInput } from './tasks/strategy';
 import type { StrengthCandidate, StrengthInput } from './tasks/strength';
-import { at } from './calc/util';
 
 const DAY_MS = 86_400_000;
 
@@ -69,39 +70,25 @@ export function distinctAvailableDays(view: StateView): number {
   return new Set(view.availability?.windows.map((w) => w.weekday)).size;
 }
 
-/** Sessões próprias (da MOVIVO) por semana que o aluno sustenta, limitadas aos dias disponíveis. */
-export function sessionsPerWeekAvailable(view: StateView): number {
-  const max = view.availability?.maxSessionsPerWeek ?? 3;
-  const days = distinctAvailableDays(view);
-  return Math.max(1, days > 0 ? Math.min(max, days) : max);
-}
-
-/** Orçamento de sessões próprias, no mínimo uma por modalidade em foco. */
-export function coachedBudget(view: StateView, focusCount: number): number {
-  return Math.max(focusCount, sessionsPerWeekAvailable(view));
-}
-
 /**
- * Divide o orçamento entre as modalidades em foco (a ordem do foco é a prioridade): pesos 3/2/1,
- * mínimo de uma sessão cada. O que sobra de arredondamento vai para a mais prioritária.
+ * Teto de sessões próprias por semana, calculado em código: o aluno informa os dias em que PODE
+ * treinar; quantas sessões fazem sentido, quem decide é a MOVIVO (agente de estratégia), sempre
+ * abaixo deste teto. Respeita o descanso mínimo da metodologia e só conta sessão dupla (mais de
+ * uma no mesmo dia) quando a metodologia a permite: no máximo uma dupla a cada dois dias de treino.
  */
-export function allocateSessions(
-  focus: readonly CoachedModality[],
-  budget: number,
-): Record<string, number> {
-  const modalities = focus.slice(0, Math.max(1, Math.min(focus.length, budget)));
-  const weights = modalities.map((_, index) => 3 - index);
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
-  const result: Record<string, number> = {};
-  let assigned = 0;
-  modalities.forEach((modality, index) => {
-    const share = Math.max(1, Math.floor((budget * at(weights, index)) / totalWeight));
-    result[modality] = share;
-    assigned += share;
-  });
-  const first = modalities[0];
-  if (first) result[first] = (result[first] ?? 0) + (budget - assigned);
-  return result;
+export function sessionLimitsOf(view: StateView, rules: HybridRules): SessionLimits {
+  const stored = view.availability?.maxSessionsPerWeek ?? 3;
+  const availableDays = distinctAvailableDays(view) || Math.min(7, stored);
+  const minRestDays = Math.max(0, rules.minRestDaysPerWeek ?? 1);
+  const maxTrainingDays = Math.max(1, Math.min(availableDays, 7 - minRestDays));
+  const doubleDays = rules.allowTwoSessionsSameDay ? Math.floor(maxTrainingDays / 2) : 0;
+  return {
+    availableDays,
+    maxTrainingDays,
+    minRestDays,
+    allowTwoSessionsSameDay: rules.allowTwoSessionsSameDay,
+    maxSessions: Math.min(14, maxTrainingDays + doubleDays),
+  };
 }
 
 /** Duração típica de uma sessão: a janela mediana do aluno, limitada pela preferência dele (inferida das conversas). */
@@ -129,14 +116,46 @@ export function venueOf(view: StateView, modality: CoachedModality): TrainingVen
   );
 }
 
+/**
+ * Frequência de respaldo para estratégias salvas antes de a MOVIVO decidir o plano de sessões:
+ * o que a anamnese guardou como teto, limitado ao teto atual, dividido por igual entre as
+ * modalidades (a sobra vai para as mais prioritárias). Estratégia nova nunca passa por aqui.
+ */
+export function fallbackSessionPlan(
+  view: StateView,
+  focus: readonly CoachedModality[],
+  rules: HybridRules,
+): SessionPlan {
+  const limits = sessionLimitsOf(view, rules);
+  const stored = view.availability?.maxSessionsPerWeek ?? 3;
+  const weekly = Math.max(focus.length, Math.min(stored, limits.maxSessions));
+  const base = Math.floor(weekly / focus.length);
+  const extra = weekly - base * focus.length;
+  return {
+    weekly,
+    byModality: focus.map((modality, index) => ({
+      modality,
+      sessions: Math.min(6, base + (index < extra ? 1 : 0)),
+    })),
+    reason: 'Frequência de respaldo: a estratégia anterior não registrou o plano de sessões.',
+  };
+}
+
 export function strategyInputOf(
   view: StateView,
   nutrition: NutritionRules,
   today: string,
+  hybrid: HybridRules,
 ): StrategyInput | null {
   if (!view.goal || view.training.modalities.length === 0) return null;
   const heightCm = view.identity.heightCm;
-  const indicators = bodyIndicators(view.body, heightCm, view.identity.biologicalSex, nutrition);
+  const indicators = bodyIndicators(
+    view.body,
+    heightCm,
+    view.identity.biologicalSex,
+    nutrition,
+    view.bodyComposition?.bodyFatRange ?? null,
+  );
   const event = view.goal.declared.targetEvent;
   return {
     declared: view.goal.declared,
@@ -147,10 +166,11 @@ export function strategyInputOf(
     })),
     derived: {
       adiposity: indicators.adiposity,
+      adiposityBasis: indicators.adiposityBasis,
       bmi: indicators.bmi,
       weeksToEvent: event ? weeksBetween(today, event.date) : null,
       hasExternalSport: view.training.externalSports.length > 0,
-      sessionsPerWeekAvailable: sessionsPerWeekAvailable(view),
+      sessionLimits: sessionLimitsOf(view, hybrid),
     },
   };
 }
@@ -503,10 +523,16 @@ export function planCheckContextOf(
   hybridParameters: MethodologyParameters | undefined,
   runningParameters: MethodologyParameters | undefined,
   startsOn: string,
+  /** Total semanal decidido pela estratégia; sem ele vale o teto calculado em código. */
+  weeklySessions?: number,
 ): PlanCheckContext {
+  const schedule = scheduleContextOf(view, hybridParameters, runningParameters);
   return {
-    ...scheduleContextOf(view, hybridParameters, runningParameters),
-    maxSessionsPerWeek: Math.max(1, view.availability?.maxSessionsPerWeek ?? 1),
+    ...schedule,
+    maxSessionsPerWeek: Math.max(
+      1,
+      weeklySessions ?? sessionLimitsOf(view, schedule.rules).maxSessions,
+    ),
     focus,
     recentWeeklyLoad: recentWeeklyLoad(view),
     startsOn,

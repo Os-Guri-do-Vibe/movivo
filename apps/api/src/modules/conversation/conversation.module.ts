@@ -4,6 +4,7 @@
  */
 import { Module } from '@nestjs/common';
 
+import { AnamnesisModule } from '../anamnesis/anamnesis.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CoachingModule } from '../coaching/coaching.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
@@ -14,12 +15,17 @@ import { StudentStateModule } from '../student-state/student-state.module';
 import { TrainingModule } from '../training/training.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { ConversationStore } from './conversation-store';
+import { FoodChatService } from './food-chat.service';
+import { MealCoachService } from './meal-coach.service';
+import { MediaRouterService } from './media-router.service';
 import { ConversationWorker } from './conversation.worker';
 import { DomainCommands } from './domain-commands.service';
 import { ConversationOrchestrator } from './orchestrator.service';
+import { PhotoConsentRevocationService } from './photo-consent-revocation.service';
 
 @Module({
   imports: [
+    AnamnesisModule,
     CatalogModule,
     CoachingModule,
     DomainEventsModule,
@@ -30,7 +36,16 @@ import { ConversationOrchestrator } from './orchestrator.service';
     TrainingModule,
     WhatsappModule,
   ],
-  providers: [ConversationStore, DomainCommands, ConversationOrchestrator, ConversationWorker],
-  exports: [ConversationOrchestrator, ConversationStore, DomainCommands],
+  providers: [
+    ConversationStore,
+    DomainCommands,
+    ConversationOrchestrator,
+    ConversationWorker,
+    FoodChatService,
+    MealCoachService,
+    MediaRouterService,
+    PhotoConsentRevocationService,
+  ],
+  exports: [ConversationOrchestrator, ConversationStore, DomainCommands, FoodChatService],
 })
 export class ConversationModule {}

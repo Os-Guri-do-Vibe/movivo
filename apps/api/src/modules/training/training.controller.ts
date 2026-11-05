@@ -22,6 +22,7 @@ import 'multer';
 import { z } from 'zod';
 
 import {
+  dailyCheckInSchema,
   finishExecutionRequestSchema,
   logExternalRequestSchema,
   saveMetricsRequestSchema,
@@ -179,6 +180,16 @@ export class TrainingController {
       uuidSchema.parse(id),
       parseBody(finishExecutionRequestSchema, raw),
     );
+  }
+
+  @Post('check-in')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'Check-in do dia (disposição, sono, corpo, estresse, ânimo, alimentação)',
+  })
+  async checkIn(@Body() raw: unknown, @Headers('authorization') authorization?: string) {
+    const userId = await this.access.requireUser(authorization);
+    return this.executions.saveRestDayCheckIn(userId, parseBody(dailyCheckInSchema, raw));
   }
 
   @Post('executions/external')

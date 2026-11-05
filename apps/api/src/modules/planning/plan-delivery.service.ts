@@ -49,6 +49,71 @@ export class PlanDelivery {
     return active ? this.sendPlanLink(userId) : false;
   }
 
+  /**
+   * Depois de publicar um plano: o primeiro plano do aluno segue o fluxo completo (link + os dois
+   * PDFs). Se ele já tinha um plano daquele domínio, é uma atualização: o aluno recebe o link e só o
+   * PDF do que mudou, com a explicação de que o anterior foi substituído.
+   */
+  async sendAfterPublish(userId: string, domain: 'TRAINING' | 'NUTRITION'): Promise<boolean> {
+    return (await this.hadPreviousPlan(userId, domain))
+      ? this.sendUpdate(userId, domain)
+      : this.sendWhenComplete(userId);
+  }
+
+  async sendUpdate(userId: string, domain: 'TRAINING' | 'NUTRITION'): Promise<boolean> {
+    const { token } = await this.accessLinks.issue('PLAN', userId, userId, PLAN_LINK_TTL_MS);
+    const url = `${this.config.whatsapp.publicSiteUrl}/plano/${token}`;
+    const kind: PlanPdfKind = domain === 'TRAINING' ? 'treino' : 'alimentacao';
+    const pdf = `${this.config.apiPublicUrl}/${this.config.globalPrefix}/plans/by-token/${token}/pdf/${kind}`;
+    const dedupeId = `plan-updated_${domain}_${userId}_${Date.now()}`;
+    const bubbles =
+      domain === 'NUTRITION'
+        ? [
+            'Atualizei o seu plano alimentar a partir do que a gente viu no seu acompanhamento. O novo substitui o anterior.',
+            `Veja por aqui: ${url}`,
+            'Mandei o PDF atualizado para você guardar. Se algo não combinar com a sua rotina, é só responder que eu ajusto.',
+          ]
+        : [
+            'Atualizei o seu protocolo de treino a partir do que a gente viu no seu acompanhamento. O novo substitui o anterior.',
+            `Veja por aqui: ${url}`,
+            'Mandei o PDF atualizado para você guardar. Se algo não combinar com a sua rotina, é só responder que eu ajusto.',
+          ];
+    const job: WhatsappOutboundJob = {
+      userId,
+      type: 'CONVERSATION_MESSAGE',
+      dedupeId,
+      text: bubbles.join(WHATSAPP_BUBBLE_SEPARATOR),
+      documents: [
+        domain === 'NUTRITION'
+          ? {
+              url: pdf,
+              fileName: 'MOVIVO-protocolo-alimentar.pdf',
+              caption: 'Protocolo alimentar atualizado: metas do dia, refeições e orientações.',
+            }
+          : {
+              url: pdf,
+              fileName: 'MOVIVO-protocolo-de-treino.pdf',
+              caption: 'Protocolo de treino atualizado: sua semana e cada sessão em detalhe.',
+            },
+      ],
+    };
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'plan-updated', job, { jobId: dedupeId });
+    return true;
+  }
+
+  /** O aluno já teve um plano publicado desse domínio (ativo substituído ou ainda ativo)? */
+  private async hadPreviousPlan(userId: string, domain: 'TRAINING' | 'NUTRITION') {
+    const table = domain === 'TRAINING' ? trainingPlans : nutritionPlans;
+    const rows = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ id: table.id })
+        .from(table)
+        .where(and(eq(table.userId, userId), inArray(table.status, ['ACTIVE', 'SUPERSEDED'])))
+        .limit(2),
+    );
+    return rows.length >= 2;
+  }
+
   async sendPlanLink(userId: string): Promise<boolean> {
     const { token } = await this.accessLinks.issue('PLAN', userId, userId, PLAN_LINK_TTL_MS);
     const url = `${this.config.whatsapp.publicSiteUrl}/plano/${token}`;

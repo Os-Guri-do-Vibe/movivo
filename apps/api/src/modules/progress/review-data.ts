@@ -173,6 +173,10 @@ function checkInOf(answers: CheckInAnswers): NonNullable<WeekMetrics['checkIn']>
     const value = answers[key];
     return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : null;
   };
+  const text = (key: string) => {
+    const value = answers[key];
+    return typeof value === 'string' && value.trim() ? value.trim().slice(0, 200) : null;
+  };
   return {
     energy: scale('energy'),
     sleep: scale('sleep'),
@@ -180,5 +184,12 @@ function checkInOf(answers: CheckInAnswers): NonNullable<WeekMetrics['checkIn']>
     intensityFeel: choice('intensity_feel'),
     barrier: choice('barrier'),
     foodDifficulty: choice('food_difficulty'),
+    stress: scale('stress'),
+    motivation: scale('motivation'),
+    foodWeek: choice('food_week'),
+    nextWeek: choice('next_week'),
+    painWhere: choice('pain_where'),
+    win: text('win'),
+    helpWith: text('help_with'),
   };
 }

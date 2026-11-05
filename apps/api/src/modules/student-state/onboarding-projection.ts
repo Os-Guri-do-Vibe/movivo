@@ -80,7 +80,8 @@ export class OnboardingProjection {
       birthDate: answers.registration.birthDate,
       heightCm: answers.registration.heightCm,
       modalities: answers.modalities.modalities,
-      externalSports: answers.modalities.externalSports,
+      // A etapa 4 é a fonte; sessões antigas já chegam aqui com o da etapa 3 levado para ela.
+      externalSports: answers.routine.externalSports ?? [],
       venues: [...new Set(answers.modalities.modalities.map((m) => m.venue))],
       lifeContext: {
         ...answers.routine.lifeContext,
@@ -133,7 +134,11 @@ export class OnboardingProjection {
         kind: 'AVAILABILITY',
         windows: answers.routine.windows,
         variesWeekly: answers.routine.variesWeekly,
-        maxSessionsPerWeek: answers.routine.maxSessionsPerWeek,
+        // O aluno informa os dias; quantas sessões fazem sentido, quem decide é a estratégia.
+        // O teto guardado é o número de dias disponíveis (ou o valor de uma etapa antiga).
+        maxSessionsPerWeek:
+          answers.routine.maxSessionsPerWeek ??
+          new Set(answers.routine.windows.map((w) => w.weekday)).size,
       },
       ...answers.nutrition.dietaryRestrictions.map((restriction): StudentConstraint => ({
         kind: 'DIETARY_RESTRICTION',

@@ -90,7 +90,6 @@ async function createStudent(name: string): Promise<string> {
             modality: 'STRENGTH',
             level: 'INTERMEDIATE',
             monthsPracticing: 30,
-            sessionsPerWeek: 3,
             wantsToStart: false,
           },
         ],

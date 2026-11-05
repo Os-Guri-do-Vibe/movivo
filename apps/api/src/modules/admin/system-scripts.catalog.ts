@@ -68,15 +68,87 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     },
   },
   {
+    id: 'plan-rollover-scan',
+    kind: 'CRON',
+    name: 'Agenda de treino sempre à frente',
+    description:
+      'Completa a agenda dos alunos com plano ativo: mantém a semana corrente e a seguinte agendadas (o plano publica só duas semanas) e aplica a semana leve que a fase prevê. A varredura roda a cada minuto e dispara às 03:00 do fuso de cada aluno.',
+    queue: QUEUE.planRollover,
+    schedulerId: 'plan-rollover-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Todo dia às 03:00 (fuso de cada aluno)',
+    runEffect:
+      'Agenda agora as semanas que ainda não têm sessões para os alunos elegíveis. Semanas já agendadas não mudam.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'sessões agendadas' },
+  },
+  {
+    id: 'specialist-follow-up-scan',
+    kind: 'CRON',
+    name: 'Revisão semanal dos especialistas',
+    description:
+      'No domingo à noite, junto da revisão semanal do progresso, o treinador lê a semana de treino do aluno (adesão, esforço, carga, prontidão e progressão) e ajusta o protocolo quando os dados pedem (19:15); a nutricionista lê a semana alimentar e ajusta o plano (19:30). A persona conversa com o aluno. A varredura roda a cada minuto e dispara no fuso de cada aluno.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'specialist-follow-up-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Domingo, treino às 19:15 e nutrição às 19:30 (fuso de cada aluno)',
+    runEffect:
+      'Enfileira agora o acompanhamento de treino e de nutrição dos alunos elegíveis. Quem já foi acompanhado não recebe de novo no mesmo dia.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'na fila' },
+  },
+  {
+    id: 'meal-routine-scan',
+    kind: 'CRON',
+    name: 'Rotina alimentar no WhatsApp',
+    description:
+      'Lembra o aluno de registrar cada refeição no horário dela, com a primeira opção do cardápio; fecha o dia com o resumo de calorias, macros e água quando tudo foi registrado ou às 23:30; e, se o registro some por dois dias ou mais, a especialista de hábitos puxa conversa às 14:00. A varredura roda a cada minuto e dispara no fuso de cada aluno.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'meal-routine-scan',
+    cron: '* * * * * (UTC)',
+    schedule:
+      'Lembretes 07:30, 10:00, 12:30, 15:30, 19:30 e 21:30; resumo do dia a cada 15 min das 19:00 às 23:30; busca ativa às 14:00 (fuso de cada aluno)',
+    runEffect:
+      'Varre agora os alunos que estão em horário de lembrete, de resumo ou de busca ativa neste minuto. Quem já recebeu a mensagem do dia não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', queued: 'na fila' },
+  },
+  {
+    id: 'care-scan',
+    kind: 'CRON',
+    name: 'Cuidado diário do aluno',
+    description:
+      'Três rotinas por aluno no relógio local dele. Às 11:00, a escada de silêncio: quem fica 3, 6, 10 e 21 dias sem dar sinal recebe, a cada degrau, um contato com abordagem escolhida pelo especialista de hábitos (a equipe é avisada a partir do 10º dia), e quem está ativo recebe o lembrete do meio da semana do passo combinado. Às 21:00, o estudo da noite: os especialistas leem o dia inteiro do aluno (check-in, relatos do chat, treino, alimentação, peso). Às 23:50, fecha o estudo do dia. No máximo um contato proativo por dia.',
+    queue: QUEUE.studentFollowUp,
+    schedulerId: 'care-scan',
+    cron: '* * * * * (UTC)',
+    schedule:
+      'Todo dia: 11:00 silêncio e combinado, 21:00 estudo da noite, 23:50 fecho do dia (fuso de cada aluno)',
+    runEffect:
+      'Enfileira agora as três rotinas para todos os alunos elegíveis, ignorando o horário. Quem já recebeu contato proativo hoje não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', scheduled: 'na fila' },
+  },
+  {
+    id: 'cycle-reassessment-scan',
+    kind: 'CRON',
+    name: 'Reavaliação de fim de ciclo',
+    description:
+      'No dia em que o protocolo vence, envia ao aluno o link do formulário de reavaliação (nova avaliação corporal, rotina, objetivos e como foi a fase). Com a resposta, os agentes comparam o começo com o agora e montam o próximo ciclo de treino e alimentação para a Fila do Profissional. A varredura roda a cada minuto e dispara às 16:00 do fuso de cada aluno.',
+    queue: QUEUE.cycleReassessment,
+    schedulerId: 'cycle-reassessment-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Todo dia às 16:00 (fuso de cada aluno)',
+    runEffect:
+      'Abre agora a reavaliação dos alunos cujo ciclo venceu e ainda não receberam o link. Quem já recebeu não recebe de novo.',
+    resultLabels: { eligible: 'elegíveis', opened: 'reavaliações abertas', resumed: 'retomadas' },
+  },
+  {
     id: 'weekly-check-in-scan',
     kind: 'CRON',
     name: 'Check-in adaptativo semanal',
     description:
-      'Abre o check-in da semana (perguntas escolhidas pelos sinais do aluno) e envia o link por WhatsApp. A varredura roda a cada minuto e dispara no domingo, às 18:00 do fuso de cada aluno.',
+      'Abre o check-in da semana (perguntas escolhidas pelos sinais do aluno) e envia o link por WhatsApp. A varredura roda a cada minuto e dispara no domingo, às 15:00 do fuso de cada aluno (o aluno tem a tarde e o começo da noite para responder antes da revisão semanal das 19:00).',
     queue: QUEUE.checkIn,
     schedulerId: 'weekly-check-in-scan',
     cron: '* * * * * (UTC)',
-    schedule: 'Domingo às 18:00 (fuso de cada aluno)',
+    schedule: 'Domingo às 15:00 (fuso de cada aluno)',
     runEffect:
       'Abre agora o check-in da semana dos alunos elegíveis que ainda não têm um e envia o convite. Quem já recebeu nesta semana não recebe outro.',
     resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
@@ -86,11 +158,11 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     kind: 'CRON',
     name: 'Revisão semanal do progresso',
     description:
-      'Revisa a semana que fechou de cada aluno: mede adesão, esforço, carga, peso e registro alimentar, e só chama o modelo quando há sinal de atenção. Explicações entram como hipótese; as ações passam pelo motor de políticas. A varredura roda a cada minuto e dispara na segunda-feira, às 06:00 do fuso de cada aluno.',
+      'Revisa a semana que fechou de cada aluno: mede adesão, esforço, carga, peso e registro alimentar, e só chama o modelo quando há sinal de atenção. Explicações entram como hipótese; as ações passam pelo motor de políticas. A varredura roda a cada minuto e dispara no domingo, às 19:00 do fuso de cada aluno (a semana de segunda a domingo está fechando).',
     queue: QUEUE.weeklyReview,
     schedulerId: 'weekly-review-scan',
     cron: '* * * * * (UTC)',
-    schedule: 'Segunda-feira às 06:00 (fuso de cada aluno)',
+    schedule: 'Domingo às 19:00 (fuso de cada aluno)',
     runEffect:
       'Enfileira agora a revisão da semana anterior de todos os alunos elegíveis que ainda não foram revisados. Quem já foi revisado nesta semana não é revisado de novo.',
     resultLabels: { eligible: 'elegíveis', queued: 'revisões na fila' },

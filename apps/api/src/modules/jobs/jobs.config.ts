@@ -28,6 +28,11 @@ export const QUEUE = {
   trainingDaily: 'training-daily',
   // Check-in adaptativo semanal.
   checkIn: 'check-in',
+  // Acompanhamento em tempo real: o que o aluno relata no dia a dia dispara a análise dos agentes.
+  studentFollowUp: 'student-follow-up',
+  // Agenda de treino sempre à frente: completa as semanas seguintes do plano ativo.
+  planRollover: 'plan-rollover',
+  cycleReassessment: 'cycle-reassessment',
   // Revisão semanal do progresso (uma por aluno) e extração de preferências.
   weeklyReview: 'weekly-review',
   conversionSequence: 'conversion-sequence',
@@ -89,6 +94,19 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.checkIn]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.studentFollowUp]: {
+    attempts: 3,
+    backoffMs: [10_000, 30_000, 90_000],
+    concurrency: 4,
+    lockMs: 300_000,
+  },
+  [QUEUE.planRollover]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 2 },
+  [QUEUE.cycleReassessment]: {
+    attempts: 3,
+    backoffMs: [15_000, 60_000, 180_000],
+    concurrency: 2,
+    lockMs: 600_000,
+  },
   [QUEUE.weeklyReview]: { attempts: 2, backoffMs: [15_000], concurrency: 4 },
   [QUEUE.conversionSequence]: {
     attempts: 3,

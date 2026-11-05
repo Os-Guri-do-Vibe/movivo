@@ -111,10 +111,10 @@ describe('computeSignals', () => {
     expect(kinds(up)).toContain('WEIGHT_WRONG_DIRECTION');
   });
 
-  it('platô só vale com objetivo de peso e com pontos suficientes', () => {
+  it('platô só vale com objetivo de peso e com 3 pesagens semanais ou mais', () => {
     const flat = [80, 80, 80, 80].map((w, i) => week(i, { weightKg: w }));
     expect(kinds(flat, { goal: 'NONE', hasNutritionPlan: true })).toEqual([]);
-    expect(kinds(flat.slice(0, 3))).toEqual([]);
+    expect(kinds(flat.slice(0, 2))).toEqual([]);
   });
 
   it('variação rápida de peso é sinal próprio', () => {

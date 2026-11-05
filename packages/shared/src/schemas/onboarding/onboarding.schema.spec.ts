@@ -39,11 +39,10 @@ describe('modalidades', () => {
   const strength = {
     modality: 'STRENGTH',
     level: 'BEGINNER',
-    sessionsPerWeek: 2,
     wantsToStart: false,
     venue: 'FULL_GYM',
   };
-  const step = (modalities: object[]) => ({ modalities, externalSports: [] });
+  const step = (modalities: object[]) => ({ modalities });
 
   it('exige um local por modalidade, compatível com ela', () => {
     expect(onboardingModalitiesStepSchema.safeParse(step([strength])).success).toBe(true);
@@ -66,6 +65,12 @@ describe('modalidades', () => {
     expect(onboardingModalitiesStepSchema.safeParse(step([strength, strength])).success).toBe(
       false,
     );
+  });
+
+  it('ainda aceita o esporte externo de etapas salvas antes de ele ir para a semana', () => {
+    expect(
+      onboardingModalitiesStepSchema.safeParse({ ...step([strength]), externalSports: [] }).success,
+    ).toBe(true);
   });
 });
 
@@ -91,6 +96,32 @@ describe('rotina', () => {
       onboardingRoutineStepSchema.safeParse({ ...base, lifeContext: { cookingCapacity: 'BASIC' } })
         .success,
     ).toBe(true);
+  });
+
+  it('leva o esporte externo, que fica opcional para etapas salvas antes da mudança', () => {
+    const swimming = {
+      sport: 'SWIMMING',
+      label: 'Natação',
+      sessionsPerWeek: 2,
+      minutesPerSession: 60,
+      typicalRpe: 5,
+      fixedDays: ['TUE'],
+    };
+    const withSport = onboardingRoutineStepSchema.parse({
+      ...base,
+      externalSports: [swimming],
+      lifeContext: {},
+    });
+    expect(withSport.externalSports).toEqual([swimming]);
+    const legacy = onboardingRoutineStepSchema.parse({ ...base, lifeContext: {} });
+    expect(legacy).not.toHaveProperty('externalSports');
+    expect(
+      onboardingRoutineStepSchema.safeParse({
+        ...base,
+        externalSports: [swimming, swimming, swimming, swimming],
+        lifeContext: {},
+      }).success,
+    ).toBe(false);
   });
 
   it('treinos por semana não passam dos dias disponíveis', () => {

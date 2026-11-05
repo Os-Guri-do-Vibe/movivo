@@ -23,10 +23,10 @@ export function StepPain({
   return (
     <StepFrame
       title="Dores e limitações"
-      description="Isso é o que mantém o seu treino seguro."
+      description="Saber onde incomoda ajuda a adaptar exercícios e cargas desde o primeiro treino. Se não sentir nada, é só responder “Não”."
       notice={
         resumed
-          ? 'Suas respostas de saúde ficam guardadas em sigilo e não são exibidas de novo. Se voltar aqui, responda outra vez para atualizar.'
+          ? 'Por sigilo, suas respostas de saúde não aparecem de novo. Responda outra vez para continuar.'
           : undefined
       }
       canContinue={painComplete(data)}

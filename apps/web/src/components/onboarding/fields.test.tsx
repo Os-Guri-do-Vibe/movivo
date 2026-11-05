@@ -42,11 +42,11 @@ describe('Combobox', () => {
       'font-semibold',
       'text-foreground',
     );
-    expect(trigger).toHaveClass('h-[52px]', 'rounded-xl', 'border-input', 'bg-white');
+    expect(trigger).toHaveClass('min-h-[52px]', 'rounded-xl', 'border-input', 'bg-white');
     await user.click(trigger);
     expect(screen.getByRole('listbox', { name: 'Qual é a sua experiência?' })).toHaveClass(
       'rounded-2xl',
-      'bg-nevoa',
+      'bg-white',
     );
     await user.click(screen.getByRole('option', { name: 'Avançado' }));
 
@@ -78,14 +78,16 @@ describe('ChoiceGroup', () => {
     const legend = screen.getByText('Pergunta de escolha');
     expect(label.className).toBe(legend.className);
     expect(label).toHaveClass('text-body', 'font-semibold', 'text-foreground');
-    expect(label.parentElement?.parentElement).toHaveClass('gap-2');
-    expect(legend.nextElementSibling?.nextElementSibling).toHaveClass('mt-2', 'gap-2');
+    // Título → resposta: 12px nos dois tipos de pergunta; a ajuda fica colada ao título.
+    expect(label.parentElement?.parentElement).toHaveClass('gap-3');
+    expect(screen.getByText('Ajuda da pergunta')).toHaveAttribute('data-field-help');
+    expect(screen.getByRole('radio', { name: 'Alfa' }).parentElement).toHaveClass('mt-3');
     expect(screen.getByText('Ajuda da pergunta')).toHaveClass(
       'text-label',
       'text-muted-foreground',
     );
     expect(screen.getByText('Ajuda da escolha')).toHaveClass('text-label', 'text-muted-foreground');
-    expect(label.parentElement?.parentElement?.parentElement).toHaveClass('gap-6');
+    expect(label.parentElement?.parentElement?.parentElement).toHaveClass('gap-8');
   });
 
   it('single-select: escolher um item chama onToggle com o valor', async () => {
@@ -147,9 +149,52 @@ describe('orientação de cada pergunta', () => {
     { value: 'C', label: 'Gama' },
   ];
 
-  it('escolha única: obrigatória, 1 opção', () => {
+  it('escolha única obrigatória não leva orientação: o círculo já diz "uma opção"', () => {
     render(<ChoiceGroup legend="Escolha" items={items} selected={[]} onToggle={vi.fn()} />);
-    expect(screen.getByText('Obrigatória · Escolha 1 opção')).toBeInTheDocument();
+    expect(screen.queryByText(/Obrigatória|Escolha 1 opção|Opcional/)).not.toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Escolha' })).toBeInTheDocument();
+  });
+
+  it('setas movem o foco entre as opções de escolha única', async () => {
+    const user = userEvent.setup();
+    render(<ChoiceGroup legend="Escolha" items={items} selected={[]} onToggle={vi.fn()} />);
+    screen.getByRole('radio', { name: 'Alfa' }).focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('radio', { name: 'Beta' })).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('radio', { name: 'Gama' })).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('radio', { name: 'Beta' })).toHaveFocus();
+  });
+
+  it('a descrição da opção é a descrição acessível, não parte do nome', () => {
+    render(
+      <ChoiceGroup
+        legend="Cozinha?"
+        items={[{ value: 'BASIC', label: 'Cozinho o básico', description: 'Arroz e ovo.' }]}
+        selected={[]}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: 'Cozinho o básico' })).toHaveAccessibleDescription(
+      'Arroz e ovo.',
+    );
+  });
+
+  it('rótulos longos ou com descrição vão em lista; curtos, em duas colunas', () => {
+    const { rerender } = render(
+      <ChoiceGroup legend="Escolha" items={items} selected={[]} onToggle={vi.fn()} />,
+    );
+    expect(screen.getByRole('radiogroup')).toHaveClass('grid-cols-2');
+    rerender(
+      <ChoiceGroup
+        legend="Escolha"
+        items={[{ value: 'A', label: 'Aproximadamente 45 minutos' }]}
+        selected={[]}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('radiogroup')).toHaveClass('grid-cols-1');
   });
 
   it('múltipla sem teto: quantas quiser; opcional quando marcada', () => {
@@ -179,22 +224,31 @@ describe('orientação de cada pergunta', () => {
         max={2}
       />,
     );
-    expect(screen.getByText('Obrigatória · Escolha até 2 · 2 de 2')).toBeInTheDocument();
+    expect(screen.getByText('Escolha até 2 · 2 de 2')).toHaveAttribute('aria-live', 'polite');
     await user.click(screen.getByRole('button', { name: 'Gama' }));
     expect(onToggle).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Alfa' }));
     expect(onToggle).toHaveBeenCalledWith('A');
   });
 
-  it('o círculo de seleção fica sempre à esquerda do texto', () => {
-    render(<ChoiceGroup legend="Escolha" items={items} selected={['A']} onToggle={vi.fn()} />);
-    const option = screen.getByRole('radio', { name: 'Alfa' });
-    expect(option.firstElementChild).toHaveAttribute('aria-hidden', 'true');
-    expect(option.firstElementChild).toHaveTextContent('✓');
-    expect(option.firstElementChild).toHaveClass('bg-primary');
+  it('o indicador fica à esquerda: círculo na escolha única, quadrado na múltipla', () => {
+    const { rerender } = render(
+      <ChoiceGroup legend="Escolha" items={items} selected={['A']} onToggle={vi.fn()} />,
+    );
+    const radio = screen.getByRole('radio', { name: 'Alfa' }).firstElementChild;
+    expect(radio).toHaveAttribute('aria-hidden', 'true');
+    expect(radio).toHaveAttribute('data-indicator', 'radio');
+    expect(radio).toHaveAttribute('data-state', 'checked');
+    expect(radio).toHaveClass('rounded-full');
+    rerender(
+      <ChoiceGroup legend="Escolha" items={items} selected={['A']} onToggle={vi.fn()} multi />,
+    );
+    const check = screen.getByRole('button', { name: 'Alfa' }).firstElementChild;
+    expect(check).toHaveAttribute('data-indicator', 'check');
+    expect(check).toHaveClass('rounded-md', 'bg-petroleo');
   });
 
-  it('campo de texto: indica se é obrigatório ou opcional', () => {
+  it('campo de texto: só o opcional é marcado', () => {
     render(
       <>
         <FieldLabel htmlFor="a">Nome</FieldLabel>
@@ -203,7 +257,7 @@ describe('orientação de cada pergunta', () => {
         </FieldLabel>
       </>,
     );
-    expect(screen.getByText('Obrigatória')).toBeInTheDocument();
+    expect(screen.queryByText('Obrigatória')).not.toBeInTheDocument();
     expect(screen.getByText('Opcional')).toBeInTheDocument();
   });
 
@@ -219,7 +273,7 @@ describe('orientação de cada pergunta', () => {
         optional
       />,
     );
-    expect(screen.getByText('Opcional · Escolha 1 opção')).toBeInTheDocument();
+    expect(screen.getByText('Opcional')).toBeInTheDocument();
     await user.click(screen.getByRole('combobox', { name: 'Estresse' }));
     expect(screen.getByText('Dias tranquilos')).toBeInTheDocument();
   });
@@ -259,7 +313,7 @@ describe('Combobox de múltipla escolha', () => {
     expect(screen.getByRole('listbox')).toBeInTheDocument();
   });
 
-  it('com mais de duas escolhas mostra a contagem', () => {
+  it('com mais de duas escolhas lista todas, separadas por vírgula', () => {
     render(
       <Combobox
         id="multi"
@@ -270,7 +324,7 @@ describe('Combobox de múltipla escolha', () => {
         onChange={vi.fn()}
       />,
     );
-    expect(screen.getByRole('combobox', { name: 'Vários' })).toHaveTextContent('3 selecionadas');
+    expect(screen.getByRole('combobox', { name: 'Vários' })).toHaveTextContent('Alfa, Beta, Gama');
   });
 });
 

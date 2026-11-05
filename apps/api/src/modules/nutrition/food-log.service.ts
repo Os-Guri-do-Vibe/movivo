@@ -15,6 +15,8 @@ import type {
   InterpretFoodTextRequest,
   ManualFoodLogRequest,
   MealSlot,
+  NutrientTotals,
+  NutritionPlanStructure,
 } from '@movivo/shared';
 
 import { AgentRunner } from '../../core/agents/agent-runner';
@@ -31,13 +33,16 @@ import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { OutboxRelay } from '../domain-events/outbox-relay';
 import { localParts } from '../training/eligibility';
 import { todayIn } from '../planning/plan-generation.service';
-import { foodLogTask } from './food-log-task';
+import { foodLogTask, type FoodLogInput } from './food-log-task';
 import { mealPhotoTask } from '../vision/vision-tasks';
 
 const NO_CONTEXT = {
   methodology: async () => ({ text: '', versions: {} }),
   state: async () => ({ slices: {}, version: 0 }),
 };
+
+/** Contexto extra da conversa: refeição do último lembrete, cardápio do plano e registro a corrigir. */
+export type FoodTextContext = Partial<Pick<FoodLogInput, 'pendingMeal' | 'plan' | 'previous'>>;
 
 export interface PhotoInput {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
@@ -59,11 +64,19 @@ export class FoodLogService {
     userId: string,
     request: InterpretFoodTextRequest,
     now: Date = new Date(),
+    context: FoodTextContext = {},
   ): Promise<FoodLogDraft> {
     const { today, localTime } = await this.clock(userId, now);
     const run = await this.runner.run(
       foodLogTask,
-      { text: request.text, mealHint: request.meal ?? null, localTime },
+      {
+        text: request.text,
+        mealHint: request.meal ?? null,
+        localTime,
+        ...(context.pendingMeal ? { pendingMeal: context.pendingMeal } : {}),
+        ...(context.plan ? { plan: context.plan } : {}),
+        ...(context.previous ? { previous: context.previous } : {}),
+      },
       { userId, sources: NO_CONTEXT },
     );
     const items = run.output.items.map((item) => ({
@@ -168,6 +181,64 @@ export class FoodLogService {
     });
     await this.outbox.flushSoon();
     return { id };
+  }
+
+  /** Corrige um registro já confirmado (itens e refeição): os totais são recalculados na base. */
+  async replaceItems(
+    userId: string,
+    logId: string,
+    meal: MealSlot,
+    items: FoodLogItem[],
+  ): Promise<NutrientTotals> {
+    const totals = await this.foods.totals(items);
+    const updated = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .update(foodLogs)
+        .set({ meal, items, totals })
+        .where(and(eq(foodLogs.id, logId), eq(foodLogs.userId, userId)))
+        .returning({ id: foodLogs.id }),
+    );
+    if (updated.length === 0) throw new NotFoundException();
+    return totals;
+  }
+
+  /** Casa itens em texto livre com a base de alimentos e calcula os totais (sem gravar nada). */
+  async estimate(
+    items: readonly { label: string; grams: number }[],
+  ): Promise<{ items: FoodLogItem[]; totals: NutrientTotals }> {
+    const matched: FoodLogItem[] = [];
+    for (const item of items) {
+      const [best] = await this.foods.search(item.label, 1);
+      matched.push({
+        foodItemId: best?.id ?? null,
+        label: item.label,
+        grams: item.grams,
+        portionSource: 'ESTIMATED',
+      });
+    }
+    return { items: matched, totals: await this.foods.totals(matched) };
+  }
+
+  /** Estrutura do plano alimentar ativo, se houver. */
+  async activePlan(userId: string): Promise<NutritionPlanStructure | null> {
+    const [plan] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ structure: nutritionPlans.structure })
+        .from(nutritionPlans)
+        .where(and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.status, 'ACTIVE'))),
+    );
+    return plan?.structure ?? null;
+  }
+
+  /** Um registro do aluno (para corrigir pelo chat). */
+  async find(userId: string, logId: string) {
+    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ id: foodLogs.id, meal: foodLogs.meal, items: foodLogs.items })
+        .from(foodLogs)
+        .where(and(eq(foodLogs.id, logId), eq(foodLogs.userId, userId))),
+    );
+    return row ? { id: row.id, meal: row.meal as MealSlot, items: row.items } : null;
   }
 
   async remove(userId: string, logId: string): Promise<void> {

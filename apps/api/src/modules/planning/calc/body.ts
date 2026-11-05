@@ -1,10 +1,12 @@
 /**
  * Indicadores corporais derivados das medidas do aluno (determinísticos).
  *
- * O Motor de Objetivos NÃO "olha a foto e decide": a adiposidade usada na estratégia sai daqui,
- * a partir de % de gordura informado ou, na falta, da relação cintura/altura, com os limiares
- * publicados pelo nutricionista. Sem dado suficiente o resultado é `UNKNOWN` — e o agente deve
- * dizer o que falta saber em vez de supor.
+ * A adiposidade usada na estratégia sai daqui, com os limiares publicados pelo nutricionista,
+ * pela ordem de confiabilidade: % de gordura medido; faixa estimada pela avaliação visual das
+ * fotos (ponto médio da faixa); relação cintura/altura. A foto sozinha é estimativa e não
+ * "decide": ela entra como a melhor leitura disponível quando não há medida direta, e a
+ * `adiposityBasis` informa de onde veio. Sem dado suficiente o resultado é `UNKNOWN` — e o
+ * agente deve dizer o que falta saber em vez de supor.
  */
 import type { NutritionRules } from './params';
 
@@ -17,6 +19,7 @@ export interface BodyIndicators {
   waistToHeight: number | null;
   bodyFatPercent: number | null;
   adiposity: Adiposity;
+  adiposityBasis: 'MEASURED_BODY_FAT' | 'PHOTO_ESTIMATE' | 'WAIST_TO_HEIGHT' | null;
 }
 
 interface MeasurementEntry {
@@ -29,6 +32,7 @@ export function bodyIndicators(
   heightCm: number | null,
   sex: 'MALE' | 'FEMALE' | null,
   rules: NutritionRules,
+  visualBodyFatRange: { min: number; max: number } | null = null,
 ): BodyIndicators {
   const weightKg = body['WEIGHT']?.latest ?? null;
   const waist = body['WAIST']?.latest ?? null;
@@ -39,14 +43,16 @@ export function bodyIndicators(
     waist !== null && heightCm ? Math.round((waist / heightCm) * 100) / 100 : null;
 
   let adiposity: Adiposity = 'UNKNOWN';
+  let adiposityBasis: BodyIndicators['adiposityBasis'] = null;
   const fatThreshold = sex ? rules.bodyFatThresholdPct[sex] : null;
+  const classify = (percent: number, threshold: number): Adiposity =>
+    percent >= threshold ? 'HIGH' : percent >= threshold - 8 ? 'MODERATE' : 'LOW';
   if (bodyFatPercent !== null && fatThreshold !== null) {
-    adiposity =
-      bodyFatPercent >= fatThreshold
-        ? 'HIGH'
-        : bodyFatPercent >= fatThreshold - 8
-          ? 'MODERATE'
-          : 'LOW';
+    adiposity = classify(bodyFatPercent, fatThreshold);
+    adiposityBasis = 'MEASURED_BODY_FAT';
+  } else if (visualBodyFatRange !== null && fatThreshold !== null) {
+    adiposity = classify((visualBodyFatRange.min + visualBodyFatRange.max) / 2, fatThreshold);
+    adiposityBasis = 'PHOTO_ESTIMATE';
   } else if (waistToHeight !== null && rules.waistToHeightThreshold !== null) {
     adiposity =
       waistToHeight >= rules.waistToHeightThreshold
@@ -54,6 +60,7 @@ export function bodyIndicators(
         : waistToHeight >= rules.waistToHeightThreshold - 0.05
           ? 'MODERATE'
           : 'LOW';
+    adiposityBasis = 'WAIST_TO_HEIGHT';
   }
-  return { weightKg, heightCm, bmi, waistToHeight, bodyFatPercent, adiposity };
+  return { weightKg, heightCm, bmi, waistToHeight, bodyFatPercent, adiposity, adiposityBasis };
 }

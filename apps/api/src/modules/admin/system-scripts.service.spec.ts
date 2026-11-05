@@ -63,6 +63,11 @@ describe('SystemScriptsService.list', () => {
 
     expect(byKind('CRON').map((script) => script.id)).toEqual([
       'training-daily-scan',
+      'plan-rollover-scan',
+      'specialist-follow-up-scan',
+      'meal-routine-scan',
+      'care-scan',
+      'cycle-reassessment-scan',
       'weekly-check-in-scan',
       'weekly-review-scan',
       'subscription-period-scan',

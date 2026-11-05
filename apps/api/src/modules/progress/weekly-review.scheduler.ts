@@ -1,6 +1,6 @@
 /**
- * Varredura por minuto: na segunda-feira, às 06:00 do fuso de cada aluno, enfileira a revisão
- * da semana que fechou (uma por aluno, para o custo de modelo não bloquear a varredura).
+ * Varredura por minuto: no domingo, às 19:00 do fuso de cada aluno, enfileira a revisão
+ * da semana que está fechando (uma por aluno, para o custo de modelo não bloquear a varredura).
  */
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
@@ -21,7 +21,9 @@ import { PreferenceExtractionService } from './preference-extraction.service';
 import { WeeklyReviewService } from './weekly-review.service';
 
 type ReviewJob = { kind: 'SCAN'; force?: boolean } | { kind: 'STUDENT'; userId: string };
-const RUN_TIME = '06:00';
+/** Domingo à noite: a semana de segunda a domingo está fechando. */
+const RUN_TIME = '19:00';
+const RUN_WEEKDAY = 0;
 const MARKER_TTL_SECONDS = 8 * 86_400;
 
 @Injectable()
@@ -63,7 +65,8 @@ export class WeeklyReviewScheduler implements OnModuleInit {
       if (
         !local ||
         (!options.force &&
-          (local.time !== RUN_TIME || new Date(`${local.date}T12:00:00Z`).getUTCDay() !== 1))
+          (local.time !== RUN_TIME ||
+            new Date(`${local.date}T12:00:00Z`).getUTCDay() !== RUN_WEEKDAY))
       ) {
         continue;
       }
@@ -103,7 +106,7 @@ export class WeeklyReviewScheduler implements OnModuleInit {
         'extração de preferências falhou',
       );
     }
-    // Primeira segunda-feira do mês: também vai o relatório do mês que fechou.
+    // Primeiro domingo depois da virada do mês: também vai o relatório do mês que fechou.
     let monthlyReport = false;
     if (Number(today.slice(8, 10)) <= 7) {
       try {

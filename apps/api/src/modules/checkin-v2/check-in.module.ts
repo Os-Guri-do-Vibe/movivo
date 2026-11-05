@@ -4,6 +4,7 @@ import { CoachingModule } from '../coaching/coaching.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { PublishedMethodologyModule } from '../methodology/published-methodology.module';
+import { StudentStateModule } from '../student-state/student-state.module';
 import { TrainingModule } from '../training/training.module';
 import { CheckInController } from './check-in.controller';
 import { CheckInScheduler } from './check-in.scheduler';
@@ -17,6 +18,7 @@ import { EvolutionService } from './evolution.service';
     DomainEventsModule,
     JobsModule,
     PublishedMethodologyModule,
+    StudentStateModule,
     TrainingModule,
   ],
   controllers: [CheckInController],

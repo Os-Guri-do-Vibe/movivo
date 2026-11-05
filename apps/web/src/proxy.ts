@@ -75,6 +75,7 @@ export const config = {
     '/alimentacao',
     '/evolucao',
     '/check-in',
+    '/reavaliacao',
     '/api/training/:path*',
     '/anamnese',
     // Anamnese complementar (dado de saúde): também precisa do nonce da CSP.

@@ -47,14 +47,14 @@ const COPY: Record<
     title: 'Fila do Profissional',
     basePath: '/dashboard/fila',
     intro:
-      'Os protocolos e as trocas de exercício que a IA gerou antes de chegarem ao aluno. Revise, ajuste ou libere; se a revisão for opcional e ninguém agir, o sistema libera sozinho ao fim da janela. Cada profissional vê o domínio do seu conselho.',
+      'Auditoria do que os agentes criaram e alteraram nos protocolos: montagem, trocas, ajustes semanais e o próximo ciclo. Os agentes especialistas acompanham o aluno e a qualidade chega ao aluno por eles; aqui você confere e pode ajustar. Se a revisão for opcional e ninguém agir, o sistema libera sozinho ao fim da janela; a revisão só é obrigatória para alunos com PAR-Q de risco ou quando a geração falha. Cada profissional vê o domínio do seu conselho.',
     empty: 'Nenhum item na fila no seu domínio.',
   },
   ALERTS: {
     title: 'Alertas',
     basePath: '/dashboard/alertas',
     intro:
-      'Situações que pedem um profissional e não são mudança de protocolo: sinais de segurança, pedidos de revisão do aluno, exames e conversas assumidas. Cada profissional vê o domínio do seu conselho.',
+      'Monitoramento dos casos extremos e de proteção: sinais de segurança, encaminhamentos feitos pelos agentes (dor, condição nova, queda forte de constância), pedidos de revisão do aluno, exames e conversas assumidas. Os agentes seguem acompanhando o aluno; o profissional entra quando o caso pede. Cada profissional vê o domínio do seu conselho.',
     empty: 'Nenhum alerta no seu domínio.',
   },
 };

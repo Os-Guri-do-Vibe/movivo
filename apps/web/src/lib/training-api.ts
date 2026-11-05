@@ -4,6 +4,7 @@
  */
 import {
   executionViewSchema,
+  type DailyCheckIn,
   trainingDaySchema,
   type ExecutionView,
   type FinishExecutionRequest,
@@ -110,4 +111,8 @@ export async function logExternal(body: LogExternalRequest): Promise<ExecutionVi
     body: JSON.stringify(body),
   });
   return executionViewSchema.parse(payload);
+}
+
+export async function saveCheckIn(body: DailyCheckIn): Promise<void> {
+  await request('/check-in', { method: 'POST', body: JSON.stringify(body) });
 }

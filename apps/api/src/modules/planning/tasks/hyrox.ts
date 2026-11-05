@@ -12,6 +12,7 @@ import { hyroxRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
 import {
   outputLanguageViolations,
+  BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
 } from './common';
@@ -156,10 +157,11 @@ Regras de montagem:
 4. Cargas das estações: nunca acima de 120% da carga oficial da categoria (metodologia); use carga progressiva coerente com o nível. Estação sem equipamento oficial (fora de "stationsWithEquipment") não leva carga oficial — use uma alternativa descrita em "notes".
 5. Cada estação usa UM volume (distância, repetições ou duração). Corridas e estações têm alvo de intensidade claro (zona, ritmo, FC ou PSE).
 6. Marque ao menos uma sessão-chave. notes: como progredir e o que observar. summary: 2 a 3 frases claras, sem prometer tempo de prova.
-7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
+7. ${BODY_COMPOSITION_RULE}
+8. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['HYROX'],
-  state: ['identity', 'goals', 'preferences', 'training'],
+  state: ['identity', 'goals', 'preferences', 'training', 'bodyComposition'],
   input: hyroxInputSchema,
   output: blockOutputSchema,
   validators: hyroxValidators,

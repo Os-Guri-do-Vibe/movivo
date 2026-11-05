@@ -247,6 +247,26 @@ export function PlanView({ plan }: { plan: PlanRead }) {
               </article>
             ))}
           </div>
+          {nutrition.structure.freeMeals && (
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <h3 className="text-label font-semibold">
+                Refeições livres · {nutrition.structure.freeMeals.perWeek}x por semana
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {nutrition.structure.freeMeals.guidance}
+              </p>
+              <ul className="grid gap-2 sm:grid-cols-3">
+                {nutrition.structure.freeMeals.options.map((option) => (
+                  <li key={option.title} className="rounded-md bg-muted/40 p-3 text-body">
+                    <p className="font-semibold">{option.title}</p>
+                    <p>{option.description}</p>
+                    <p className="font-mono text-xs">~{option.energyKcal} kcal</p>
+                    <p className="text-xs text-muted-foreground">{option.fitTip}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <ul className="list-disc pl-5 text-body">
             {nutrition.structure.guidelines.map((guideline) => (
               <li key={guideline}>{guideline}</li>

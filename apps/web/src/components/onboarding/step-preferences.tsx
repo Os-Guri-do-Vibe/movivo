@@ -7,10 +7,26 @@ import { MuscleEmphasisGrid } from './muscle-emphasis';
 import { preferencesComplete, type PreferencesDraft } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
 
-const PRIORITY_ITEMS: { value: NonNullable<PreferencesDraft['priority']>; label: string }[] = [
-  { value: 'MAX_RESULT', label: 'Focado no melhor resultado possível' },
-  { value: 'BALANCED', label: 'Equilibrado entre resultado e constância' },
-  { value: 'ENJOYMENT', label: 'Leve e prazeroso, para manter o hábito' },
+const PRIORITY_ITEMS: {
+  value: NonNullable<PreferencesDraft['priority']>;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'MAX_RESULT',
+    label: 'Puxado',
+    description: 'Mais exigente, para buscar o melhor resultado possível.',
+  },
+  {
+    value: 'BALANCED',
+    label: 'Equilibrado',
+    description: 'Desafiador, mas fácil de encaixar e manter na rotina.',
+  },
+  {
+    value: 'ENJOYMENT',
+    label: 'Leve e prazeroso',
+    description: 'Mais tranquilo, para criar e manter o hábito.',
+  },
 ];
 
 export function StepPreferences({
@@ -41,11 +57,11 @@ export function StepPreferences({
 
   return (
     <StepFrame
-      title="Suas preferências de treino"
-      description="Quem monta o treino é o profissional da MOVIVO. Aqui você só conta o que ele deve levar em consideração."
+      title="Preferências e saúde geral"
+      description="Conte como você gosta de treinar e o que precisamos saber da sua saúde. Os profissionais da MOVIVO levam tudo isso em conta no seu plano."
       notice={
         resumed
-          ? 'Suas respostas de saúde e os textos livres ficam guardados em sigilo e não são exibidos de novo. Se voltar aqui, responda outra vez para atualizar.'
+          ? 'Por sigilo, suas respostas de saúde e os textos livres não aparecem de novo. Responda essas perguntas outra vez para continuar.'
           : undefined
       }
       canContinue={preferencesComplete(data)}
@@ -54,7 +70,8 @@ export function StepPreferences({
       onBack={onBack}
     >
       <ChoiceGroup
-        legend="Como você prefere que seu treino seja?"
+        legend="Que ritmo de treino combina com você?"
+        help="Não muda o seu objetivo, só o quanto o plano vai te exigir."
         items={PRIORITY_ITEMS}
         selected={data.priority ? [data.priority] : []}
         onToggle={(priority) => onChange({ ...data, priority })}
@@ -64,7 +81,7 @@ export function StepPreferences({
         <MuscleEmphasisGrid selected={data.muscleEmphasis} onToggle={toggleRegion} />
       )}
       <YesNo
-        legend="Você tem alguma preferência para os seus protocolos de treino?"
+        legend="Tem algum jeito de treinar que você prefere?"
         value={data.hasTrainingPreferences}
         onChange={(hasTrainingPreferences) =>
           onChange({
@@ -78,8 +95,8 @@ export function StepPreferences({
         <div className="border-l-2 border-primary pl-4">
           <Labeled
             id="training-preferences"
-            label="Conte quais são as suas preferências."
-            help="Como gosta de dividir os treinos, o esforço que prefere, o que mais curte. Os profissionais da MOVIVO levam isso em consideração."
+            label="Conte como você gosta de treinar."
+            help="Ex.: dividir por grupo muscular, treinos curtos e intensos, exercícios que você curte."
           >
             <TextArea
               id="training-preferences"
@@ -91,7 +108,7 @@ export function StepPreferences({
         </div>
       )}
       <YesNo
-        legend="Existe algo ou algum exercício ou movimento que você não gosta e prefere evitar?"
+        legend="Tem algum exercício que você prefere evitar só por não gostar?"
         value={data.hasDislikedExercises}
         onChange={(hasDislikedExercises) =>
           onChange({
@@ -103,7 +120,11 @@ export function StepPreferences({
       />
       {data.hasDislikedExercises && (
         <div className="border-l-2 border-primary pl-4">
-          <Labeled id="disliked" label="O que você prefere evitar?">
+          <Labeled
+            id="disliked"
+            label="Quais exercícios você prefere evitar?"
+            help="Se for por dor ou lesão, conte na próxima etapa."
+          >
             <TextArea
               id="disliked"
               value={data.dislikedExercises}
@@ -115,7 +136,7 @@ export function StepPreferences({
       )}
 
       <YesNo
-        legend="Você tem alguma condição de saúde ou toma algum medicamento que a gente deva saber?"
+        legend="Você tem alguma condição de saúde ou usa algum medicamento contínuo?"
         value={data.hasCondition}
         onChange={(hasCondition) =>
           onChange({
@@ -130,7 +151,7 @@ export function StepPreferences({
           <Labeled
             id="conditions"
             label="Quais condições de saúde?"
-            help="Se não tiver nenhuma, deixe em branco e preencha só os medicamentos. Pelo menos um dos dois campos é necessário."
+            help="Ex.: asma, diabetes, hipotireoidismo. Preencha pelo menos um dos dois campos: se for só medicamento, deixe este em branco."
             optional
           >
             <TextArea
@@ -143,7 +164,7 @@ export function StepPreferences({
           <Labeled
             id="medications"
             label="Quais medicamentos você usa?"
-            help="A MOVIVO não indica nem altera medicamentos. Isto só ajuda a treinar com segurança."
+            help="Nome e para que serve, se souber. A MOVIVO não indica nem altera medicamentos: isso só ajuda a planejar com segurança."
             optional
           >
             <TextArea
@@ -156,7 +177,7 @@ export function StepPreferences({
         </div>
       )}
       <YesNo
-        legend="Algum profissional de saúde te orientou sobre treino ou alimentação?"
+        legend="Algum profissional de saúde já te deu orientações sobre treino ou alimentação que ainda valem?"
         value={data.hasProfessionalGuidance}
         onChange={(hasProfessionalGuidance) =>
           onChange({
@@ -170,8 +191,8 @@ export function StepPreferences({
         <div className="border-l-2 border-primary pl-4">
           <Labeled
             id="guidance"
-            label="O que ele orientou?"
-            help="Médico, fisioterapeuta, nutricionista…"
+            label="O que foi orientado, e por quem?"
+            help="Ex.: o nutricionista pediu menos sal; o médico liberou corrida leve. Orientações sobre uma dor específica ficam na próxima etapa."
           >
             <TextArea
               id="guidance"

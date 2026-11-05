@@ -29,7 +29,6 @@ import {
   hyroxBestError,
   hyroxRacesError,
   mealsOutsideError,
-  mealsPerDayError,
   measurementError,
   modalitiesComplete,
   modalitiesFromBlock,
@@ -46,7 +45,6 @@ import {
   routineComplete,
   routineFromBlock,
   routinePayload,
-  sessionsExceedDays,
   sleepError,
   sleepOutOfRange,
   sportDurationError,
@@ -103,14 +101,13 @@ describe('payloads aceitos pelos contratos da API', () => {
     expect(payload.goal.secondary).toEqual(['STRENGTH']);
   });
 
-  it('modalidades: quem quer começar vira nível NONE e o esporte externo usa o rótulo do esporte', () => {
+  it('modalidades: quem quer começar vira nível NONE e o esporte externo não fica mais aqui', () => {
     const draft = structuredClone(EMPTY_MODALITIES);
     draft.modalities.STRENGTH = {
       ...draft.modalities.STRENGTH,
       selected: true,
       practicing: true,
       level: 'INTERMEDIATE',
-      sessions: '3',
       venue: 'FULL_GYM',
     };
     draft.modalities.RUNNING = {
@@ -119,15 +116,11 @@ describe('payloads aceitos pelos contratos da API', () => {
       practicing: false,
       venue: 'TRACK',
     };
-    draft.practicesOtherSport = true;
-    draft.externalSports = [
-      { ...newExternalSport(), sport: 'MARTIAL_ARTS', sessions: '3', duration: '1:30:00', rpe: 7 },
-    ];
     expect(modalitiesComplete(draft)).toBe(true);
     const payload = modalitiesPayload(draft);
     expect(onboardingModalitiesStepSchema.safeParse(payload).success).toBe(true);
     expect(payload).not.toHaveProperty('venues');
-    expect(payload.modalities[0]).toMatchObject({ sessionsPerWeek: 3, venue: 'FULL_GYM' });
+    expect(payload.modalities[0]).toMatchObject({ venue: 'FULL_GYM' });
     expect(payload.modalities[0]).not.toHaveProperty('fixedDays');
     expect(payload.modalities[1]).toMatchObject({
       modality: 'RUNNING',
@@ -135,11 +128,7 @@ describe('payloads aceitos pelos contratos da API', () => {
       wantsToStart: true,
       venue: 'TRACK',
     });
-    expect(payload.externalSports[0]).toMatchObject({
-      label: 'Luta / artes marciais',
-      minutesPerSession: 90,
-      typicalRpe: 7,
-    });
+    expect(payload).not.toHaveProperty('externalSports');
   });
 
   it('modalidades: corrida usa km semanais e tempo de 5 km', () => {
@@ -149,12 +138,10 @@ describe('payloads aceitos pelos contratos da API', () => {
       selected: true,
       practicing: true,
       level: 'BEGINNER',
-      sessions: '2',
       weeklyKm: '15',
       fiveK: '29:30',
       venue: 'OUTDOOR',
     };
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(true);
     const payload = modalitiesPayload(draft);
     expect(payload.modalities[0]).toMatchObject({ weeklyKm: 15, recent5kSeconds: 1770 });
@@ -168,54 +155,30 @@ describe('payloads aceitos pelos contratos da API', () => {
       selected: true,
       practicing: true,
       level: 'ADVANCED',
-      sessions: '4',
       hyroxRaces: '2',
       hyroxBest: '01:25:00',
       venue: 'HYROX_GYM',
     };
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(true);
     const payload = modalitiesPayload(draft);
     expect(payload.modalities[0]).toMatchObject({ hyroxRaces: 2, hyroxBestSeconds: 5100 });
     expect(onboardingModalitiesStepSchema.safeParse(payload).success).toBe(true);
   });
 
-  it('modalidades: pede resposta de "já pratica", nível, dias, local e outro esporte', () => {
+  it('modalidades: pede resposta de "já pratica", nível e local', () => {
     const draft = structuredClone(EMPTY_MODALITIES);
     draft.modalities.STRENGTH.selected = true;
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(false); // não respondeu "já pratica"
     draft.modalities.STRENGTH.practicing = true;
     draft.modalities.STRENGTH.level = 'BEGINNER';
-    draft.modalities.STRENGTH.sessions = '3';
     expect(modalitiesComplete(draft)).toBe(false); // falta o local
     draft.modalities.STRENGTH.venue = 'HOME';
-    expect(modalitiesComplete(draft)).toBe(true);
-    draft.modalities.STRENGTH.sessions = '';
-    expect(modalitiesComplete(draft)).toBe(false); // falta dias
-    draft.modalities.STRENGTH.sessions = '3';
-    draft.practicesOtherSport = true;
-    expect(modalitiesComplete(draft)).toBe(false); // disse que pratica, mas sem esporte
-    draft.externalSports = [newExternalSport()];
-    expect(modalitiesComplete(draft)).toBe(false); // esporte incompleto
-    const swimming = {
-      ...newExternalSport(),
-      sport: 'SWIMMING' as const,
-      sessions: '2',
-      duration: '45:00',
-      rpe: 5,
-    };
-    draft.externalSports = [{ ...swimming, fixedDays: ['MON', 'WED', 'FRI'] }];
-    expect(fixedDaysExceedSessions('2', ['MON', 'WED', 'FRI'])).toBe(true);
-    expect(modalitiesComplete(draft)).toBe(false); // mais dias fixos que dias por semana
-    draft.externalSports = [{ ...swimming, fixedDays: ['MON', 'WED'] }];
     expect(modalitiesComplete(draft)).toBe(true);
   });
 
   it('modalidades: quem quer começar também escolhe o local, e o local precisa servir à modalidade', () => {
     const draft = structuredClone(EMPTY_MODALITIES);
     draft.modalities.RUNNING = { ...draft.modalities.RUNNING, selected: true, practicing: false };
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(false);
     expect(onboardingModalitiesStepSchema.safeParse(modalitiesPayload(draft)).success).toBe(false);
     draft.modalities.RUNNING.venue = 'HOME';
@@ -228,13 +191,13 @@ describe('payloads aceitos pelos contratos da API', () => {
   it('rotina: sem dias diferentes, os dias marcados viram janelas com o mesmo período e tempo', () => {
     const draft: typeof EMPTY_ROUTINE = {
       ...EMPTY_ROUTINE,
+      practicesOtherSport: false,
       days: ['SAT', 'MON', 'WED'],
       slot: 'MORNING',
       availableMinutes: '90',
       // Diferenças guardadas sem o "sim" não valem.
       overrides: { WED: { slot: 'EVENING', minutes: '30' } },
       variesWeekly: false,
-      daysWanted: '3',
       sleep: '07:30',
       stress: 'MODERATE',
     };
@@ -245,21 +208,59 @@ describe('payloads aceitos pelos contratos da API', () => {
       { weekday: 'WED', slot: 'MORNING', maxMinutes: 90 },
       { weekday: 'SAT', slot: 'MORNING', maxMinutes: 90 },
     ]);
-    expect(payload.maxSessionsPerWeek).toBe(3);
+    expect(payload).not.toHaveProperty('maxSessionsPerWeek');
+    expect(payload.externalSports).toEqual([]);
     expect(payload.lifeContext).toEqual({ sleepHoursTypical: 7.5, stressLevel: 'MODERATE' });
     expect(onboardingRoutineStepSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it('semana: o esporte externo vem antes da agenda, com o rótulo do esporte', () => {
+    const draft: typeof EMPTY_ROUTINE = {
+      ...EMPTY_ROUTINE,
+      days: ['TUE', 'THU'],
+      slot: 'EVENING',
+      availableMinutes: '60',
+      variesWeekly: false,
+    };
+    expect(routineComplete(draft)).toBe(false); // não respondeu se pratica outro esporte
+    draft.practicesOtherSport = true;
+    expect(routineComplete(draft)).toBe(false); // disse que pratica, mas sem esporte
+    draft.externalSports = [newExternalSport()];
+    expect(routineComplete(draft)).toBe(false); // esporte incompleto
+    const fight = {
+      ...newExternalSport(),
+      sport: 'MARTIAL_ARTS' as const,
+      sessions: '2',
+      duration: '1:30:00',
+      rpe: 7,
+    };
+    draft.externalSports = [{ ...fight, fixedDays: ['MON', 'WED', 'FRI'] }];
+    expect(fixedDaysExceedSessions('2', ['MON', 'WED', 'FRI'])).toBe(true);
+    expect(routineComplete(draft)).toBe(false); // mais dias fixos que dias por semana
+    draft.externalSports = [{ ...fight, fixedDays: ['MON', 'WED'] }];
+    expect(routineComplete(draft)).toBe(true);
+    const payload = routinePayload(draft);
+    expect(payload.externalSports[0]).toMatchObject({
+      label: 'Luta / artes marciais',
+      minutesPerSession: 90,
+      typicalRpe: 7,
+      fixedDays: ['MON', 'WED'],
+    });
+    expect(onboardingRoutineStepSchema.safeParse(payload).success).toBe(true);
+    // "Não" depois de preencher descarta o que ficou no rascunho.
+    expect(routinePayload({ ...draft, practicesOtherSport: false }).externalSports).toEqual([]);
   });
 
   it('rotina: dia com período ou tempo próprio gera a sua janela; os outros seguem o padrão', () => {
     const draft: typeof EMPTY_ROUTINE = {
       ...EMPTY_ROUTINE,
+      practicesOtherSport: false,
       days: ['MON', 'WED', 'SAT'],
       slot: 'EVENING',
       availableMinutes: '45',
       hasDayOverrides: true,
       overrides: { SAT: { slot: 'MORNING', minutes: '90' }, WED: { slot: 'EVENING', minutes: '' } },
       variesWeekly: false,
-      daysWanted: '2',
     };
     expect(routineComplete(draft)).toBe(true);
     const payload = routinePayload(draft);
@@ -268,33 +269,17 @@ describe('payloads aceitos pelos contratos da API', () => {
       { weekday: 'WED', slot: 'EVENING', maxMinutes: 45 },
       { weekday: 'SAT', slot: 'MORNING', maxMinutes: 90 },
     ]);
-    expect(payload.maxSessionsPerWeek).toBe(2);
     expect(onboardingRoutineStepSchema.safeParse(payload).success).toBe(true);
-  });
-
-  it('rotina: mais treinos do que dias marcados não continua (nem passaria na API)', () => {
-    const draft: typeof EMPTY_ROUTINE = {
-      ...EMPTY_ROUTINE,
-      days: ['MON', 'THU'],
-      slot: 'ANY',
-      availableMinutes: '60',
-      variesWeekly: true,
-      daysWanted: '3',
-    };
-    expect(sessionsExceedDays(draft)).toBe(true);
-    expect(routineComplete(draft)).toBe(false);
-    expect(onboardingRoutineStepSchema.safeParse(routinePayload(draft)).success).toBe(false);
-    expect(routineComplete({ ...draft, daysWanted: '2' })).toBe(true);
   });
 
   it('rotina: sono e estresse são opcionais, mas sono fora de 3 a 12 horas bloqueia', () => {
     const base = {
       ...EMPTY_ROUTINE,
+      practicesOtherSport: false,
       days: ['MON' as const],
       slot: 'ANY' as const,
       availableMinutes: '30',
       variesWeekly: true,
-      daysWanted: '1',
     };
     expect(routineComplete(base)).toBe(true);
     expect(routinePayload(base).lifeContext).toEqual({});
@@ -304,7 +289,7 @@ describe('payloads aceitos pelos contratos da API', () => {
     expect(routineComplete({ ...base, sleep: '02:00' })).toBe(false);
     expect(routineComplete({ ...base, sleep: '07:' })).toBe(false);
     expect(routineComplete({ ...base, variesWeekly: undefined })).toBe(false);
-    expect(routineComplete({ ...base, daysWanted: '' })).toBe(false);
+    expect(routineComplete({ ...base, practicesOtherSport: undefined })).toBe(false);
   });
 
   it('preferências: prioridade e as perguntas de sim ou não são obrigatórias; "sim" exige o texto', () => {
@@ -407,7 +392,6 @@ describe('payloads aceitos pelos contratos da API', () => {
       cookingCapacity: 'BASIC' as const,
       mealsOutsideHomePerWeek: '4',
       foodBudgetCents: '120050',
-      mealsPerDay: '4',
       usualMeals: ['BREAKFAST' as const, 'LUNCH' as const],
       hasAllergy: true,
       hunger: 'NORMAL' as const,
@@ -421,7 +405,12 @@ describe('payloads aceitos pelos contratos da API', () => {
     expect(nutritionComplete(clean)).toBe(true);
     const payload = nutritionPayload(draft);
     expect(payload.allergies).toHaveLength(1);
-    expect(payload).toMatchObject({ cookingCapacity: 'BASIC', mealsOutsideHomePerWeek: 4 });
+    // O número de refeições vem da lista marcada, não de uma pergunta à parte.
+    expect(payload).toMatchObject({
+      cookingCapacity: 'BASIC',
+      mealsOutsideHomePerWeek: 4,
+      mealsPerDay: 2,
+    });
     expect(onboardingNutritionStepSchema.safeParse(payload).success).toBe(true);
   });
 
@@ -431,7 +420,6 @@ describe('payloads aceitos pelos contratos da API', () => {
       cookingCapacity: 'GOOD' as const,
       mealsOutsideHomePerWeek: '0',
       foodBudgetCents: '60000',
-      mealsPerDay: '3',
       usualMeals: ['LUNCH' as const],
       hasAllergy: false,
       hunger: 'HIGH' as const,
@@ -467,28 +455,17 @@ describe('retomada a partir do que o servidor devolve', () => {
         {
           modality: 'STRENGTH',
           level: 'ADVANCED',
-          sessionsPerWeek: 4,
           venue: 'CONDO_GYM',
           wantsToStart: false,
         },
-        { modality: 'HYROX', level: 'NONE', sessionsPerWeek: 0, wantsToStart: true, venue: 'HOME' },
+        { modality: 'HYROX', level: 'NONE', wantsToStart: true, venue: 'HOME' },
         {
           modality: 'RUNNING',
           level: 'BEGINNER',
-          sessionsPerWeek: 2,
           weeklyKm: 12.5,
           recent5kSeconds: 3930,
           wantsToStart: false,
           venue: 'TRACK',
-        },
-      ],
-      externalSports: [
-        {
-          sport: 'SWIMMING',
-          sessionsPerWeek: 2,
-          minutesPerSession: 75,
-          typicalRpe: 5,
-          fixedDays: ['MON'],
         },
       ],
     });
@@ -496,7 +473,6 @@ describe('retomada a partir do que o servidor devolve', () => {
       selected: true,
       practicing: true,
       level: 'ADVANCED',
-      sessions: '4',
       venue: 'CONDO_GYM',
     });
     expect(modalities.modalities.HYROX).toMatchObject({
@@ -511,16 +487,16 @@ describe('retomada a partir do que o servidor devolve', () => {
       venue: 'TRACK',
     });
     expect(modalities.modalities.STRENGTH.selected).toBe(true);
-    expect(modalities.practicesOtherSport).toBe(true);
-    expect(modalities.externalSports[0]).toEqual({
-      sport: 'SWIMMING',
-      sessions: '2',
-      duration: '1:15:00',
-      rpe: 5,
-      fixedDays: ['MON'],
-    });
 
+    const swimming = {
+      sport: 'SWIMMING',
+      sessionsPerWeek: 2,
+      minutesPerSession: 75,
+      typicalRpe: 5,
+      fixedDays: ['MON'],
+    };
     const routine = routineFromBlock({
+      externalSports: [swimming],
       windows: [
         { weekday: 'TUE', slot: 'MORNING', maxMinutes: 45 },
         { weekday: 'THU', slot: 'MORNING', maxMinutes: 45 },
@@ -536,27 +512,68 @@ describe('retomada a partir do que o servidor devolve', () => {
       hasDayOverrides: undefined,
       overrides: {},
       variesWeekly: true,
-      daysWanted: '2',
       sleep: '07:30',
       stress: 'HIGH',
+      practicesOtherSport: true,
     });
+    expect(routine.externalSports[0]).toEqual({
+      sport: 'SWIMMING',
+      sessions: '2',
+      duration: '1:15:00',
+      rpe: 5,
+      fixedDays: ['MON'],
+    });
+  });
+
+  it('semana de sessão salva antes da mudança usa o esporte externo guardado na etapa 3', () => {
+    const legacyModalities = {
+      modalities: [{ modality: 'STRENGTH', level: 'NONE', wantsToStart: true, venue: 'HOME' }],
+      externalSports: [
+        {
+          sport: 'SOCCER',
+          sessionsPerWeek: 1,
+          minutesPerSession: 90,
+          typicalRpe: 7,
+          fixedDays: [],
+        },
+      ],
+    };
+    const savedWeek = {
+      windows: [{ weekday: 'MON', slot: 'EVENING', maxMinutes: 60 }],
+      variesWeekly: false,
+      maxSessionsPerWeek: 1,
+      lifeContext: {},
+    };
+    // A etapa 3 antiga continua abrindo, só sem o esporte.
+    expect(modalitiesFromBlock(legacyModalities)).not.toHaveProperty('externalSports');
+    // Etapa 4 salva sem o campo e etapa 4 ainda não salva: os dois herdam da 3.
+    for (const week of [savedWeek, undefined]) {
+      const routine = routineFromBlock(week, legacyModalities);
+      expect(routine.practicesOtherSport).toBe(true);
+      expect(routine.externalSports.map((s) => s.sport)).toEqual(['SOCCER']);
+    }
+    // Etapa 4 já no formato novo ganha da 3.
+    const answered = routineFromBlock({ ...savedWeek, externalSports: [] }, legacyModalities);
+    expect(answered.practicesOtherSport).toBe(false);
+    expect(answered.externalSports).toEqual([]);
+    // Sem resposta em lugar nenhum, a pergunta fica em aberto.
+    expect(routineFromBlock(savedWeek).practicesOtherSport).toBeUndefined();
   });
 
   it('modalidades de bloco antigo (local único em `venues`) ganham o local de cada uma', () => {
     const modalities = modalitiesFromBlock({
       modalities: [
-        { modality: 'STRENGTH', level: 'BEGINNER', sessionsPerWeek: 3, wantsToStart: false },
-        { modality: 'RUNNING', level: 'NONE', sessionsPerWeek: 0, wantsToStart: true },
-        { modality: 'HYROX', level: 'NONE', sessionsPerWeek: 0, wantsToStart: true },
+        { modality: 'STRENGTH', level: 'BEGINNER', wantsToStart: false },
+        { modality: 'RUNNING', level: 'NONE', wantsToStart: true },
+        { modality: 'HYROX', level: 'NONE', wantsToStart: true },
       ],
-      externalSports: [],
       venues: ['OUTDOOR', 'FULL_GYM'],
     });
     expect(modalities.modalities.STRENGTH.venue).toBe('FULL_GYM');
     expect(modalities.modalities.RUNNING.venue).toBe('OUTDOOR');
     expect(modalities.modalities.HYROX.venue).toBe('FULL_GYM');
     expect(modalities).not.toHaveProperty('venues');
-    const payload = modalitiesPayload({ ...modalities, practicesOtherSport: false });
+    const payload = modalitiesPayload(modalities);
     expect(onboardingModalitiesStepSchema.safeParse(payload).success).toBe(true);
   });
 
@@ -581,7 +598,6 @@ describe('retomada a partir do que o servidor devolve', () => {
         FRI: { slot: 'EVENING', minutes: '30' },
         SAT: { slot: 'MORNING', minutes: '90' },
       },
-      daysWanted: '3',
     });
     expect(routinePayload(routine).windows).toEqual([
       { weekday: 'MON', slot: 'EVENING', maxMinutes: 45 },
@@ -614,7 +630,7 @@ describe('retomada a partir do que o servidor devolve', () => {
       cookingCapacity: 'NONE',
       mealsOutsideHomePerWeek: '0',
       foodBudgetCents: '250050',
-      mealsPerDay: '5',
+      usualMeals: ['LUNCH'],
       hasAllergy: undefined,
     });
   });
@@ -653,7 +669,7 @@ describe('faixas e formatos (o que a API recusaria nunca sai do formulário)', (
 
   it('corrida e HYROX: km, tempos incompletos ou fora da faixa bloqueiam', () => {
     expect(weeklyKmError('301')).toMatch(/0 a 300 km/);
-    expect(fiveKError('25:3')).toMatch(/mm:ss/);
+    expect(fiveKError('25:3')).toMatch(/minutos e segundos/);
     expect(fiveKError('05:00')).toMatch(/entre 10:00 e 2:00:00/);
     expect(fiveKError('24:59')).toBeUndefined();
     expect(hyroxRacesError('101')).toMatch(/0 a 100/);
@@ -667,12 +683,10 @@ describe('faixas e formatos (o que a API recusaria nunca sai do formulário)', (
       selected: true,
       practicing: true,
       level: 'BEGINNER',
-      sessions: '2',
       weeklyKm: '15',
       fiveK: '25:3',
       venue: 'OUTDOOR',
     };
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(false);
   });
 
@@ -683,12 +697,10 @@ describe('faixas e formatos (o que a API recusaria nunca sai do formulário)', (
       selected: true,
       practicing: true,
       level: 'BEGINNER',
-      sessions: '2',
       hyroxRaces: '0',
       hyroxBest: '01:25:00',
       venue: 'HYROX_GYM',
     };
-    draft.practicesOtherSport = false;
     expect(modalitiesComplete(draft)).toBe(true);
     const payload = modalitiesPayload(draft);
     expect(payload.modalities[0]).not.toHaveProperty('hyroxBestSeconds');
@@ -696,7 +708,7 @@ describe('faixas e formatos (o que a API recusaria nunca sai do formulário)', (
   });
 
   it('sono incompleto pede o formato hh:mm', () => {
-    expect(sleepError('07:')).toMatch(/hh:mm/);
+    expect(sleepError('07:')).toMatch(/horas e minutos/);
     expect(sleepError('07:30')).toBeUndefined();
     expect(sleepError('')).toBeUndefined();
   });
@@ -706,14 +718,11 @@ describe('faixas e formatos (o que a API recusaria nunca sai do formulário)', (
     expect(foodBudgetError('100000001')).toBe('Informe um valor de até R$ 1.000.000,00.');
     expect(foodBudgetError('100000000')).toBeUndefined();
     expect(mealsOutsideError('22')).toMatch(/0 a 21/);
-    expect(mealsPerDayError('9')).toMatch(/1 a 8/);
-    expect(mealsPerDayError('0')).toMatch(/1 a 8/);
     const base = {
       ...EMPTY_NUTRITION,
       cookingCapacity: 'BASIC' as const,
       mealsOutsideHomePerWeek: '2',
       foodBudgetCents: '999999999',
-      mealsPerDay: '4',
       usualMeals: ['LUNCH' as const],
       hasAllergy: false,
       hunger: 'NORMAL' as const,

@@ -167,20 +167,4 @@ export function askMealMessage(labels: readonly string[]): string {
 export const MEAL_SUGGESTION_FAILED_MESSAGE =
   'Não consegui montar uma boa opção agora. Me diga o que você tem em casa para essa refeição que eu monto com isso, ou fale com a equipe.';
 
-/** Sugestão de refeição: alimentos com a quantidade, dentro da meta da refeição do plano. */
-export function mealSuggestionMessage(
-  mealLabel: string,
-  options: ReadonlyArray<{
-    title: string;
-    items: ReadonlyArray<string>;
-    totals: { energyKcal: number; proteinG: number };
-    costBrl: number;
-  }>,
-): string {
-  const blocks = options.map((option, index) => {
-    const lines = option.items.map((item) => `• ${item}`).join('\n');
-    const cost = option.costBrl.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    return `${options.length > 1 ? `Opção ${index + 1}: ` : ''}${option.title}\n${lines}\n${option.totals.energyKcal} kcal · ${Math.round(option.totals.proteinG)} g de proteína · custo estimado ~${cost}`;
-  });
-  return `Aqui ${options.length > 1 ? 'vão duas opções' : 'vai uma opção'} para o seu ${mealLabel.toLowerCase()}, dentro da meta do seu plano:${WHATSAPP_BUBBLE_SEPARATOR}${blocks.join('\n\n')}${WHATSAPP_BUBBLE_SEPARATOR}Quer outra opção ou uma troca de algum alimento? É só me dizer.`;
-}
+export const ASK_WATER_AMOUNT_MESSAGE = 'Quanto de água foi? Pode dizer em ml, copos ou garrafas.';

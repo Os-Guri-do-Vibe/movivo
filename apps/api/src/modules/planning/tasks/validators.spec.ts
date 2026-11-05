@@ -15,7 +15,12 @@ import {
 } from './nutrition';
 import { runningValidators, type RunningInput } from './running';
 import { strategyValidators, type StrategyInput, type StrategyOutput } from './strategy';
-import { strengthValidators, type StrengthCandidate, type StrengthInput } from './strength';
+import {
+  strengthTask,
+  strengthValidators,
+  type StrengthCandidate,
+  type StrengthInput,
+} from './strength';
 import type { BlockOutput } from './blocks';
 import { at } from '../calc/util';
 
@@ -58,10 +63,24 @@ const strategyInput = (
     bmi: 24,
     weeksToEvent: null,
     hasExternalSport: false,
-    sessionsPerWeekAvailable: 4,
+    sessionLimits: {
+      availableDays: 5,
+      maxTrainingDays: 5,
+      minRestDays: 1,
+      allowTwoSessionsSameDay: true,
+      maxSessions: 7,
+    },
     ...over,
   },
 });
+
+const LIMITS_TIGHT = {
+  availableDays: 4,
+  maxTrainingDays: 4,
+  minRestDays: 1,
+  allowTwoSessionsSameDay: false,
+  maxSessions: 4,
+};
 
 const strategyOutput = (energy: StrategyOutput['strategy']['energyStrategy']): StrategyOutput => ({
   strategy: {
@@ -69,6 +88,11 @@ const strategyOutput = (energy: StrategyOutput['strategy']['energyStrategy']): S
     rationale: ['Objetivo declarado e disponibilidade permitem foco em força.'],
     energyStrategy: energy,
     modalityFocus: ['STRENGTH'],
+    sessionPlan: {
+      weekly: 3,
+      byModality: [{ modality: 'STRENGTH', sessions: 3 }],
+      reason: 'Três sessões dão estímulo suficiente e deixam dias de recuperação.',
+    },
     indicators: [
       { key: 'waist', label: 'Cintura', source: 'BODY', direction: 'DECREASE', unit: 'cm' },
       { key: 'sessions', label: 'Sessões concluídas', source: 'ADHERENCE', direction: 'INCREASE' },
@@ -162,8 +186,81 @@ describe('goals.define_strategy', () => {
     at(output.tasks, 0).target = 6;
     output.studentMessage = 'Resultado garantido: vamos tratar sua condição.';
     const found = await run(strategyValidators, strategyInput(), output, context());
-    expect(found.join(' ')).toContain('acima da disponibilidade');
+    expect(found.join(' ')).toContain('acima do que o plano prevê');
     expect(found.join(' ')).toContain('guardrail');
+  });
+
+  describe('frequência semanal decidida pela MOVIVO', () => {
+    const withPlan = (plan: StrategyOutput['strategy']['sessionPlan']) => {
+      const output = strategyOutput('MAINTENANCE');
+      output.strategy.sessionPlan = plan;
+      return output;
+    };
+
+    it('plano dentro do teto e com a divisão certa passa', async () => {
+      expect(
+        await run(strategyValidators, strategyInput(), strategyOutput('MAINTENANCE'), context()),
+      ).toEqual([]);
+    });
+
+    it('soma da divisão diferente do total é recusada', async () => {
+      const found = await run(
+        strategyValidators,
+        strategyInput(),
+        withPlan({
+          weekly: 4,
+          byModality: [{ modality: 'STRENGTH', sessions: 3 }],
+          reason: 'Quatro sessões.',
+        }),
+        context(),
+      );
+      expect(found.join(' ')).toContain('soma da divisão');
+    });
+
+    it('a divisão precisa trazer as modalidades do foco, uma vez cada', async () => {
+      const found = await run(
+        strategyValidators,
+        strategyInput(),
+        withPlan({
+          weekly: 3,
+          byModality: [
+            { modality: 'STRENGTH', sessions: 2 },
+            { modality: 'RUNNING', sessions: 1 },
+          ],
+          reason: 'Mistura.',
+        }),
+        context(),
+      );
+      expect(found.join(' ')).toContain('modalidades do foco');
+    });
+
+    it('passar do teto de dias e descanso é recusado, mesmo que o aluno tenha dias livres', async () => {
+      const found = await run(
+        strategyValidators,
+        strategyInput({ sessionLimits: LIMITS_TIGHT }),
+        withPlan({
+          weekly: 6,
+          byModality: [{ modality: 'STRENGTH', sessions: 6 }],
+          reason: 'Seis sessões.',
+        }),
+        context(),
+      );
+      expect(found.join(' ')).toContain('passam do teto de 4');
+    });
+
+    it('sessão dupla sem permissão da metodologia é recusada', async () => {
+      const found = await run(
+        strategyValidators,
+        strategyInput({ sessionLimits: { ...LIMITS_TIGHT, maxSessions: 6 } }),
+        withPlan({
+          weekly: 5,
+          byModality: [{ modality: 'STRENGTH', sessions: 5 }],
+          reason: 'Cinco sessões.',
+        }),
+        context(),
+      );
+      expect(found.join(' ')).toContain('sessão dupla');
+    });
   });
 });
 
@@ -261,6 +358,47 @@ describe('strength.build_block', () => {
       strengthSession('B', FULL_BODY, { estimatedMinutes: 65 }),
     ]);
     expect(await run(strengthValidators, strengthInput(), output, ctx)).toEqual([]);
+  });
+
+  describe('ênfase muscular escolhida pelo aluno', () => {
+    // O validador só exige grupos com ao menos 3 exercícios viáveis.
+    const candidates = ['', '_b', '_c'].flatMap((suffix) =>
+      CANDIDATES.map((c) => ({ ...c, id: `${c.id}${suffix}` })),
+    );
+    const withGluteSets = (sets: number) =>
+      block(
+        ['A', 'B'].map((key) =>
+          strengthSession(
+            key,
+            FULL_BODY.map((e) => (e.id === 'elevacao_pelvica' ? { ...e, sets } : e)),
+            { estimatedMinutes: 65 },
+          ),
+        ),
+      );
+
+    it('grupo de ênfase com volume abaixo da média dos demais é recusado', async () => {
+      const input = strengthInput({ candidates, emphasisMuscleGroups: ['glúteo'] });
+      const found = (await run(strengthValidators, input, withGluteSets(2), ctx)).join(' | ');
+      expect(found).toContain('glúteo é ênfase pedida pelo aluno');
+    });
+
+    it('grupo de ênfase com ao menos a média dos demais passa', async () => {
+      const input = strengthInput({ candidates, emphasisMuscleGroups: ['glúteo'] });
+      expect(await run(strengthValidators, input, withGluteSets(5), ctx)).toEqual([]);
+    });
+
+    it('sem ênfase escolhida nada é exigido', async () => {
+      expect(await run(strengthValidators, strengthInput(), withGluteSets(2), ctx)).not.toContain(
+        'ênfase',
+      );
+    });
+
+    it('a ênfase do aluno vem antes da avaliação por foto no prompt', () => {
+      expect(strengthTask.instructions).toMatch(
+        /ALUNO escolheu e ela vem SEMPRE em primeiro lugar/,
+      );
+      expect(strengthTask.instructions).toMatch(/Hierarquia: o objetivo declarado/);
+    });
   });
 
   it('recusa exercício fora do universo permitido e frequência errada', async () => {
@@ -742,7 +880,14 @@ const options = (
   titles: [string, string, string],
   items: ReturnType<typeof draftItem>[],
   cost: number,
-) => titles.map((title) => ({ title, estimatedCostBrl: cost, items }));
+  /** Proteína da 2ª opção (o cardápio real varia a proteína entre as opções). */
+  alternative?: ReturnType<typeof draftItem>,
+) =>
+  titles.map((title, index) => ({
+    title,
+    estimatedCostBrl: cost,
+    items: alternative && index === 1 ? [alternative, ...items.slice(1)] : items,
+  }));
 
 const nutritionOutput = (over: Partial<NutritionOutput> = {}): NutritionOutput => ({
   strategy: 'DEFICIT',
@@ -779,6 +924,7 @@ const nutritionOutput = (over: Partial<NutritionOutput> = {}): NutritionOutput =
           draftItem('alface', 40),
         ],
         9,
+        draftItem('tilapia', 100, ['frango']),
       ),
     },
     {
@@ -809,11 +955,36 @@ const nutritionOutput = (over: Partial<NutritionOutput> = {}): NutritionOutput =
           draftItem('alface', 60),
         ],
         8,
+        draftItem('frango', 130, ['tilapia']),
       ),
     },
   ],
   guidelines: ['Beba água ao longo do dia.'],
   supplements: [{ name: 'Creatina', guidance: 'Uso diário, conforme orientação.' }],
+  freeMeals: {
+    perWeek: 1,
+    options: [
+      {
+        title: 'Combo de hambúrguer',
+        description: 'Hambúrguer artesanal com batata frita média',
+        energyKcal: 950,
+        fitTip: 'No dia, capriche na proteína do almoço e deixe o lanche leve.',
+      },
+      {
+        title: 'Pizza',
+        description: '3 fatias (calabresa, margherita, frango com catupiry)',
+        energyKcal: 850,
+        fitTip: 'Faça uma salada grande antes e um jantar simples no dia seguinte.',
+      },
+      {
+        title: 'Sushi',
+        description: '14 peças variadas e 1 temaki',
+        energyKcal: 800,
+        fitTip: 'Boa proteína já vem junto: mantenha o café da manhã leve.',
+      },
+    ],
+    guidance: 'Pode escolher outra refeição livre: me conte no WhatsApp e eu ajudo a encaixar.',
+  },
   ...over,
 });
 
@@ -838,6 +1009,62 @@ describe('nutrition.build_plan', () => {
     const output = nutritionOutput({ restDay: day([1_850, 1_950], 160, 100, 60) });
     const found = (await run(nutritionValidators, nutritionInput(), output, ctx)).join(' | ');
     expect(found).toContain('somam');
+  });
+
+  describe('refeições livres', () => {
+    const free = nutritionOutput().freeMeals;
+    if (!free) throw new Error('fixture sem refeições livres');
+    const found = async (output: ReturnType<typeof nutritionOutput>, input = nutritionInput()) =>
+      (await run(nutritionValidators, input, output, ctx)).join(' | ');
+
+    it('exige o planejamento das refeições livres', async () => {
+      expect(await found(nutritionOutput({ freeMeals: undefined }))).toContain('freeMeals');
+    });
+
+    it('em déficit, no máximo uma por semana', async () => {
+      const input = nutritionInput({ strategy: 'DEFICIT' });
+      const output = nutritionOutput({ strategy: 'DEFICIT', freeMeals: { ...free, perWeek: 2 } });
+      expect(await found(output, input)).toContain('no máximo 1 refeição livre');
+    });
+
+    it('recusa opção que passa de metade do dia e linguagem de culpa', async () => {
+      const [first, ...rest] = free.options;
+      if (!first) throw new Error('fixture');
+      const heavy = nutritionOutput({
+        freeMeals: {
+          ...free,
+          options: [{ ...first, energyKcal: 1_800 }, ...rest] as typeof free.options,
+        },
+      });
+      expect(await found(heavy)).toContain('metade do dia');
+      const guilty = nutritionOutput({
+        freeMeals: { ...free, guidance: 'É o dia liberado, depois você compensa na dieta.' },
+      });
+      expect(await found(guilty)).toContain('culpa ou proibição');
+    });
+
+    it('com histórico de transtorno alimentar não há refeição livre', async () => {
+      const blocked = context(
+        {
+          safety: {
+            activeSignals: [],
+            healthRecords: [{ kind: 'EATING_DISORDER_HISTORY', summary: 'histórico' }],
+          },
+        },
+        ['NUTRITION'],
+      );
+      const withFree = (
+        await run(nutritionValidators, nutritionInput(), nutritionOutput(), blocked)
+      ).join(' | ');
+      expect(withFree).toContain('não planeje refeição livre');
+      const without = await run(
+        nutritionValidators,
+        nutritionInput(),
+        nutritionOutput({ freeMeals: undefined }),
+        blocked,
+      );
+      expect(without.join(' | ')).not.toContain('freeMeals');
+    });
   });
 
   it('recusa perda de peso semanal acima do máximo', async () => {
@@ -900,6 +1127,52 @@ describe('nutrition.build_plan', () => {
     expect((await run(nutritionValidators, nutritionInput(), output, ctx)).join(' | ')).toContain(
       'não é uma troca equivalente',
     );
+  });
+
+  it('qualidade do cardápio: almoço e jantar levam vegetais, o dia leva fruta, proteínas variam', async () => {
+    const base = nutritionOutput();
+    const withoutFood = (foodId: string) => ({
+      ...base,
+      meals: base.meals.map((meal) => ({
+        ...meal,
+        options: meal.options?.map((option) => ({
+          ...option,
+          items: option.items.filter((item) => item.foodId !== foodId),
+        })),
+      })),
+    });
+    const noVeg = (
+      await run(nutritionValidators, nutritionInput(), withoutFood('alface'), ctx)
+    ).join(' | ');
+    expect(noVeg).toContain('legumes ou verduras');
+    const noFruit = (
+      await run(nutritionValidators, nutritionInput(), withoutFood('banana'), ctx)
+    ).join(' | ');
+    expect(noFruit).toContain('inclua fruta');
+    // Sem fruta na lista do aluno, a regra não cobra o impossível.
+    const foodsNoFruit = FOODS.filter((f) => f.id !== 'banana');
+    expect(
+      (
+        await run(
+          nutritionValidators,
+          nutritionInput({ foods: foodsNoFruit }),
+          withoutFood('banana'),
+          ctx,
+        )
+      ).join(' | '),
+    ).not.toContain('inclua fruta');
+    const samePrimaryProtein = {
+      ...base,
+      meals: base.meals.map((meal) => {
+        const first = meal.options?.[0];
+        return meal.slot === 'LUNCH' && first
+          ? { ...meal, options: meal.options?.map((o) => ({ ...first, title: o.title })) }
+          : meal;
+      }),
+    };
+    expect(
+      (await run(nutritionValidators, nutritionInput(), samePrimaryProtein, ctx)).join(' | '),
+    ).toContain('repetem a mesma proteína');
   });
 
   it('o custo do dia precisa caber no orçamento do aluno', async () => {

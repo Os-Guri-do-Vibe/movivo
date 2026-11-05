@@ -145,8 +145,8 @@ export function Step1Registration({
       <div className="text-center">
         <h1 className="text-h1 font-bold text-petroleo">Vamos começar por você</h1>
         <p className="mt-2 text-body text-muted-foreground">
-          É rápido. Estas informações ajudam o profissional responsável a preparar um treino que
-          faça sentido para a sua rotina.
+          Seus dados básicos. Idade, sexo biológico, altura e peso entram nos cálculos do seu treino
+          e da sua alimentação, que os profissionais da MOVIVO revisam.
         </p>
       </div>
 
@@ -179,6 +179,7 @@ export function Step1Registration({
 
       <ChoiceGroup<BiologicalSex>
         legend="Qual é o seu sexo biológico?"
+        help="Usado só nos cálculos, como gasto de energia e progressão de carga."
         items={[
           { value: 'FEMALE', label: 'Feminino' },
           { value: 'MALE', label: 'Masculino' },
@@ -207,20 +208,20 @@ export function Step1Registration({
               onChange={(heightCm) => onChange({ ...data, heightCm: maskNumber(heightCm, 3, 0) })}
               type="text"
               inputMode="numeric"
-              placeholder="Ex: 170"
+              placeholder="Ex.: 170"
               maxLength={3}
             />
           </QuestionField>
 
           <QuestionField className="row-span-2 grid grid-rows-subgrid">
-            <FieldLabel htmlFor="weightKg">Qual é o seu peso? (kg)</FieldLabel>
+            <FieldLabel htmlFor="weightKg">Qual é o seu peso hoje? (kg)</FieldLabel>
             <TextInput
               id="weightKg"
               value={data.weightKg}
               onChange={(weightKg) => onChange({ ...data, weightKg: maskNumber(weightKg, 3, 1) })}
               type="text"
               inputMode="decimal"
-              placeholder="Ex: 70"
+              placeholder="Ex.: 70"
               maxLength={5}
             />
           </QuestionField>
@@ -229,7 +230,10 @@ export function Step1Registration({
 
       <QuestionField>
         <FieldLabel htmlFor="phone">Qual é o seu WhatsApp?</FieldLabel>
-        <FieldHelp>Enviaremos seu treino e faremos seu acompanhamento por este número.</FieldHelp>
+        <FieldHelp>
+          É por ele que você recebe seu plano e conversa com a MOVIVO. Vamos enviar um código para
+          confirmar o número.
+        </FieldHelp>
         <PhoneInput
           id="phone"
           countryIso={data.phoneCountryIso}

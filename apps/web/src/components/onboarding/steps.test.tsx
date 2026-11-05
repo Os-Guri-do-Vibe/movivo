@@ -31,12 +31,12 @@ describe('aviso de respostas sigilosas ao retomar', () => {
     ['alimentação', <StepNutrition key="n" {...common} data={EMPTY_NUTRITION} resumed />],
   ])('%s: mostra o aviso quando a etapa já foi respondida', (_name, element) => {
     render(element);
-    expect(screen.getByText(/guardad[oa]s? em sigilo/)).toBeInTheDocument();
+    expect(screen.getByText(/Por sigilo/)).toBeInTheDocument();
   });
 
   it('sem retomada, não mostra aviso', () => {
     render(<StepGoals {...common} data={EMPTY_GOALS} resumed={false} />);
-    expect(screen.queryByText(/em sigilo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sigilo/)).not.toBeInTheDocument();
   });
 });
 
@@ -48,8 +48,8 @@ describe('Continuar só habilita com o essencial', () => {
       <StepGoals {...common} onChange={onChange} data={EMPTY_GOALS} resumed={false} />,
     );
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
-    await user.click(screen.getByRole('combobox', { name: 'Qual seu objetivo?' }));
-    await user.click(screen.getByRole('option', { name: 'Emagrecimento' }));
+    await user.click(screen.getByRole('combobox', { name: 'Qual é o seu objetivo principal?' }));
+    await user.click(screen.getByRole('option', { name: /^Emagrecimento/ }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ primary: 'FAT_LOSS' }));
     rerender(
       <StepGoals
@@ -70,16 +70,16 @@ describe('Continuar só habilita com o essencial', () => {
         resumed={false}
       />,
     );
-    expect(screen.getByRole('combobox', { name: 'Qual seu objetivo?' })).toHaveTextContent(
-      'Hipertrofia',
-    );
+    expect(
+      screen.getByRole('combobox', { name: 'Qual é o seu objetivo principal?' }),
+    ).toHaveTextContent('Hipertrofia');
     expect(screen.queryByText('Mais algum objetivo?')).not.toBeInTheDocument();
-    const more = screen.getByRole('combobox', { name: 'Você tem mais algum objetivo?' });
+    const more = screen.getByRole('combobox', { name: 'Tem outros objetivos além do principal?' });
     expect(more).toHaveTextContent('Força');
     expect(screen.getByText('Opcional · Escolha até 3 · 1 de 3')).toBeInTheDocument();
     await user.click(more);
-    expect(screen.queryByRole('option', { name: 'Hipertrofia' })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Emagrecimento' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^Hipertrofia/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^Emagrecimento/ })).toBeInTheDocument();
   });
 
   it('títulos das etapas ficam centralizados', () => {
@@ -97,16 +97,15 @@ describe('Continuar só habilita com o essencial', () => {
         resumed={false}
       />,
     );
-    expect(screen.getByText('Qual a modalidade?')).toBeInTheDocument();
+    expect(screen.getByText('De qual modalidade é a prova?')).toBeInTheDocument();
     expect(screen.queryByText('Que tipo de data?')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('dd/mm/aaaa')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Abrir calendário' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Qual a distância da prova?')).toBeInTheDocument();
+    expect(screen.getByLabelText('Qual é a distância da prova?')).toBeInTheDocument();
   });
 
   it('modalidades: mostra campos de corrida só para quem escolheu corrida', () => {
     const data = structuredClone(EMPTY_MODALITIES);
-    data.practicesOtherSport = false;
     const { rerender } = render(<StepModalities {...common} data={data} />);
     expect(screen.queryByLabelText(/km você corre/i)).not.toBeInTheDocument();
     data.modalities.RUNNING = {
@@ -114,7 +113,6 @@ describe('Continuar só habilita com o essencial', () => {
       selected: true,
       practicing: true,
       level: 'BEGINNER',
-      sessions: '2',
       weeklyKm: '10',
       venue: 'OUTDOOR',
     };
@@ -122,7 +120,9 @@ describe('Continuar só habilita com o essencial', () => {
     expect(
       screen.getByLabelText('Em média, quantos km você corre por semana?'),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('Qual seu tempo atual nos 5 km?')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Quanto tempo você leva hoje para correr 5 km?'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
   });
 
@@ -131,7 +131,7 @@ describe('Continuar só habilita com o essencial', () => {
     const data = structuredClone(EMPTY_MODALITIES);
     data.modalities.RUNNING = { ...data.modalities.RUNNING, selected: true, practicing: true };
     render(<StepModalities {...common} data={data} />);
-    await user.click(screen.getByRole('combobox', { name: 'Qual seu nível atual?' }));
+    await user.click(screen.getByRole('combobox', { name: 'Qual é o seu nível em corrida?' }));
     expect(screen.getByRole('option', { name: /Avançado/ })).toHaveTextContent(
       'Sigo planilha, controlo ritmo e distância e corro provas com frequência.',
     );
@@ -179,7 +179,7 @@ describe('Continuar só habilita com o essencial', () => {
     const strength = screen.getByRole('group', {
       name: 'Onde você vai fazer a maior parte dos treinos de musculação?',
     });
-    expect(within(strength).getByRole('radio', { name: 'Em casa' })).toBeInTheDocument();
+    expect(within(strength).getByRole('radio', { name: /^Em casa/ })).toBeInTheDocument();
     expect(
       within(strength).queryByRole('radio', { name: /pista de atletismo/ }),
     ).not.toBeInTheDocument();
@@ -204,56 +204,63 @@ describe('Continuar só habilita com o essencial', () => {
     };
     const { rerender } = render(<StepModalities {...common} data={data} />);
     expect(screen.getByLabelText('Quantas provas de HYROX você já fez?')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Qual seu melhor no HYROX completo?')).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Qual é o seu melhor tempo numa prova completa de HYROX?'),
+    ).not.toBeInTheDocument();
     data.modalities.HYROX.hyroxRaces = '2';
     rerender(<StepModalities {...common} data={data} />);
-    expect(screen.getByLabelText('Qual seu melhor no HYROX completo?')).toBeInTheDocument();
-  });
-
-  it('modalidades: outro esporte usa combos (esporte e dias fixos), sem a pergunta de nome da prática', async () => {
-    const user = userEvent.setup();
-    const data = structuredClone(EMPTY_MODALITIES);
-    data.practicesOtherSport = true;
-    data.externalSports = [{ sport: null, sessions: '', duration: '', rpe: null, fixedDays: [] }];
-    render(<StepModalities {...common} data={data} />);
-    expect(screen.queryByText('Como você chama essa prática?')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('combobox', { name: 'Qual esporte?' }));
-    expect(screen.getByRole('option', { name: 'Natação' })).toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    const fixed = screen.getByRole('combobox', {
-      name: 'Em quais dias você pratica esse esporte?',
-    });
-    expect(fixed).toHaveTextContent('Nenhum dia fixo');
-    await user.click(fixed);
-    expect(screen.getByRole('option', { name: 'Segunda-feira' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Domingo' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Qual a duração média das sessões de treino?')).toHaveAttribute(
-      'placeholder',
-      '45:00',
-    );
     expect(
-      screen.getByRole('combobox', { name: 'Qual a intensidade média dessa prática?' }),
+      screen.getByLabelText('Qual é o seu melhor tempo numa prova completa de HYROX?'),
     ).toBeInTheDocument();
   });
 
-  it('modalidades: pergunta os dias de hoje como ponto de partida, sem dias fixos', () => {
+  it('modalidades: não pergunta dias por semana nem dias fixos das modalidades da MOVIVO', () => {
     const data = structuredClone(EMPTY_MODALITIES);
     data.modalities.STRENGTH = { ...data.modalities.STRENGTH, selected: true, practicing: true };
     render(<StepModalities {...common} data={data} />);
-    const sessions = screen.getByRole('combobox', {
-      name: 'Hoje, quantos dias por semana você pratica musculação?',
-    });
-    expect(sessions).toHaveAccessibleDescription(
-      'É o seu ponto de partida. Quantos treinos você vai fazer com a MOVIVO, você escolhe na próxima etapa.',
-    );
+    expect(screen.queryByText(/quantos dias por semana você pratica/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/dias fixos/)).not.toBeInTheDocument();
+  });
+
+  it('modalidades: é só o treino com a MOVIVO; o esporte de fora fica para a semana', () => {
+    render(<StepModalities {...common} data={structuredClone(EMPTY_MODALITIES)} />);
+    expect(screen.getByRole('heading', { name: 'Seu treino com a MOVIVO' })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Esporte que você pratica por fora entra na próxima etapa/),
+    ).toBeVisible();
+    expect(screen.queryByText(/pratica algum esporte por fora/)).not.toBeInTheDocument();
   });
 
   const routineProps = {
     ...common,
     modalities: ['STRENGTH', 'RUNNING'] as const,
-    externalSports: [] as const,
   };
+
+  it('semana: outro esporte usa combos (esporte e dias fixos), sem a pergunta de nome da prática', async () => {
+    const user = userEvent.setup();
+    const data = structuredClone(EMPTY_ROUTINE);
+    data.practicesOtherSport = true;
+    data.externalSports = [{ sport: null, sessions: '', duration: '', rpe: null, fixedDays: [] }];
+    render(<StepRoutine {...routineProps} data={data} />);
+    expect(screen.queryByText('Como você chama essa prática?')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('combobox', { name: 'Qual esporte?' }));
+    expect(screen.getByRole('option', { name: 'Natação' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    const fixed = screen.getByRole('combobox', {
+      name: 'Algum desses dias é fixo? Quais?',
+    });
+    expect(fixed).toHaveTextContent('Nenhum dia fixo');
+    await user.click(fixed);
+    expect(screen.getByRole('option', { name: 'Segunda-feira' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Domingo' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Quanto tempo dura cada sessão, em média?')).toHaveAttribute(
+      'placeholder',
+      '45:00',
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Quanto esse esporte costuma te cansar?' }),
+    ).toBeInTheDocument();
+  });
 
   it('rotina: sem dia marcado não continua; completa, continua', () => {
     const data = structuredClone(EMPTY_ROUTINE);
@@ -264,32 +271,42 @@ describe('Continuar só habilita com o essencial', () => {
         {...routineProps}
         data={{
           ...data,
+          practicesOtherSport: false,
           days: ['MON', 'WED', 'FRI'],
           slot: 'EVENING',
           availableMinutes: '60',
           variesWeekly: false,
-          daysWanted: '3',
         }}
       />,
     );
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
   });
 
-  it('rotina: o texto cita as modalidades e os dias vêm antes dos treinos, que esperam os dias', async () => {
+  it('semana: o texto diz que a MOVIVO decide, e a ordem vai do que ocupa a semana ao descanso', async () => {
     const user = userEvent.setup();
     render(<StepRoutine {...routineProps} data={EMPTY_ROUTINE} />);
+    expect(screen.getByRole('heading', { name: 'Sua semana' })).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Conte quando você pode treinar. A MOVIVO distribui musculação e corrida nesses dias e reorganiza quando a sua semana mudar.',
+        'Conte como a sua semana é hoje. Com isso, a MOVIVO decide quantos treinos de musculação e corrida fazem sentido e em que dias, e explica o porquê.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(['O que já ocupa a sua semana', 'Quando você pode treinar', 'Sono e estresse']);
+    const otherSport = screen.getByRole('group', { name: /pratica algum esporte por fora/ });
     const days = screen.getByRole('combobox', { name: 'Em quais dias você pode treinar?' });
-    const sessions = screen.getByRole('combobox', {
-      name: 'Quantos treinos da MOVIVO por semana você quer fazer?',
+    const varies = screen.getByRole('group', { name: /mudam de uma semana para outra/ });
+    const sleep = screen.getByLabelText('Quantas horas você dorme por noite, em média?');
+    const inOrder = [otherSport, days, varies, sleep];
+    inOrder.reduce((previous, element) => {
+      expect(
+        previous.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      return element;
     });
-    expect(days.compareDocumentPosition(sessions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(sessions).toBeDisabled();
-    expect(sessions).toHaveTextContent('Marque os dias primeiro');
+    // Quantos treinos fazer é decisão da MOVIVO: não há pergunta de quantidade.
+    expect(screen.queryByText(/quantos treinos por semana/i)).not.toBeInTheDocument();
     await user.click(days);
     for (const day of [
       'Segunda-feira',
@@ -302,49 +319,6 @@ describe('Continuar só habilita com o essencial', () => {
     ]) {
       expect(screen.getByRole('option', { name: day })).toBeInTheDocument();
     }
-  });
-
-  it('rotina: os treinos vão de 1 até os dias marcados e o esporte externo fica de fora', async () => {
-    const user = userEvent.setup();
-    render(
-      <StepRoutine
-        {...routineProps}
-        externalSports={['MARTIAL_ARTS', 'SWIMMING']}
-        data={{ ...EMPTY_ROUTINE, days: ['MON', 'WED', 'FRI'] }}
-      />,
-    );
-    const sessions = screen.getByRole('combobox', {
-      name: 'Quantos treinos da MOVIVO por semana você quer fazer?',
-    });
-    expect(sessions).toHaveAccessibleDescription(
-      'Sem contar luta / artes marciais e natação: eles já estão na sua semana e a MOVIVO organiza os treinos em volta deles.',
-    );
-    await user.click(sessions);
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-      '1 treino',
-      '2 treinos',
-      '3 treinos',
-    ]);
-  });
-
-  it('rotina: desmarcar dias abaixo dos treinos escolhidos avisa e trava o Continuar', () => {
-    render(
-      <StepRoutine
-        {...routineProps}
-        data={{
-          ...EMPTY_ROUTINE,
-          days: ['MON', 'THU'],
-          slot: 'MORNING',
-          availableMinutes: '45',
-          variesWeekly: false,
-          daysWanted: '4',
-        }}
-      />,
-    );
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Você escolheu 4 treinos, mas marcou só 2 dias. Ajuste um dos dois.',
-    );
-    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
   });
 
   it('rotina: com 2+ dias, "dia diferente" abre período e tempo por dia, pré-preenchidos', async () => {
@@ -360,12 +334,12 @@ describe('Continuar só habilita com o essencial', () => {
       <StepRoutine {...routineProps} onChange={onChange} data={{ ...base, days: ['MON'] }} />,
     );
     expect(
-      screen.queryByText('Algum desses dias tem período ou tempo diferente?'),
+      screen.queryByText('Algum dia foge desse padrão de período ou de tempo?'),
     ).not.toBeInTheDocument();
 
     rerender(<StepRoutine {...routineProps} onChange={onChange} data={base} />);
     const question = screen.getByRole('group', {
-      name: 'Algum desses dias tem período ou tempo diferente?',
+      name: 'Algum dia foge desse padrão de período ou de tempo?',
     });
     expect(screen.queryByRole('combobox', { name: 'Período na segunda-feira' })).toBeNull();
     await user.click(within(question).getByRole('radio', { name: 'Sim' }));
@@ -381,17 +355,17 @@ describe('Continuar só habilita com o essencial', () => {
     expect(screen.getByRole('combobox', { name: 'Período na segunda-feira' })).toHaveTextContent(
       'Noite',
     );
-    const saturday = screen.getByRole('combobox', { name: 'Tempo no sábado' });
-    expect(saturday).toHaveTextContent('Aproximadamente 45 minutos');
+    const saturday = screen.getByRole('combobox', { name: 'Tempo disponível no sábado' });
+    expect(saturday).toHaveTextContent('Cerca de 45 minutos');
     await user.click(saturday);
-    await user.click(screen.getByRole('option', { name: 'Mais de 60 minutos' }));
+    await user.click(screen.getByRole('option', { name: 'Mais de 1 hora' }));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ overrides: { SAT: { slot: 'EVENING', minutes: '90' } } }),
     );
 
     await user.click(
       within(
-        screen.getByRole('group', { name: 'Algum desses dias tem período ou tempo diferente?' }),
+        screen.getByRole('group', { name: 'Algum dia foge desse padrão de período ou de tempo?' }),
       ).getByRole('radio', { name: 'Não' }),
     );
     expect(onChange).toHaveBeenLastCalledWith(
@@ -406,22 +380,24 @@ describe('Continuar só habilita com o essencial', () => {
         data={{ ...EMPTY_ROUTINE, days: ['MON', 'WED'], slot: null }}
       />,
     );
-    expect(screen.getByText('Em qual período, na maioria desses dias?')).toBeInTheDocument();
     expect(
-      screen.getByText('Quanto tempo você tem por treino, na maioria desses dias?'),
+      screen.getByText('Na maioria desses dias, qual período fica melhor para treinar?'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('E quanto tempo você tem para cada treino?')).toBeInTheDocument();
+    expect(
+      screen.getByRole('group', {
+        name: 'Esses dias e horários mudam de uma semana para outra, por escala, plantão ou viagem?',
+      }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('group', { name: 'Sua rotina muda de uma semana para outra?' }),
+      screen.getByRole('combobox', { name: 'Como anda o seu nível de estresse no dia a dia?' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('combobox', { name: 'Qual o seu nível de estresse no cotidiano?' }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText('Quantas horas você costuma dormir?')).toHaveAttribute(
+    expect(screen.getByLabelText('Quantas horas você dorme por noite, em média?')).toHaveAttribute(
       'placeholder',
       'hh:mm',
     );
     expect(screen.queryByText('Como é o seu trabalho?')).not.toBeInTheDocument();
-    expect(screen.queryByText('Você sabe cozinhar?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Como você se vira na cozinha?')).not.toBeInTheDocument();
     expect(screen.queryByText('Quando?')).not.toBeInTheDocument();
   });
 
@@ -438,20 +414,20 @@ describe('Continuar só habilita com o essencial', () => {
     expect(screen.queryByText('E o esforço?')).not.toBeInTheDocument();
     // Perguntas de sim ou não: o campo de texto só aparece com "sim".
     for (const question of [
-      'Você tem alguma preferência para os seus protocolos de treino?',
-      'Existe algo ou algum exercício ou movimento que você não gosta e prefere evitar?',
-      'Algum profissional de saúde te orientou sobre treino ou alimentação?',
+      'Tem algum jeito de treinar que você prefere?',
+      'Tem algum exercício que você prefere evitar só por não gostar?',
+      'Algum profissional de saúde já te deu orientações sobre treino ou alimentação que ainda valem?',
     ]) {
       expect(screen.getByRole('group', { name: question })).toBeInTheDocument();
     }
+    expect(screen.queryByLabelText('Conte como você gosta de treinar.')).not.toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Conte quais são as suas preferências.'),
+      screen.queryByLabelText('Quais exercícios você prefere evitar?'),
     ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('O que você prefere evitar?')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('O que ele orientou?')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('O que foi orientado, e por quem?')).not.toBeInTheDocument();
     expect(screen.queryByText('Quanto tempo por sessão é o ideal?')).not.toBeInTheDocument();
     expect(
-      screen.queryByText('Em quais regiões você gostaria de dar mais ênfase?'),
+      screen.queryByText('Na musculação, quer dar mais ênfase a alguma região do corpo?'),
     ).not.toBeInTheDocument();
   });
 
@@ -468,7 +444,7 @@ describe('Continuar só habilita com o essencial', () => {
       />,
     );
     const group = screen.getByRole('group', {
-      name: 'Você tem alguma preferência para os seus protocolos de treino?',
+      name: 'Tem algum jeito de treinar que você prefere?',
     });
     await user.click(within(group).getByRole('radio', { name: 'Sim' }));
     expect(onChange).toHaveBeenCalledWith(
@@ -487,9 +463,9 @@ describe('Continuar só habilita com o essencial', () => {
         strengthSelected={false}
       />,
     );
-    expect(screen.getByLabelText('Conte quais são as suas preferências.')).toBeInTheDocument();
-    expect(screen.getByLabelText('O que você prefere evitar?')).toBeInTheDocument();
-    expect(screen.getByLabelText('O que ele orientou?')).toBeInTheDocument();
+    expect(screen.getByLabelText('Conte como você gosta de treinar.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Quais exercícios você prefere evitar?')).toBeInTheDocument();
+    expect(screen.getByLabelText('O que foi orientado, e por quem?')).toBeInTheDocument();
   });
 
   it('preferências: musculação traz as regiões de ênfase, até 2', async () => {
@@ -524,7 +500,7 @@ describe('Continuar só habilita com o essencial', () => {
       />,
     );
     const group = screen.getByRole('group', {
-      name: 'Você tem alguma condição de saúde ou toma algum medicamento que a gente deva saber?',
+      name: 'Você tem alguma condição de saúde ou usa algum medicamento contínuo?',
     });
     await user.click(within(group).getByRole('radio', { name: 'Sim' }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ hasCondition: true }));
@@ -545,7 +521,9 @@ describe('Continuar só habilita com o essencial', () => {
     const onChange = vi.fn();
     render(<StepPain {...common} onChange={onChange} data={EMPTY_PAIN} resumed={false} />);
     expect(
-      screen.getByText('Você sente alguma dor hoje que atrapalha ou preocupa na hora de treinar?'),
+      screen.getByText(
+        'Hoje, você sente alguma dor ou desconforto que atrapalha ou te preocupa na hora de treinar?',
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/condição de saúde/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
@@ -555,17 +533,19 @@ describe('Continuar só habilita com o essencial', () => {
 
   it('alimentação: contexto de vida, combos, listas e grade 2x2 da fome', () => {
     render(<StepNutrition {...common} data={EMPTY_NUTRITION} resumed={false} />);
-    const cooking = screen.getByRole('group', { name: 'Você sabe cozinhar?' });
+    const cooking = screen.getByRole('group', { name: 'Como você se vira na cozinha?' });
     expect(cooking.querySelector('.grid-cols-1')).not.toBeNull();
     expect(
       screen.getByLabelText('Quantas refeições por semana você faz fora de casa?'),
     ).toBeInTheDocument();
-    const budget = screen.getByLabelText('Qual seu orçamento mensal para alimentação?');
+    const budget = screen.getByLabelText('Quanto você pode gastar por mês com a sua alimentação?');
     expect(budget).toHaveAttribute('placeholder', 'R$ 0,00');
     expect(
-      screen.getByRole('combobox', { name: 'Alguma restrição alimentar?' }),
+      screen.getByRole('combobox', {
+        name: 'Você segue algum estilo de alimentação ou restrição?',
+      }),
     ).toBeInTheDocument();
-    const meals = screen.getByRole('group', { name: 'Quais refeições você costuma fazer?' });
+    const meals = screen.getByRole('group', { name: 'Quais refeições você faz num dia comum?' });
     expect(meals.querySelector('.grid-cols-1')).not.toBeNull();
     const hunger = screen.getByRole('group', {
       name: 'Como costuma ser a sua fome ao longo do dia?',
@@ -574,22 +554,23 @@ describe('Continuar só habilita com o essencial', () => {
     expect(hunger.querySelector('.sm\\:grid-cols-3')).toBeNull();
   });
 
-  it('alimentação: aplica "refeições" ao número digitado', async () => {
+  it('alimentação: o número de refeições vem da lista marcada, sem pergunta à parte', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
       <StepNutrition
         {...common}
         onChange={onChange}
-        data={{ ...EMPTY_NUTRITION, mealsPerDay: '4' }}
+        data={{ ...EMPTY_NUTRITION, usualMeals: ['LUNCH', 'DINNER'] }}
         resumed={false}
       />,
     );
-    const input = screen.getByLabelText('Quantas refeições você faz por dia?');
-    expect(input).toHaveValue('4');
-    expect(input.parentElement).toHaveTextContent('refeições');
-    await user.type(input, '5');
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ mealsPerDay: '4' }));
+    expect(screen.queryByLabelText('Quantas refeições você faz por dia?')).toBeNull();
+    expect(screen.getByText(/2 refeições marcadas/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Café da manhã' }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ usualMeals: ['LUNCH', 'DINNER', 'BREAKFAST'] }),
+    );
   });
 
   it('alimentação: gravidade é um combo e "Outro" suplemento abre o campo', () => {
@@ -605,7 +586,9 @@ describe('Continuar só habilita com o essencial', () => {
         resumed={false}
       />,
     );
-    expect(screen.getByRole('combobox', { name: 'Gravidade' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Que tipo de reação você tem?' }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('Qual outro suplemento você usa?')).toBeInTheDocument();
   });
 });

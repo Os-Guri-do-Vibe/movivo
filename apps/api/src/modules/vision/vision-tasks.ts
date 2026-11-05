@@ -178,3 +178,41 @@ Regras:
   validators: mealPhotoValidators,
   maxCorrectionRounds: 2,
 });
+
+// --- Que foto é essa? (WhatsApp) ---------------------------------------------------------------
+
+export const IMAGE_KINDS = ['MEAL', 'EXAM', 'WORKOUT_SCREEN', 'BODY', 'OTHER'] as const;
+
+export const imageKindInputSchema = z.object({
+  /** Legenda que o aluno escreveu junto da foto, se houver. */
+  caption: z.string().trim().max(200).nullable(),
+  /** Refeição do último lembrete: o aluno costuma responder a ele com a foto do prato. */
+  expectingMeal: z.boolean(),
+});
+export type ImageKindInput = z.infer<typeof imageKindInputSchema>;
+
+export const imageKindOutputSchema = z.object({
+  kind: z.enum(IMAGE_KINDS),
+  confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+});
+export type ImageKindOutput = z.infer<typeof imageKindOutputSchema>;
+
+export const imageKindTask = defineAgentTask<ImageKindInput, ImageKindOutput>({
+  id: 'vision.classify_whatsapp_image',
+  role: 'Recepção visual da MOVIVO. Você olha a foto que o aluno mandou no WhatsApp e diz que tipo de imagem é, só para encaminhar ao especialista certo.',
+  instructions: `Classifique a imagem em UM tipo:
+- MEAL: prato, refeição, lanche, bebida ou alimento embalado que o aluno comeu ou vai comer.
+- EXAM: exame laboratorial, laudo ou documento de saúde.
+- WORKOUT_SCREEN: print de aplicativo ou relógio com resumo de treino.
+- BODY: foto do corpo (avaliação física).
+- OTHER: qualquer outra coisa.
+
+"expectingMeal" indica que a MOVIVO acabou de lembrar o aluno de registrar uma refeição: em caso de dúvida entre MEAL e OTHER, prefira MEAL. A legenda ("caption") ajuda, mas o que vale é o que se vê. Não descreva a imagem nem faça análise: só o tipo e a confiança.`,
+  tier: 'VISION',
+  methodology: [],
+  state: [],
+  input: imageKindInputSchema,
+  output: imageKindOutputSchema,
+  validators: [],
+  maxCorrectionRounds: 1,
+});

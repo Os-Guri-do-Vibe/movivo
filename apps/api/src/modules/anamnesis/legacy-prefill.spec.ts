@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { ONBOARDING_STEP_SCHEMAS } from '@movivo/shared';
 
-import { legacyPrefill, withModalityVenues, withSessionsWithinDays } from './legacy-prefill';
+import {
+  legacyPrefill,
+  withExternalSportsInWeek,
+  withModalityVenues,
+  withSessionsWithinDays,
+} from './legacy-prefill';
 
 const v1 = {
   primaryGoal: 'LOSE_FAT',
@@ -27,6 +32,9 @@ describe('pré-preenchimento da anamnese antiga', () => {
     const modalities = ONBOARDING_STEP_SCHEMAS[3].parse(blocks.modalities);
     expect(modalities.modalities).toEqual([expect.objectContaining({ venue: 'HOME' })]);
     expect(blocks.modalities).not.toHaveProperty('venues');
+    // A anamnese antiga não perguntava o esporte externo: fica para o aluno responder na semana.
+    expect(blocks.modalities).not.toHaveProperty('externalSports');
+    expect(blocks.routine).not.toHaveProperty('externalSports');
     const routine = ONBOARDING_STEP_SCHEMAS[4].parse({
       ...(blocks.routine as object),
       lifeContext: {},
@@ -39,8 +47,8 @@ describe('etapas salvas no formato anterior', () => {
   it('modalidade sem local herda o mais completo da lista antiga', () => {
     const block = withModalityVenues({
       modalities: [
-        { modality: 'STRENGTH', level: 'BEGINNER', sessionsPerWeek: 2, wantsToStart: false },
-        { modality: 'RUNNING', level: 'NONE', sessionsPerWeek: 0, wantsToStart: true },
+        { modality: 'STRENGTH', level: 'BEGINNER', wantsToStart: false },
+        { modality: 'RUNNING', level: 'NONE', wantsToStart: true },
       ],
       externalSports: [],
       venues: ['OUTDOOR', 'FULL_GYM'],
@@ -60,5 +68,44 @@ describe('etapas salvas no formato anterior', () => {
       lifeContext: {},
     });
     expect(ONBOARDING_STEP_SCHEMAS[4].parse(block).maxSessionsPerWeek).toBe(2);
+  });
+
+  describe('esporte externo respondido na etapa 3', () => {
+    const swimming = {
+      sport: 'SWIMMING',
+      label: 'Natação',
+      sessionsPerWeek: 2,
+      minutesPerSession: 60,
+      typicalRpe: 5,
+      fixedDays: ['TUE'],
+    };
+    const modalities = {
+      modalities: [{ modality: 'STRENGTH', level: 'NONE', wantsToStart: true, venue: 'HOME' }],
+      externalSports: [swimming],
+    };
+    const routine = {
+      windows: [{ weekday: 'MON', slot: 'EVENING', maxMinutes: 60 }],
+      variesWeekly: false,
+      maxSessionsPerWeek: 1,
+      lifeContext: {},
+    };
+
+    it('vai para a semana e sai das modalidades', () => {
+      const week = withExternalSportsInWeek(modalities, routine);
+      expect(week.modalities).not.toHaveProperty('externalSports');
+      expect(ONBOARDING_STEP_SCHEMAS[4].parse(week.routine).externalSports).toEqual([swimming]);
+      expect(ONBOARDING_STEP_SCHEMAS[3].safeParse(week.modalities).success).toBe(true);
+    });
+
+    it('a semana que já tem o campo ganha, e sem semana salva nada é criado', () => {
+      const answered = { ...routine, externalSports: [] };
+      expect(withExternalSportsInWeek(modalities, answered).routine).toBe(answered);
+      expect(withExternalSportsInWeek(modalities, undefined).routine).toBeUndefined();
+    });
+
+    it('etapa 3 já no formato novo não muda nada', () => {
+      const current = { modalities: modalities.modalities };
+      expect(withExternalSportsInWeek(current, routine)).toEqual({ modalities: current, routine });
+    });
   });
 });

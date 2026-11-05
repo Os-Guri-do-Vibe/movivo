@@ -20,21 +20,19 @@ export const modalities = () => ({
     {
       modality: 'STRENGTH',
       level: 'INTERMEDIATE',
-      sessionsPerWeek: 3,
       wantsToStart: false,
       venue: 'FULL_GYM',
     },
     {
       modality: 'RUNNING',
       level: 'BEGINNER',
-      sessionsPerWeek: 0,
       wantsToStart: true,
       venue: 'OUTDOOR',
     },
   ],
-  externalSports: [],
 });
 export const routine = () => ({
+  externalSports: [],
   windows: [
     { weekday: 'MON', slot: 'EVENING', maxMinutes: 60 },
     { weekday: 'WED', slot: 'EVENING', maxMinutes: 60 },

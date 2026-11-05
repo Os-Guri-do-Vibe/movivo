@@ -25,7 +25,7 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
-import { MEDIA_INBOUND_EVENT, type InboundMediaEvent } from '../../core/event-bus/events';
+import { MEDIA_EXAM_EVENT, type InboundMediaEvent } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { DecisionPipeline } from '../coaching/decision/decision-pipeline.service';
@@ -131,9 +131,8 @@ export class MedicalExamService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
-    this.unregister = this.events.register<InboundMediaEvent, boolean>(
-      MEDIA_INBOUND_EVENT,
-      (event) => this.receive(event),
+    this.unregister = this.events.register<InboundMediaEvent, boolean>(MEDIA_EXAM_EVENT, (event) =>
+      this.receive(event),
     );
     this.workers.create<MedicalExamJob>(QUEUE.medicalExam, (job) => this.process(job));
   }

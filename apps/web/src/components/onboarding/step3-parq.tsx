@@ -88,12 +88,17 @@ export function Step3Parq({
             </h1>
           </div>
           <p className="text-body text-muted-foreground">
-            São 9 perguntas rápidas, de sim ou não. É o questionário que o profissional de Educação
-            Física usa antes de preparar um treino.
+            São 9 perguntas rápidas, de sim ou não. É o questionário padrão de prontidão para
+            atividade física (PAR-Q), que o profissional de Educação Física usa antes de preparar um
+            treino.
+          </p>
+          <p className="text-body text-muted-foreground">
+            Algumas perguntas podem lembrar o que você já contou antes. Responda mesmo assim: o
+            questionário é sempre aplicado completo.
           </p>
           <p className="rounded-xl border border-coral bg-coral/10 p-4 text-body text-petroleo">
-            Se alguma resposta for “sim”, tudo bem. O profissional responsável só vai olhar seu caso
-            antes de o treino ser preparado.
+            Se alguma resposta for “sim”, tudo bem. O profissional responsável só vai olhar o seu
+            caso antes de o treino ser preparado.
           </p>
         </section>
       )}
@@ -123,13 +128,13 @@ export function Step3Parq({
               <p className="text-body text-muted-foreground">Anotado. Obrigado por contar.</p>
               <QuestionField className="border-l-2 border-primary pl-4">
                 <FieldLabel htmlFor={`detail-${questionId}`} optional={questionId !== 'Q9'}>
-                  {questionId === 'Q9' ? 'Qual motivo?' : 'Quer contar um pouco mais?'}
+                  {questionId === 'Q9' ? 'Qual é o motivo?' : 'Quer contar um pouco mais?'}
                 </FieldLabel>
                 <FieldValidation
                   key={questionId}
                   error={
                     questionId === 'Q9' && currentAnswer.detail.trim() === ''
-                      ? 'Conte qual é o motivo para continuar.'
+                      ? 'Para continuar, conte qual é o motivo.'
                       : undefined
                   }
                 >

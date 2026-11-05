@@ -21,6 +21,7 @@ import { hybridRules, runningRules } from '../calc/params';
 import { blockOutputSchema } from './blocks';
 import {
   outputLanguageViolations,
+  BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
 } from './common';
@@ -157,10 +158,11 @@ Regras:
 4. Não passe de "maxSessionsPerWeek" sessões próprias por semana e garanta que cada modalidade em foco mantém ao menos uma sessão.
 5. modalityPriorities: reflita a prioridade recebida de cada modalidade (1 = principal). phases: organize o plano em fases coerentes, com semanas de recuperação quando a metodologia pedir. summary: 3 a 4 frases claras que expliquem como as modalidades convivem na semana, sem prometer resultado.
 6. Nunca "compense" sessão perdida empilhando treinos; a semana é o que cabe.
-7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
+7. ${BODY_COMPOSITION_RULE}
+8. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['HYBRID', 'RUNNING'],
-  state: ['goals', 'availability', 'training'],
+  state: ['goals', 'availability', 'training', 'bodyComposition'],
   input: hybridInputSchema,
   output: hybridOutputSchema,
   validators: hybridValidators,

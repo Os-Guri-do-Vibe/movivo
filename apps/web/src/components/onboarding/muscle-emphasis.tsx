@@ -4,7 +4,7 @@ import { MUSCLE_EMPHASIS_LABELS, type MuscleEmphasisRegion } from '@movivo/share
 
 import { cn } from '@/lib/utils';
 
-import { QuestionMeta, selectionHint } from './fields';
+import { QuestionMeta, SelectionIndicator, selectionHint } from './fields';
 
 const REGIONS = Object.keys(MUSCLE_EMPHASIS_LABELS) as MuscleEmphasisRegion[];
 const MAX_REGIONS = 2;
@@ -33,13 +33,13 @@ export function MuscleEmphasisGrid({
   const atLimit = selected.length >= MAX_REGIONS;
   return (
     <fieldset className="min-w-0">
-      <legend className="text-body font-semibold text-foreground">
-        Em quais regiões você gostaria de dar mais ênfase?
+      <legend className="text-body font-semibold leading-snug tracking-[-0.005em] text-foreground">
+        Na musculação, quer dar mais ênfase a alguma região do corpo?
       </legend>
       <div className="mt-0.5" aria-live="polite">
         <QuestionMeta optional hint={selectionHint(true, MAX_REGIONS, selected.length)} />
       </div>
-      <div className="mt-2 grid w-full grid-cols-3 gap-3">
+      <div className="mt-3 grid w-full grid-cols-3 gap-2.5">
         {REGIONS.map((region) => {
           const isSelected = selected.includes(region);
           const isDisabled = !isSelected && atLimit;
@@ -51,24 +51,18 @@ export function MuscleEmphasisGrid({
               aria-disabled={isDisabled || undefined}
               onClick={() => !isDisabled && onToggle(region)}
               className={cn(
-                'relative flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-2xl border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:gap-2 sm:p-3',
+                'relative flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-2xl border p-2 text-center outline-none sm:gap-2 sm:p-3',
+                'transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out',
+                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-white',
                 isSelected
-                  ? 'border-petroleo bg-accent text-petroleo ring-1 ring-inset ring-petroleo'
-                  : 'border-input bg-white text-foreground hover:border-petroleo hover:bg-secondary',
-                isDisabled && 'opacity-50',
+                  ? 'border-petroleo bg-accent text-petroleo shadow-[inset_0_0_0_1px_var(--petroleo-vivo)]'
+                  : 'border-border bg-white text-foreground shadow-[0_1px_2px_rgba(6,48,42,0.05)] hover:border-input hover:bg-nevoa',
+                isDisabled
+                  ? 'cursor-not-allowed opacity-50 hover:border-border hover:bg-white'
+                  : 'motion-safe:active:scale-[0.97]',
               )}
             >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'absolute left-1.5 top-1.5 flex size-5 items-center justify-center rounded-full border text-[0.6875rem] font-bold sm:left-2 sm:top-2 sm:size-6 sm:text-label',
-                  isSelected
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input text-transparent',
-                )}
-              >
-                ✓
-              </span>
+              <SelectionIndicator selected={isSelected} multi className="absolute left-2 top-2" />
               <span
                 aria-hidden="true"
                 data-icons8-icon={region}

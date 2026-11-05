@@ -165,6 +165,17 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // --- Nutrição, corpo e check-ins.
   { table: 'nutrition_plans', column: 'user_id', professional: 'write' },
   { table: 'food_logs', column: 'user_id', professional: 'read' },
+  { table: 'daily_check_ins', column: 'user_id', professional: 'read' },
+  { table: 'student_memories', column: 'user_id', professional: 'read' },
+  // Acompanhamento premium: observações, estudo do dia, snapshots, compromissos, contatos e qualidade.
+  { table: 'student_reports', column: 'user_id', professional: 'read' },
+  { table: 'student_day_digests', column: 'user_id', professional: 'read' },
+  { table: 'session_snapshots', column: 'user_id', professional: 'read' },
+  { table: 'student_commitments', column: 'user_id', professional: 'read' },
+  { table: 'agent_outreaches', column: 'user_id', professional: 'read' },
+  { table: 'message_quality_reviews', column: 'user_id', professional: 'write' },
+  { table: 'cycle_reassessments', column: 'user_id', professional: 'read' },
+  { table: 'cycle_reassessment_photos', column: 'user_id', professional: 'read' },
   { table: 'body_measurements', column: 'user_id', professional: 'read' },
   { table: 'body_photos', column: 'user_id', professional: 'read' },
   { table: 'body_assessments', column: 'user_id', professional: 'read' },

@@ -86,27 +86,24 @@ export const weeklyKmError = (text: string) =>
 
 export const fiveKError = (text: string) =>
   timeInvalid(text, 600, 7_200)
-    ? 'Informe o tempo no formato mm:ss, entre 10:00 e 2:00:00.'
+    ? 'Use minutos e segundos (ex.: 28:30), entre 10:00 e 2:00:00.'
     : undefined;
 
 export const hyroxRacesError = (text: string) =>
-  outOfRange(text, 0, 100, true) ? 'Informe um número de 0 a 100 provas.' : undefined;
+  outOfRange(text, 0, 100, true) ? 'Informe um número de 0 a 100.' : undefined;
 
 export const hyroxBestError = (text: string) =>
   timeInvalid(text, 2_400, 14_400)
-    ? 'Informe o tempo no formato hh:mm:ss, entre 00:40:00 e 04:00:00.'
+    ? 'Use horas, minutos e segundos (ex.: 01:25:00), entre 00:40:00 e 04:00:00.'
     : undefined;
 
 export const sportDurationError = (text: string) =>
   timeInvalid(text, MIN_SESSION_MINUTES * 60, MAX_SESSION_MINUTES * 60)
-    ? 'Informe a duração no formato mm:ss (ou h:mm:ss), entre 10 minutos e 10 horas.'
+    ? 'Use minutos e segundos (ex.: 45:00) ou horas (ex.: 1:30:00), entre 10 minutos e 10 horas.'
     : undefined;
 
 export const mealsOutsideError = (text: string) =>
   outOfRange(text, 0, 21, true) ? 'Informe de 0 a 21 refeições por semana.' : undefined;
-
-export const mealsPerDayError = (text: string) =>
-  outOfRange(text, 1, 8, true) ? 'Informe de 1 a 8 refeições por dia.' : undefined;
 
 /** Teto do orçamento aceito pela API: R$ 1.000.000,00, em centavos. */
 const MAX_FOOD_BUDGET_CENTS = 100_000_000;
@@ -208,7 +205,7 @@ export function goalsFromBlock(block: unknown): GoalsDraft {
   };
 }
 
-// --- 3. Modalidades -----------------------------------------------------------------------
+// --- 3. Seu treino com a MOVIVO -----------------------------------------------------------
 
 export type CoachedModalityKey = 'STRENGTH' | 'RUNNING' | 'HYROX';
 
@@ -217,8 +214,6 @@ export interface ModalityDraft {
   /** `true` = já pratica; `false` = quer começar; `null` = ainda não respondeu. */
   practicing: boolean | null;
   level: Exclude<ExperienceLevel, 'NONE'> | null;
-  /** Dias por semana (1 a 7) em que já pratica hoje. */
-  sessions: string;
   /** Onde faz a maior parte dos treinos da modalidade (pratique ou queira começar). */
   venue: TrainingVenue | null;
   weeklyKm: string;
@@ -229,28 +224,14 @@ export interface ModalityDraft {
   hyroxBest: string;
 }
 
-export interface ExternalSportDraft {
-  sport: ExternalSport | null;
-  /** Dias por semana (1 a 7). */
-  sessions: string;
-  /** Duração média de uma sessão: `mm:ss` (45:00) ou `h:mm:ss` a partir de uma hora. */
-  duration: string;
-  rpe: number | null;
-  fixedDays: Weekday[];
-}
-
 export interface ModalitiesDraft {
   modalities: Record<CoachedModalityKey, ModalityDraft>;
-  /** `undefined` = ainda não respondeu; `false` = não pratica outro esporte. */
-  practicesOtherSport: boolean | undefined;
-  externalSports: ExternalSportDraft[];
 }
 
 const EMPTY_MODALITY: ModalityDraft = {
   selected: false,
   practicing: null,
   level: null,
-  sessions: '',
   venue: null,
   weeklyKm: '',
   fiveK: '',
@@ -264,20 +245,7 @@ export const EMPTY_MODALITIES: ModalitiesDraft = {
     RUNNING: { ...EMPTY_MODALITY },
     HYROX: { ...EMPTY_MODALITY },
   },
-  practicesOtherSport: undefined,
-  externalSports: [],
 };
-
-export const newExternalSport = (): ExternalSportDraft => ({
-  sport: null,
-  sessions: '',
-  duration: '',
-  rpe: null,
-  fixedDays: [],
-});
-
-const MIN_SESSION_MINUTES = 10;
-const MAX_SESSION_MINUTES = 600;
 
 export function modalitiesPayload(d: ModalitiesDraft) {
   return {
@@ -289,7 +257,6 @@ export function modalitiesPayload(d: ModalitiesDraft) {
           return {
             modality: key,
             level: 'NONE',
-            sessionsPerWeek: 0,
             wantsToStart: true,
             venue: m.venue,
           };
@@ -297,7 +264,6 @@ export function modalitiesPayload(d: ModalitiesDraft) {
         return {
           modality: key,
           level: m.level,
-          sessionsPerWeek: Math.round(num(m.sessions) ?? 0),
           wantsToStart: false,
           venue: m.venue,
           ...(key === 'RUNNING'
@@ -314,34 +280,13 @@ export function modalitiesPayload(d: ModalitiesDraft) {
             : {}),
         };
       }),
-    externalSports: d.externalSports.flatMap((s) =>
-      s.sport === null
-        ? []
-        : [
-            {
-              sport: s.sport,
-              label: EXTERNAL_SPORT_LABELS[s.sport],
-              sessionsPerWeek: Math.round(num(s.sessions) ?? 1),
-              minutesPerSession: durationMinutes(s.duration) ?? 60,
-              typicalRpe: s.rpe ?? 6,
-              fixedDays: s.fixedDays,
-            },
-          ],
-    ),
   };
-}
-
-/** Mais dias fixos do que dias por semana não faz sentido. */
-export function fixedDaysExceedSessions(sessions: string, fixedDays: readonly Weekday[]): boolean {
-  const days = num(sessions);
-  return days !== undefined && fixedDays.length > days;
 }
 
 function modalityComplete(m: ModalityDraft, key: CoachedModalityKey): boolean {
   if (m.practicing === null || m.venue === null) return false;
   if (!m.practicing) return true;
-  const sessions = num(m.sessions);
-  if (m.level === null || sessions === undefined || sessions < 1 || sessions > 7) return false;
+  if (m.level === null) return false;
   if (key === 'RUNNING') {
     return num(m.weeklyKm) !== undefined && !weeklyKmError(m.weeklyKm) && !fiveKError(m.fiveK);
   }
@@ -354,6 +299,72 @@ function modalityComplete(m: ModalityDraft, key: CoachedModalityKey): boolean {
     );
   }
   return true;
+}
+
+export function modalitiesComplete(d: ModalitiesDraft): boolean {
+  const keys = (Object.keys(d.modalities) as CoachedModalityKey[]).filter(
+    (key) => d.modalities[key].selected,
+  );
+  return keys.length > 0 && keys.every((key) => modalityComplete(d.modalities[key], key));
+}
+
+export function modalitiesFromBlock(block: unknown): ModalitiesDraft {
+  const data = block as
+    | {
+        modalities?: Array<Record<string, unknown>>;
+        /** Blocos antigos: um local para todas as modalidades. */
+        venues?: TrainingVenue[];
+      }
+    | undefined;
+  if (!data?.modalities) return EMPTY_MODALITIES;
+  const modalities = structuredClone(EMPTY_MODALITIES.modalities);
+  for (const m of data.modalities) {
+    const key = m.modality as CoachedModalityKey;
+    const wantsToStart = m.wantsToStart === true;
+    modalities[key] = {
+      selected: true,
+      practicing: !wantsToStart,
+      level: m.level === 'NONE' ? null : (m.level as ModalityDraft['level']),
+      venue: (m.venue as TrainingVenue | undefined) ?? defaultVenueOf(key, data.venues ?? []),
+      weeklyKm: m.weeklyKm ? String(m.weeklyKm) : '',
+      fiveK: m.recent5kSeconds ? secondsToRaceTime(Number(m.recent5kSeconds)) : '',
+      hyroxRaces: m.hyroxRaces !== undefined ? String(m.hyroxRaces) : '',
+      hyroxBest: m.hyroxBestSeconds ? secondsToClock(Number(m.hyroxBestSeconds)) : '',
+    };
+  }
+  return { modalities };
+}
+
+// --- 4. Sua semana -------------------------------------------------------------------------
+//
+// Ordem da etapa: o que já ocupa a semana (esporte externo), quando dá para treinar, o teto de
+// treinos e, por último, sono e estresse. Tudo é informação: a MOVIVO decide o resto.
+
+export interface ExternalSportDraft {
+  sport: ExternalSport | null;
+  /** Dias por semana (1 a 7). */
+  sessions: string;
+  /** Duração média de uma sessão: `mm:ss` (45:00) ou `h:mm:ss` a partir de uma hora. */
+  duration: string;
+  rpe: number | null;
+  fixedDays: Weekday[];
+}
+
+export const newExternalSport = (): ExternalSportDraft => ({
+  sport: null,
+  sessions: '',
+  duration: '',
+  rpe: null,
+  fixedDays: [],
+});
+
+const MIN_SESSION_MINUTES = 10;
+const MAX_SESSION_MINUTES = 600;
+
+/** Mais dias fixos do que dias por semana não faz sentido. */
+export function fixedDaysExceedSessions(sessions: string, fixedDays: readonly Weekday[]): boolean {
+  const days = num(sessions);
+  return days !== undefined && fixedDays.length > days;
 }
 
 /** Duração digitada como `mm:ss` / `h:mm:ss` → minutos. */
@@ -376,60 +387,32 @@ function externalSportComplete(s: ExternalSportDraft): boolean {
   );
 }
 
-export function modalitiesComplete(d: ModalitiesDraft): boolean {
-  const keys = (Object.keys(d.modalities) as CoachedModalityKey[]).filter(
-    (key) => d.modalities[key].selected,
-  );
-  return (
-    keys.length > 0 &&
-    keys.every((key) => modalityComplete(d.modalities[key], key)) &&
-    d.practicesOtherSport !== undefined &&
-    (!d.practicesOtherSport ||
-      (d.externalSports.length > 0 && d.externalSports.every(externalSportComplete)))
+function externalSportsPayload(sports: readonly ExternalSportDraft[]) {
+  return sports.flatMap((s) =>
+    s.sport === null
+      ? []
+      : [
+          {
+            sport: s.sport,
+            label: EXTERNAL_SPORT_LABELS[s.sport],
+            sessionsPerWeek: Math.round(num(s.sessions) ?? 1),
+            minutesPerSession: durationMinutes(s.duration) ?? 60,
+            typicalRpe: s.rpe ?? 6,
+            fixedDays: s.fixedDays,
+          },
+        ],
   );
 }
 
-export function modalitiesFromBlock(block: unknown): ModalitiesDraft {
-  const data = block as
-    | {
-        modalities?: Array<Record<string, unknown>>;
-        externalSports?: Array<Record<string, unknown>>;
-        /** Blocos antigos: um local para todas as modalidades. */
-        venues?: TrainingVenue[];
-      }
-    | undefined;
-  if (!data?.modalities) return EMPTY_MODALITIES;
-  const modalities = structuredClone(EMPTY_MODALITIES.modalities);
-  for (const m of data.modalities) {
-    const key = m.modality as CoachedModalityKey;
-    const wantsToStart = m.wantsToStart === true;
-    modalities[key] = {
-      selected: true,
-      practicing: !wantsToStart,
-      level: m.level === 'NONE' ? null : (m.level as ModalityDraft['level']),
-      sessions: m.sessionsPerWeek ? String(m.sessionsPerWeek) : '',
-      venue: (m.venue as TrainingVenue | undefined) ?? defaultVenueOf(key, data.venues ?? []),
-      weeklyKm: m.weeklyKm ? String(m.weeklyKm) : '',
-      fiveK: m.recent5kSeconds ? secondsToRaceTime(Number(m.recent5kSeconds)) : '',
-      hyroxRaces: m.hyroxRaces !== undefined ? String(m.hyroxRaces) : '',
-      hyroxBest: m.hyroxBestSeconds ? secondsToClock(Number(m.hyroxBestSeconds)) : '',
-    };
-  }
-  const externalSports = (data.externalSports ?? []).map((s) => ({
+function externalSportsFromBlock(sports: Array<Record<string, unknown>>): ExternalSportDraft[] {
+  return sports.map((s) => ({
     sport: s.sport as ExternalSport,
     sessions: s.sessionsPerWeek ? String(s.sessionsPerWeek) : '',
     duration: s.minutesPerSession ? secondsToRaceTime(Number(s.minutesPerSession) * 60) : '',
     rpe: s.typicalRpe === undefined ? null : Number(s.typicalRpe),
     fixedDays: (s.fixedDays as Weekday[]) ?? [],
   }));
-  return {
-    modalities,
-    practicesOtherSport: externalSports.length > 0,
-    externalSports,
-  };
 }
-
-// --- 4. Rotina ----------------------------------------------------------------------------
 
 /** Tempo disponível por treino (minutos); `90` representa "mais de 60 minutos". */
 export const AVAILABLE_MINUTES_OPTIONS = ['30', '45', '60', '90'] as const;
@@ -442,6 +425,10 @@ export interface DayWindowDraft {
 }
 
 export interface RoutineDraft {
+  /** `undefined` = ainda não respondeu; `false` = não pratica outro esporte. */
+  practicesOtherSport: boolean | undefined;
+  /** Esportes que o aluno já pratica por fora: a MOVIVO planeja em volta deles. */
+  externalSports: ExternalSportDraft[];
   /** Dias da semana em que o aluno pode treinar. */
   days: Weekday[];
   /** Período da maioria dos dias marcados (padrão). */
@@ -453,21 +440,20 @@ export interface RoutineDraft {
   /** Período e tempo dos dias que fogem do padrão. */
   overrides: Partial<Record<Weekday, DayWindowDraft>>;
   variesWeekly: boolean | undefined;
-  /** Treinos da MOVIVO por semana (1 até o número de dias marcados), sem o esporte externo. */
-  daysWanted: string;
   /** Horas de sono, `hh:mm`. */
   sleep: string;
   stress: '' | 'LOW' | 'MODERATE' | 'HIGH';
 }
 
 export const EMPTY_ROUTINE: RoutineDraft = {
+  practicesOtherSport: undefined,
+  externalSports: [],
   days: [],
   slot: null,
   availableMinutes: '',
   hasDayOverrides: undefined,
   overrides: {},
   variesWeekly: undefined,
-  daysWanted: '',
   sleep: '',
   stress: '',
 };
@@ -478,12 +464,6 @@ export function dayWindow(d: RoutineDraft, day: Weekday) {
   return { slot: own?.slot ?? d.slot, minutes: own?.minutes || d.availableMinutes };
 }
 
-/** Mais treinos do que dias marcados: o planejador não teria onde encaixar. */
-export function sessionsExceedDays(d: RoutineDraft): boolean {
-  const wanted = num(d.daysWanted);
-  return wanted !== undefined && wanted > d.days.length;
-}
-
 function sleepHours(text: string): number | undefined {
   const minutes = clockToTotal(text);
   return minutes === undefined ? undefined : minutes / 60;
@@ -492,6 +472,7 @@ function sleepHours(text: string): number | undefined {
 export function routinePayload(d: RoutineDraft) {
   const sleep = sleepHours(d.sleep);
   return {
+    externalSports: d.practicesOtherSport ? externalSportsPayload(d.externalSports) : [],
     windows: WEEKDAYS.filter((day) => d.days.includes(day)).map((weekday) => {
       const window = dayWindow(d, weekday);
       return {
@@ -501,7 +482,6 @@ export function routinePayload(d: RoutineDraft) {
       };
     }),
     variesWeekly: d.variesWeekly === true,
-    maxSessionsPerWeek: Math.round(num(d.daysWanted) ?? 1),
     lifeContext: {
       ...(sleep ? { sleepHoursTypical: Math.round(sleep * 100) / 100 } : {}),
       ...(d.stress ? { stressLevel: d.stress } : {}),
@@ -517,19 +497,18 @@ export function sleepOutOfRange(text: string): boolean {
 
 export const sleepError = (text: string) =>
   text !== '' && (!/^\d{2}:\d{2}$/.test(text) || sleepOutOfRange(text))
-    ? 'Informe no formato hh:mm, entre 03:00 e 12:00 horas.'
+    ? 'Use horas e minutos (ex.: 07:30), entre 03:00 e 12:00.'
     : undefined;
 
 export function routineComplete(d: RoutineDraft): boolean {
-  const wanted = num(d.daysWanted);
   return (
+    d.practicesOtherSport !== undefined &&
+    (!d.practicesOtherSport ||
+      (d.externalSports.length > 0 && d.externalSports.every(externalSportComplete))) &&
     d.days.length > 0 &&
     d.slot !== null &&
     d.availableMinutes !== '' &&
     d.variesWeekly !== undefined &&
-    wanted !== undefined &&
-    wanted >= 1 &&
-    !sessionsExceedDays(d) &&
     !sleepError(d.sleep)
   );
 }
@@ -543,16 +522,39 @@ function mostFrequent<T>(values: readonly T[]): T | undefined {
   );
 }
 
-export function routineFromBlock(block: unknown): RoutineDraft {
+type SportsBlock = { externalSports?: Array<Record<string, unknown>> } | undefined;
+
+/**
+ * Esporte externo salvo: o da etapa 4; em sessão salva antes da mudança, o da etapa 3. Sem
+ * nenhum dos dois, a pergunta fica sem resposta.
+ */
+function savedExternalSports(routine: SportsBlock, legacyModalities: SportsBlock) {
+  const sports = routine?.externalSports ?? legacyModalities?.externalSports;
+  if (!sports) return { practicesOtherSport: undefined, externalSports: [] };
+  const externalSports = externalSportsFromBlock(sports);
+  return { practicesOtherSport: externalSports.length > 0, externalSports };
+}
+
+/**
+ * Etapa 4 salva → rascunho. `legacyModalities` é o bloco da etapa 3: sessões salvas antes da
+ * mudança guardavam lá o esporte externo.
+ */
+export function routineFromBlock(block: unknown, legacyModalities?: unknown): RoutineDraft {
   const data = block as
     | {
+        externalSports?: Array<Record<string, unknown>>;
         windows?: Array<{ weekday: Weekday; slot: DaySlot; maxMinutes: number }>;
         variesWeekly?: boolean;
         maxSessionsPerWeek?: number;
         lifeContext?: Record<string, unknown>;
       }
     | undefined;
-  if (!data?.windows) return EMPTY_ROUTINE;
+  const sports = savedExternalSports(data, legacyModalities as SportsBlock);
+  if (!data?.windows) {
+    return sports.practicesOtherSport === undefined
+      ? EMPTY_ROUTINE
+      : { ...EMPTY_ROUTINE, ...sports };
+  }
   const windows = data.windows.map((w) => ({
     weekday: w.weekday,
     slot: w.slot,
@@ -570,13 +572,13 @@ export function routineFromBlock(block: unknown): RoutineDraft {
   const sleep = Number(life.sleepHoursTypical);
   return {
     ...EMPTY_ROUTINE,
+    ...sports,
     days: windows.map((w) => w.weekday),
     slot,
     availableMinutes,
     hasDayOverrides: Object.keys(overrides).length > 0 || undefined,
     overrides,
     variesWeekly: data.variesWeekly,
-    daysWanted: data.maxSessionsPerWeek ? String(Math.min(7, data.maxSessionsPerWeek)) : '',
     sleep: sleep > 0 ? minutesToClock(Math.round(sleep * 60)) : '',
     stress: (life.stressLevel as RoutineDraft['stress']) ?? '',
   };
@@ -710,7 +712,6 @@ export interface NutritionDraft {
   mealsOutsideHomePerWeek: string;
   /** Orçamento mensal para alimentação, em centavos (só dígitos). */
   foodBudgetCents: string;
-  mealsPerDay: string;
   usualMeals: MealSlot[];
   dietaryRestrictions: DietaryRestriction[];
   hasAllergy: boolean | undefined;
@@ -726,7 +727,6 @@ export const EMPTY_NUTRITION: NutritionDraft = {
   cookingCapacity: null,
   mealsOutsideHomePerWeek: '',
   foodBudgetCents: '',
-  mealsPerDay: '',
   usualMeals: [],
   dietaryRestrictions: [],
   hasAllergy: undefined,
@@ -743,7 +743,8 @@ export function nutritionPayload(d: NutritionDraft) {
     cookingCapacity: d.cookingCapacity,
     mealsOutsideHomePerWeek: Math.round(num(d.mealsOutsideHomePerWeek) ?? 0),
     foodBudgetMonthlyBrl: Number(d.foodBudgetCents) / 100,
-    mealsPerDay: Math.round(num(d.mealsPerDay) ?? 0),
+    // O número de refeições é a quantidade marcada: o aluno responde uma pergunta só.
+    mealsPerDay: d.usualMeals.length,
     usualMeals: d.usualMeals,
     dietaryRestrictions: d.dietaryRestrictions,
     allergies: d.hasAllergy
@@ -766,8 +767,6 @@ export function nutritionComplete(d: NutritionDraft): boolean {
     !foodBudgetError(d.foodBudgetCents) &&
     d.mealsOutsideHomePerWeek.trim() !== '' &&
     !mealsOutsideError(d.mealsOutsideHomePerWeek) &&
-    d.mealsPerDay.trim() !== '' &&
-    !mealsPerDayError(d.mealsPerDay) &&
     d.usualMeals.length > 0 &&
     d.hasAllergy !== undefined &&
     (!d.hasAllergy ||
@@ -782,7 +781,7 @@ export function nutritionFromBlock(block: unknown): NutritionDraft {
   const data = block as
     | (Partial<Record<keyof NutritionDraft, unknown>> & { foodBudgetMonthlyBrl?: unknown })
     | undefined;
-  if (!data?.mealsPerDay) return EMPTY_NUTRITION;
+  if (!data?.usualMeals) return EMPTY_NUTRITION;
   return {
     ...EMPTY_NUTRITION,
     cookingCapacity: (data.cookingCapacity as NutritionDraft['cookingCapacity']) ?? null,
@@ -792,7 +791,6 @@ export function nutritionFromBlock(block: unknown): NutritionDraft {
       typeof data.foodBudgetMonthlyBrl === 'number'
         ? String(Math.round(data.foodBudgetMonthlyBrl * 100))
         : '',
-    mealsPerDay: String(data.mealsPerDay),
     usualMeals: (data.usualMeals as MealSlot[]) ?? [],
     dietaryRestrictions: (data.dietaryRestrictions as DietaryRestriction[]) ?? [],
     supplements: (data.supplements as Supplement[]) ?? [],

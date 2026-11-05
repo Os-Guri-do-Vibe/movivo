@@ -27,6 +27,8 @@ import { OutboxRelay } from '../domain-events/outbox-relay';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { addDays } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
+import { StudentMemoryService } from '../student-state/student-memory.service';
+import { saveDailyCheckIn } from '../training/daily-check-in';
 import { AnswerError, composeQuestions, validateAnswers, type CheckInSignals } from './questions';
 
 const EXPIRES_IN_DAYS = 5;
@@ -48,6 +50,7 @@ export class CheckInService {
     private readonly safety: SafetyService,
     private readonly policies: PublishedPolicies,
     private readonly methodology: PublishedMethodologyReader,
+    private readonly memory: StudentMemoryService,
   ) {}
 
   /** Cria o check-in da semana (idempotente: já existe um aberto → devolve o mesmo). */
@@ -128,11 +131,41 @@ export class CheckInService {
           measuredOn: today,
         });
       }
+      // O que o aluno conta toda semana alimenta as métricas diárias dos agentes.
+      const scale = (key: string) =>
+        typeof answers[key] === 'number' ? Math.round(answers[key]) : null;
+      const foodWeek: Record<string, 'ON_TRACK' | 'PARTIAL' | 'OFF'> = {
+        'Segui o plano': 'ON_TRACK',
+        'Segui quase sempre': 'ON_TRACK',
+        'Segui pouco': 'PARTIAL',
+        'Quase nada': 'OFF',
+      };
+      await saveDailyCheckIn(
+        tx,
+        userId,
+        today,
+        {
+          energy: scale('energy'),
+          sleep: scale('sleep'),
+          soreness: scale('soreness'),
+          stress: scale('stress'),
+          mood: scale('motivation'),
+          nutrition: foodWeek[String(answers.food_week)] ?? null,
+        },
+        'DAILY',
+      );
       if (answers.pain === true) {
+        const where = typeof answers.pain_where === 'string' ? ` (${answers.pain_where})` : '';
         await this.safety.raiseIn(
           tx,
           userId,
-          [signalOf('PERSISTENT_PAIN', 'no check-in o aluno relatou dor ou desconforto', params)],
+          [
+            signalOf(
+              'PERSISTENT_PAIN',
+              `no check-in o aluno relatou dor ou desconforto${where}`,
+              params,
+            ),
+          ],
           'RULE',
         );
       }
@@ -143,6 +176,25 @@ export class CheckInService {
       });
     });
     await this.outbox.flushSoon();
+    await this.rememberWin(userId, answers);
+  }
+
+  /** A vitória da semana vira marco na memória do aluno; falhar aqui nunca desfaz o check-in. */
+  private async rememberWin(userId: string, answers: CheckInAnswers): Promise<void> {
+    const win = typeof answers.win === 'string' ? answers.win.trim() : '';
+    if (win.length < 8) return;
+    try {
+      await this.memory.apply(userId, [
+        {
+          kind: 'MILESTONE',
+          text: `Vitória da semana: ${win}`.slice(0, 160),
+          importance: 2,
+          origin: 'CHECK_IN',
+        },
+      ]);
+    } catch {
+      // Memória é complemento do acompanhamento; o registro do check-in já está salvo.
+    }
   }
 
   // --- Sinais ----------------------------------------------------------------------------

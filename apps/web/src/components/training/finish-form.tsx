@@ -2,11 +2,36 @@
 
 import { useState } from 'react';
 
-import type { ExecutionView, FinishExecutionRequest } from '@movivo/shared';
+import type {
+  DailyCheckIn,
+  ExecutionView,
+  FinishExecutionRequest,
+  PainReport,
+} from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
 
-const REGIONS = ['ombro', 'joelho', 'lombar', 'quadril', 'tornozelo', 'punho', 'cotovelo', 'outra'];
+import { CheckInFields, EMPTY_CHECK_IN } from './check-in-fields';
+
+const REGIONS = [
+  'ombro',
+  'joelho',
+  'lombar',
+  'quadril',
+  'tornozelo',
+  'punho',
+  'cotovelo',
+  'pescoço',
+  'outra',
+];
+
+const CHARACTERS: ReadonlyArray<{ value: NonNullable<PainReport['character']>; label: string }> = [
+  { value: 'MUSCLE', label: 'Muscular (cansaço do treino)' },
+  { value: 'JOINT', label: 'Na articulação' },
+  { value: 'SHARP', label: 'Pontada' },
+  { value: 'BURNING', label: 'Queimação' },
+  { value: 'OTHER', label: 'Outra' },
+];
 
 /**
  * Fechamento da sessão: como foi (esforço de 0 a 10), quanto durou, se doeu e se gostou.
@@ -28,6 +53,9 @@ export function FinishForm({
   const [hadPain, setHadPain] = useState(false);
   const [region, setRegion] = useState(REGIONS[0] ?? 'outra');
   const [intensity, setIntensity] = useState(3);
+  const [character, setCharacter] = useState<PainReport['character']>('MUSCLE');
+  const [limits, setLimits] = useState(false);
+  const [checkIn, setCheckIn] = useState<DailyCheckIn>(EMPTY_CHECK_IN);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -49,7 +77,10 @@ export function FinishForm({
         rpe,
         durationMinutes: parsedMinutes,
         enjoyment,
-        painReports: hadPain ? [{ region, intensity, during: 'DURING' }] : [],
+        painReports: hadPain
+          ? [{ region, intensity, during: 'DURING', character, limitsMovement: limits }]
+          : [],
+        checkIn,
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Não foi possível registrar agora.');
@@ -154,9 +185,47 @@ export function FinishForm({
                 className="h-11 w-24 rounded-lg border border-border bg-card px-3 text-body"
               />
             </label>
+            <label className="flex flex-col gap-1 text-label">
+              Como é a dor
+              <select
+                value={character}
+                onChange={(event) => setCharacter(event.target.value as PainReport['character'])}
+                className="h-11 rounded-lg border border-border bg-card px-3 text-body"
+              >
+                {CHARACTERS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-body">
+              <input
+                type="checkbox"
+                checked={limits}
+                onChange={(event) => setLimits(event.target.checked)}
+              />
+              Atrapalha o movimento
+            </label>
           </div>
         )}
+        {hadPain && (
+          <p className="text-label text-muted-foreground">
+            Depois de enviar, a gente te responde no WhatsApp com a orientação e o que muda nos
+            próximos treinos.
+          </p>
+        )}
       </fieldset>
+
+      <section className="flex flex-col gap-4 rounded-xl border border-border p-4">
+        <h3 className="text-label font-semibold">
+          Como você está hoje?{' '}
+          <span className="font-normal text-muted-foreground">
+            (leva segundos e ajuda a ajustar o seu treino)
+          </span>
+        </h3>
+        <CheckInFields value={checkIn} onChange={setCheckIn} />
+      </section>
 
       {needsConfirmation && (
         <p role="status" className="text-label text-muted-foreground">

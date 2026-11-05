@@ -52,6 +52,21 @@ export interface StateView {
     executions: ExecutionRow[];
   };
   body: Record<string, { latest: number; on: string }>;
+  /** Leitura visual por foto (faixa de gordura corporal em %), quando o aluno enviou fotos. */
+  bodyComposition: {
+    assessedOn: string;
+    bodyFatRange: { min: number; max: number } | null;
+    confidence: string;
+    comparison: string | null;
+    observations: string[];
+    /** Grupos musculares lidos na foto: pontos fortes e a desenvolver. */
+    muscleGroups: { region: string; status: string; note: string }[];
+    /** Alterações de alinhamento observadas (só as visíveis); para o profissional confirmar. */
+    posture: { region: string; finding: string; degree: string }[];
+    symmetry: string | null;
+    strengths: string[];
+    attentionPoints: string[];
+  } | null;
   safety: {
     signals: { kind: string; severity: string; scope: string }[];
     records: { kind: string; summary: string; movementTags?: string[] }[];
@@ -65,6 +80,27 @@ const record = (value: unknown): Record<string, unknown> =>
 const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 const num = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+function bodyCompositionOf(raw: unknown): StateView['bodyComposition'] {
+  const slice = record(raw);
+  const range = record(slice.bodyFatRangePercent);
+  const min = num(range.min);
+  const max = num(range.max);
+  if (typeof slice.assessedOn !== 'string') return null;
+  return {
+    assessedOn: slice.assessedOn,
+    bodyFatRange: min !== null && max !== null ? { min, max } : null,
+    confidence: typeof slice.confidence === 'string' ? slice.confidence : 'LOW',
+    comparison:
+      typeof slice.comparisonWithPrevious === 'string' ? slice.comparisonWithPrevious : null,
+    observations: list<string>(slice.observations).filter((o) => typeof o === 'string'),
+    muscleGroups: list<{ region: string; status: string; note: string }>(slice.muscleGroups),
+    posture: list<{ region: string; finding: string; degree: string }>(slice.posture),
+    symmetry: typeof slice.symmetry === 'string' ? slice.symmetry : null,
+    strengths: list<string>(slice.strengths).filter((o) => typeof o === 'string'),
+    attentionPoints: list<string>(slice.attentionPoints).filter((o) => typeof o === 'string'),
+  };
+}
 
 export function parseStateView(slices: Record<string, unknown>): StateView {
   const identity = record(slices.identity);
@@ -110,6 +146,7 @@ export function parseStateView(slices: Record<string, unknown>): StateView {
         return latest === null ? [] : [[kind, { latest, on: String(record(entry).on ?? '') }]];
       }),
     ),
+    bodyComposition: bodyCompositionOf(slices.bodyComposition),
     safety: {
       signals: list(safety.activeSignals),
       records: list(safety.healthRecords),

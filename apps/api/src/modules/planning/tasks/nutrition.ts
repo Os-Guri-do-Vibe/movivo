@@ -26,11 +26,13 @@ import {
   draftMealSchema,
   foodCandidateSchema,
   foodNamesOf,
+  groupOf,
   mealTarget,
   type DraftMeal,
   type FoodCandidate,
 } from '../calc/menu';
 import {
+  energyRestrictionBlocked,
   fold,
   healthRecords,
   outputLanguageViolations,
@@ -340,9 +342,139 @@ const menuValidators: Validator<NutritionInput, NutritionOutput>[] = [
   },
 ];
 
+/**
+ * Qualidade do cardápio (garantia, não meta): um nutricionista não monta prato só para fechar
+ * macros. Almoço e jantar levam vegetais, o dia leva fruta e as opções de uma refeição principal
+ * não repetem a mesma proteína. Só cobra quando a lista de alimentos do aluno permite.
+ */
+const qualityValidators: Validator<NutritionInput, NutritionOutput>[] = [
+  (input, output) => {
+    const foods = foodMap(input);
+    const available = new Set(input.foods.map((food) => groupOf(food)));
+    const groupsOf = (option: { items: Array<{ foodId: string }> }) =>
+      option.items.flatMap((item) => {
+        const food = foods.get(item.foodId);
+        return food ? [groupOf(food)] : [];
+      });
+    const violations: Violation[] = [];
+
+    output.meals.forEach((meal, mealIndex) => {
+      const options = meal.options ?? [];
+      if (['LUNCH', 'DINNER'].includes(meal.slot) && available.has('VEG')) {
+        options.forEach((option, optionIndex) => {
+          if (!groupsOf(option).includes('VEG')) {
+            violations.push({
+              path: `meals.${mealIndex}.options.${optionIndex}`,
+              message:
+                'almoço e jantar levam legumes ou verduras em toda opção (um prato equilibrado, não só macros)',
+            });
+          }
+        });
+      }
+      if (['LUNCH', 'DINNER'].includes(meal.slot) && options.length >= 3) {
+        const proteinsPerOption = options.map((option) =>
+          option.items.flatMap((item) => {
+            const food = foods.get(item.foodId);
+            return food && groupOf(food) === 'PROTEIN' ? [food.id] : [];
+          }),
+        );
+        const first = proteinsPerOption[0] ?? [];
+        const sameEverywhere =
+          first.length === 1 && proteinsPerOption.every((p) => p.length === 1 && p[0] === first[0]);
+        if (available.has('PROTEIN') && sameEverywhere) {
+          violations.push({
+            path: `meals.${mealIndex}.options`,
+            message:
+              'as 3 opções repetem a mesma proteína: varie (frango, carne, peixe, ovo, leguminosas) para variedade de nutrientes',
+          });
+        }
+      }
+    });
+
+    const hasFruit = output.meals.some((meal) =>
+      (meal.options ?? []).some((option) => groupsOf(option).includes('FRUIT')),
+    );
+    if (available.has('FRUIT') && !hasFruit) {
+      violations.push({
+        path: 'meals',
+        message: 'inclua fruta em alguma refeição do dia (café da manhã ou lanches)',
+      });
+    }
+    return violations;
+  },
+];
+
+/** Linguagem de culpa ou de proibição não cabe numa refeição livre. */
+const FREE_MEAL_GUILT =
+  /\bproibid|\bliberad|\bcheat\b|\bcompens(ar|e|ac)|\bpagar\b|\bculpa|\bsair da dieta|\bpecado|\blixo\b|\bbesteira/;
+
+/**
+ * Refeições livres: obrigatórias (3 opções) salvo quando o perfil de saúde não recomenda, em
+ * frequência compatível com a estratégia e com energia que cabe no dia.
+ */
+export const freeMealValidators: Validator<NutritionInput, NutritionOutput>[] = [
+  (input, output, context) => {
+    const violations: Violation[] = [];
+    const blocked = energyRestrictionBlocked(context.state);
+    const free = output.freeMeals;
+    if (!free) {
+      if (!blocked) {
+        violations.push({
+          path: 'freeMeals',
+          message:
+            'planeje as refeições livres (frequência semanal e 3 opções prévias); só se omite com histórico/sinais de transtorno alimentar ou gestação',
+        });
+      }
+      return violations;
+    }
+    if (blocked) {
+      violations.push({
+        path: 'freeMeals',
+        message: `com ${blocked}, não planeje refeição livre: omita "freeMeals" e deixe o acompanhamento com a equipe`,
+      });
+      return violations;
+    }
+    if (input.strategy === 'DEFICIT' && free.perWeek > 1) {
+      violations.push({
+        path: 'freeMeals.perWeek',
+        message: 'em déficit energético, no máximo 1 refeição livre por semana',
+      });
+    }
+    const dayCeiling = Math.min(output.trainingDay.energyKcal.max, output.restDay.energyKcal.max);
+    free.options.forEach((option, index) => {
+      if (option.energyKcal > dayCeiling * 0.5) {
+        violations.push({
+          path: `freeMeals.options.${index}.energyKcal`,
+          message: `${option.energyKcal} kcal passa de metade do dia (${Math.round(dayCeiling * 0.5)} kcal): reduza a porção`,
+        });
+      }
+    });
+    const titles = free.options.map((o) => fold(o.title));
+    if (new Set(titles).size !== titles.length) {
+      violations.push({
+        path: 'freeMeals.options',
+        message: 'as 3 opções precisam ser diferentes',
+      });
+    }
+    const text = fold(
+      [free.guidance, ...free.options.flatMap((o) => [o.title, o.description, o.fitTip])].join(' '),
+    );
+    if (FREE_MEAL_GUILT.test(text)) {
+      violations.push({
+        path: 'freeMeals',
+        message:
+          'sem linguagem de culpa ou proibição (nada de "proibido", "liberado", "compensar", "cheat"): a refeição livre faz parte do plano',
+      });
+    }
+    return violations;
+  },
+];
+
 export const nutritionValidators: Validator<NutritionInput, NutritionOutput>[] = [
   ...nutritionEditValidators,
   ...menuValidators,
+  ...qualityValidators,
+  ...freeMealValidators,
 ];
 
 /**
@@ -435,6 +567,7 @@ export const nutritionTask = defineAgentTask<NutritionInput, NutritionOutput>({
   instructions: `Monte o plano alimentar do aluno.
 
 Regras:
+0. Leia a avaliação física visual ("bodyComposition": faixa de gordura por foto, comparação e observações) junto das medidas e da anamnese: ela calibra ONDE dentro dos limites você coloca a energia (déficit mais para o fim da faixa permitida quando a gordura estimada é alta; superávit contido quando é baixa) e o tom do "summary". É estimativa com margem de erro: não escreva o percentual no texto do plano (o aluno recebe a estimativa, em faixa, quando perguntar pela conversa).
 1. A "strategy" do plano é exatamente a recebida. Escolha as metas de cada tipo de dia (treino e descanso) DENTRO dos limites em "bounds": energia (faixa), proteína, gordura mínima, fibra mínima e água mínima. Os macronutrientes precisam fechar com a energia (proteína 4 kcal/g, carboidrato 4 kcal/g, gordura 9 kcal/g). Dia de treino costuma ter mais carboidrato.
 2. Refeições: use as que o aluno já faz ("usualMeals"; pré e pós-treino são extras opcionais). A distribuição de energia soma 100% e a proteína das refeições fecha a meta do dia, com o mínimo por refeição principal da metodologia.
 3. Cardápio: cada refeição tem OPÇÕES de cardápio ("options"): 3 para café da manhã, almoço e jantar e 2 para as demais. Cada opção é uma refeição completa (ex.: ovos mexidos + pão + banana), com os alimentos ("items") escolhidos SÓ da lista "foods" (use o "id" exato) e a quantidade aproximada em "grams". Priorize os alimentos que o aluno gosta (primeiros da lista) e monte opções diferentes entre si, práticas e compatíveis com a capacidade de cozinhar e com as refeições fora de casa. NUNCA contrariar restrição alimentar nem alergia/intolerância registrada.
@@ -442,13 +575,24 @@ Regras:
    - "unit": só para o que o aluno CONTA em unidades inteiras: ovo = {"singular":"ovo","plural":"ovos","grams":50}, pão francês = 50 g, fatia de pão de forma = 25 g, banana média = 100 g, maçã = 130 g, pote de iogurte = 170 g. NUNCA use colher, concha, xícara ou copo como medida: arroz, feijão, carnes, legumes e massas são pesados em gramas, e líquidos (leite, bebida vegetal, suco) são medidos em ml pelo servidor. Omita "unit" em tudo que não se conta em unidades.
    - "swaps": 1 a 3 trocas equivalentes por alimento (id da lista, do MESMO grupo: arroz ↔ batata, macarrão ou mandioca; frango ↔ carne, peixe ou ovo; fruta ↔ fruta; leguminosa ↔ leguminosa). O servidor calcula a quantidade da troca para igualar a energia.
    - "estimatedCostBrl": o custo da opção em reais, com preços médios de supermercado no Brasil. Com "dailyBudgetBrl" informado, o custo de um dia (média das opções de cada refeição, somada) deve caber nele: escolha alimentos básicos e baratos (ovo, frango, feijão, arroz, banana, aveia) quando o orçamento for apertado. Sem orçamento informado, mantenha o custo moderado.
+   - Pense como nutricionista, não só como calculadora de macros: o cardápio deve fazer sentido para a SAÚDE, a longevidade, a imunidade e a energia do aluno. Almoço e jantar com legumes e verduras de cores variadas, fruta no dia, boa fonte de fibras (grãos integrais, leguminosas), gorduras de qualidade (azeite, castanhas, peixes, abacate) e proteínas variadas entre as opções (peixe, ovos, aves, carnes, leguminosas), com ultraprocessados em pouca presença. Considere as condições e os cuidados de saúde registrados do aluno ao escolher o cardápio. NÃO liste nem descreva micronutrientes, vitaminas ou metas nutricionais extras no plano: isso é um critério de qualidade interno, o plano continua simples para o aluno.
+3b. Refeições livres ("freeMeals"), planejadas desde já como parte do plano, de acordo com o perfil do aluno: "perWeek" (1 por semana é o padrão; 2 para quem está em manutenção/superávit, tem rotina social intensa ou alta aderência; em déficit, no máximo 1) e SEMPRE 3 opções prévias, escolhidas pelo que o aluno gosta e pela vida real dele (ex.: "Combo de hambúrguer com batata frita", "Pizza: 3 fatias (calabresa, margherita, frango com catupiry)", "Sushi: 14 peças e 1 temaki"). Cada opção: "title" (até 40 caracteres), "description" (o que compõe, quantidades em unidades, até 110), "energyKcal" (estimativa honesta da refeição inteira) e "fitTip" (como encaixar no resto do dia: ex. proteína no almoço e lanche leve, até 120). Respeite restrições e alergias. "guidance": diga que ele pode escolher OUTRA refeição livre e que a MOVIVO ajuda a encaixar pelo WhatsApp. Tom humano: a refeição livre faz parte do plano, nunca "proibido/liberado", "compensar", "pagar" ou culpa. Com histórico/sinais de transtorno alimentar ou gestação, omita "freeMeals".
 4. Suplementos: apenas os da lista permitida; se a lista estiver vazia, devolva lista vazia. Nunca sugira medicamento.
 5. guidelines: orientações curtas e acionáveis (hidratação, dia de treino longo, refeição fora de casa, o que fazer quando a rotina quebra). Em estratégia de restrição energética, nada de linguagem de culpa ou proibição.
 6. summary: 2 a 3 frases claras sobre a lógica do plano. Sem prometer resultado, sem diagnosticar. "guidance" de cada refeição: 1 a 2 frases sobre como montar e comer aquela refeição, sem repetir os alimentos.
 7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['NUTRITION'],
-  state: ['identity', 'goals', 'restrictions', 'preferences', 'body', 'safety', 'training'],
+  state: [
+    'identity',
+    'goals',
+    'restrictions',
+    'preferences',
+    'body',
+    'bodyComposition',
+    'safety',
+    'training',
+  ],
   input: nutritionInputSchema,
   output: nutritionOutputSchema,
   validators: nutritionValidators,

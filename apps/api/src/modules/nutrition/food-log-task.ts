@@ -16,6 +16,32 @@ export const foodLogInputSchema = z.object({
   mealHint: mealSlotSchema.nullable(),
   /** Horário local do registro (HH:mm), para inferir a refeição quando o texto não diz. */
   localTime: z.string().regex(/^\d{2}:\d{2}$/),
+  /** Refeição para a qual a MOVIVO acabou de mandar o lembrete (o aluno costuma responder a ela). */
+  pendingMeal: mealSlotSchema.nullish(),
+  /** Cardápio do plano (por refeição, itens da primeira à última opção) para "comi o que estava no plano". */
+  plan: z
+    .array(
+      z.object({
+        slot: mealSlotSchema,
+        options: z
+          .array(
+            z.object({
+              title: z.string().max(80),
+              items: z.array(z.object({ label: z.string().max(80), grams: z.number() })).max(10),
+            }),
+          )
+          .max(3),
+      }),
+    )
+    .max(8)
+    .nullish(),
+  /** Correção: o que foi registrado antes. O texto novo corrige esta lista, que volta completa. */
+  previous: z
+    .object({
+      meal: mealSlotSchema,
+      items: z.array(z.object({ label: z.string().max(80), grams: z.number() })).max(20),
+    })
+    .nullish(),
 });
 export type FoodLogInput = z.infer<typeof foodLogInputSchema>;
 
@@ -62,9 +88,11 @@ export const foodLogTask = defineAgentTask<FoodLogInput, FoodLogOutput>({
 Regras:
 1. Um item por alimento, com nome em português no padrão de tabela de composição ("arroz branco cozido", "feijão carioca cozido", "bife de patinho grelhado", "ovo de galinha mexido", "pão francês", "manteiga").
 2. Porção em gramas. Medida declarada ("200 g") → DECLARED. Medida caseira → HOUSEHOLD_MEASURE e converta (referências: colher de sopa de arroz cozido ≈ 25 g; concha de feijão ≈ 90 g; fatia de pão de forma ≈ 25 g; pão francês ≈ 50 g; ovo ≈ 50 g; copo de leite ≈ 200 g; banana média ≈ 100 g; filé de frango médio ≈ 120 g; bife médio ≈ 100 g; colher de chá de azeite ≈ 4 g). Sem medida nenhuma → ESTIMATED com uma porção típica de adulto.
-3. "meal": use "mealHint" se vier; senão, o que o texto diz ("almocei", "no café"); senão, o horário local (até 10h café da manhã, 10–12h lanche da manhã, 12–15h almoço, 15–18h lanche da tarde, 18–22h jantar, depois ceia).
+3. "meal": use "mealHint" se vier; senão, o que o texto diz ("almocei", "no café"); senão, "pendingMeal" (a refeição do lembrete que o aluno está respondendo); senão, o horário local (até 10h café da manhã, 10–12h lanche da manhã, 12–15h almoço, 15–18h lanche da tarde, 18–22h jantar, depois ceia).
 4. Se o relato for vago demais para qualquer item ("comi bem"), items vazio e uma pergunta curta em "needsClarification". Não invente alimentos.
-5. Não comente se a refeição é boa ou ruim, não diga calorias.`,
+5. Não comente se a refeição é boa ou ruim, não diga calorias.
+6. "Comi o que estava no plano" / "segui o cardápio" / "a opção B": use "plan" (a refeição do passo 3) e copie os itens e gramas daquela opção (a primeira, se ele não disser qual). Se disser que trocou algo ("sem o ovo", "com pão integral"), aplique a troca. Mesmo que o aluno só descreva em medidas caseiras, converta como no passo 2.
+7. Com "previous", o texto é uma CORREÇÃO do que já foi registrado ("na verdade foram 3 ovos", "esqueci o café", "era arroz integral"): devolva a lista COMPLETA já corrigida (os itens de "previous" mais/menos/trocados), com a mesma refeição, sem duplicar nada.`,
   tier: 'STANDARD',
   methodology: [],
   state: [],

@@ -39,8 +39,8 @@ export function SuccessScreen({ outcome, name }: { outcome: OnboardingOutcome; n
         </h1>
         {ready ? (
           <p className="mt-2 text-body text-muted-foreground">
-            Recebemos suas informações e já estamos preparando seu treino personalizado. Seu treino
-            será criado considerando seus objetivos, experiência, rotina, equipamentos disponíveis e
+            Recebemos suas informações e já estamos preparando seu treino e seu plano alimentar,
+            considerando seus objetivos, experiência, rotina, local de treino, alimentação e
             preferências.
           </p>
         ) : (

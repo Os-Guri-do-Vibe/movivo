@@ -44,8 +44,19 @@ export function CheckInForm() {
     }
   }
 
+  // Pergunta de acompanhamento ("Onde foi?") só aparece quando a anterior pede; ao mudar a
+  // resposta anterior, a resposta dependente sai junto para não ir sem sentido.
+  const visible = (checkIn?.questions ?? []).filter(
+    (q) => !q.showIf || answers[q.showIf.key] === q.showIf.equals,
+  );
   const set = (key: string, value: number | boolean | string) =>
-    setAnswers((prev) => ({ ...prev, [key]: value }));
+    setAnswers((prev) => {
+      const next = { ...prev, [key]: value };
+      for (const q of checkIn?.questions ?? []) {
+        if (q.showIf?.key === key && q.showIf.equals !== value) delete next[q.key];
+      }
+      return next;
+    });
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-8">
@@ -69,7 +80,7 @@ export function CheckInForm() {
       )}
       {checkIn && !done && (
         <form onSubmit={submit} className="flex flex-col gap-6">
-          {checkIn.questions.map((q) => (
+          {visible.map((q) => (
             <fieldset key={q.key} className="flex flex-col gap-2">
               <legend className="text-body font-semibold">{q.prompt}</legend>
               {q.type === 'SCALE_1_5' && (

@@ -12,15 +12,18 @@ import { AttendanceService } from '../../core/database/attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { isFinalFailure } from '../jobs/dlq.handler';
+import { MEMORY_CURATE_WINDOW_MS, type FollowUpJob } from '../jobs/follow-up.contract';
 import { QUEUE } from '../jobs/jobs.config';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import { OutreachService } from '../student-state/outreach.service';
 import { UserJobLock } from '../whatsapp/user-job-lock';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import { ConversationStore } from './conversation-store';
 import { isOnlyAcknowledgements, withoutAcknowledgements } from './inbound-acknowledgement';
 import { FALLBACK_MESSAGE } from './messages';
+import { PhotoConsentRevocationService } from './photo-consent-revocation.service';
 import { ConversationOrchestrator } from './orchestrator.service';
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -42,6 +45,8 @@ export class ConversationWorker implements OnModuleInit {
     private readonly attendance: AttendanceService,
     private readonly store: ConversationStore,
     private readonly orchestrator: ConversationOrchestrator,
+    private readonly photoConsent: PhotoConsentRevocationService,
+    private readonly outreach: OutreachService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -80,6 +85,8 @@ export class ConversationWorker implements OnModuleInit {
       }
       const texts = entries.map((e) => e.text);
       const raw = texts.join(' ').slice(0, MAX_MESSAGE_CHARS);
+      // Qualquer mensagem do aluno (até um "ok") é resposta ao último contato da MOVIVO.
+      if (raw) await this.markResponded(userId);
 
       // Pausa ligada depois de o job entrar na fila: a IA não responde, mas o texto vai ao histórico.
       if (await this.attendance.isPaused(userId)) {
@@ -103,6 +110,21 @@ export class ConversationWorker implements OnModuleInit {
       const message = kept.join(' ').slice(0, MAX_MESSAGE_CHARS);
 
       await this.store.persistTurn({ userId, direction: 'INBOUND', content: message });
+
+      // Pedido de privacidade (retirar a autorização das fotos): fluxo fixo, sem modelo no meio.
+      const privacyReply = await this.photoConsent.handle(userId, message);
+      if (privacyReply) {
+        await this.store.persistTurn({
+          userId,
+          direction: 'OUTBOUND',
+          content: privacyReply,
+          validationPassed: true,
+        });
+        await this.deliver(userId, correlationId, privacyReply);
+        return { status: 'PHOTO_CONSENT_FLOW' };
+      }
+
+      await this.scheduleMemoryCuration(userId);
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-typing', {
         userId,
         type: 'TYPING',
@@ -127,6 +149,31 @@ export class ConversationWorker implements OnModuleInit {
     } finally {
       await this.lock.release(userId, token);
       await this.requeueOrphanedBatch(userId, batchKey, correlationId);
+    }
+  }
+
+  private async markResponded(userId: string): Promise<void> {
+    try {
+      await this.outreach.markResponded(userId);
+    } catch (err: unknown) {
+      this.logger.warn({ userId, err, event: 'outreach_response_failed' }, 'resposta não anotada');
+    }
+  }
+
+  /** Depois da rajada de conversa, o curador atualiza a memória do aluno; falha aqui nunca atrapalha o atendimento. */
+  private async scheduleMemoryCuration(userId: string): Promise<void> {
+    try {
+      const bucket = Math.floor(Date.now() / MEMORY_CURATE_WINDOW_MS);
+      const job: FollowUpJob = { kind: 'MEMORY_CURATE', userId };
+      await this.queues.enqueue(QUEUE.studentFollowUp, 'memory-curate', job, {
+        jobId: `memory-curate_${userId}_${bucket}`,
+        delay: MEMORY_CURATE_WINDOW_MS,
+      });
+    } catch (err: unknown) {
+      this.logger.warn(
+        { userId, err, event: 'memory_curate_enqueue_failed' },
+        'memória não agendada',
+      );
     }
   }
 

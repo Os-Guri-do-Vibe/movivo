@@ -17,7 +17,6 @@ import {
 import {
   foodBudgetError,
   mealsOutsideError,
-  mealsPerDayError,
   nutritionComplete,
   type AllergyDraft,
   type DietaryRestriction,
@@ -42,7 +41,7 @@ const RESTRICTION_ITEMS: { value: DietaryRestriction; label: string }[] = [
 
 const SUPPLEMENT_ITEMS: { value: Supplement; label: string }[] = [
   { value: 'CREATINE', label: 'Creatina' },
-  { value: 'WHEY', label: 'Proteína' },
+  { value: 'WHEY', label: 'Whey ou outra proteína em pó' },
   { value: 'CAFFEINE', label: 'Cafeína' },
   { value: 'VITAMIN_D', label: 'Vitamina D' },
   { value: 'OMEGA_3', label: 'Ômega 3' },
@@ -57,16 +56,44 @@ const HUNGER_ITEMS: { value: NonNullable<NutritionDraft['hunger']>; label: strin
   { value: 'VARIES', label: 'Varia bastante' },
 ];
 
-const SEVERITY_ITEMS: { value: NonNullable<AllergyDraft['severity']>; label: string }[] = [
-  { value: 'INTOLERANCE', label: 'Intolerância' },
-  { value: 'ALLERGY', label: 'Alergia' },
-  { value: 'SEVERE_ALLERGY', label: 'Alergia grave' },
+const SEVERITY_ITEMS: {
+  value: NonNullable<AllergyDraft['severity']>;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'INTOLERANCE',
+    label: 'Intolerância',
+    description: 'Desconforto na digestão, como gases, inchaço ou diarreia.',
+  },
+  {
+    value: 'ALLERGY',
+    label: 'Alergia',
+    description: 'Reação no corpo, como coceira, manchas na pele ou inchaço leve.',
+  },
+  {
+    value: 'SEVERE_ALLERGY',
+    label: 'Alergia grave',
+    description: 'Reação forte, como falta de ar ou inchaço na boca ou na garganta.',
+  },
 ];
 
-const COOKING_ITEMS: { value: NonNullable<NutritionDraft['cookingCapacity']>; label: string }[] = [
-  { value: 'NONE', label: 'Não cozinho' },
-  { value: 'BASIC', label: 'Cozinho o básico' },
-  { value: 'GOOD', label: 'Cozinho bem' },
+const COOKING_ITEMS: {
+  value: NonNullable<NutritionDraft['cookingCapacity']>;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'NONE',
+    label: 'Não cozinho',
+    description: 'Como fora, peço comida ou alguém cozinha para mim.',
+  },
+  {
+    value: 'BASIC',
+    label: 'Cozinho o básico',
+    description: 'Arroz, ovo, carne grelhada, coisas simples.',
+  },
+  { value: 'GOOD', label: 'Cozinho bem', description: 'Faço receitas variadas sem dificuldade.' },
 ];
 
 const MAX_ALLERGIES = 10;
@@ -94,10 +121,10 @@ export function StepNutrition({
   return (
     <StepFrame
       title="Como é a sua alimentação?"
-      description="A MOVIVO acompanha treino e alimentação juntos. Aqui a gente só aprende a sua rotina, nada de dieta pronta."
+      description="Seu plano alimentar parte da sua rotina de hoje: o que você come, quanto pode gastar e quanto cozinha. Nada de dieta pronta."
       notice={
         resumed
-          ? 'Alergias e textos livres ficam guardados em sigilo e não aparecem de novo. Responda outra vez sobre alergias (e qual é o outro suplemento, se houver). O que você gosta ou não come fica como estava se ficar em branco.'
+          ? 'Por sigilo, alergias e textos livres não aparecem de novo. Responda outra vez a pergunta de alergias (e o nome do outro suplemento, se houver). O que você gosta ou não come continua salvo se ficar em branco.'
           : undefined
       }
       canContinue={nutritionComplete(data)}
@@ -106,13 +133,18 @@ export function StepNutrition({
       onBack={onBack}
     >
       <ChoiceGroup
-        legend="Você sabe cozinhar?"
+        legend="Como você se vira na cozinha?"
+        help="Ajuda a escolher refeições que cabem na sua rotina e a explicar o preparo no seu nível."
         items={COOKING_ITEMS}
         selected={data.cookingCapacity ? [data.cookingCapacity] : []}
         onToggle={(cookingCapacity) => onChange({ ...data, cookingCapacity })}
         layout="stack"
       />
-      <Labeled id="meals-out" label="Quantas refeições por semana você faz fora de casa?">
+      <Labeled
+        id="meals-out"
+        label="Quantas refeições por semana você faz fora de casa?"
+        help="Conte restaurante, delivery e marmita comprada. Ex.: almoço fora de segunda a sexta = 5."
+      >
         <FieldValidation error={mealsOutsideError(data.mealsOutsideHomePerWeek)}>
           <UnitInput
             id="meals-out"
@@ -124,7 +156,11 @@ export function StepNutrition({
           />
         </FieldValidation>
       </Labeled>
-      <Labeled id="food-budget" label="Qual seu orçamento mensal para alimentação?">
+      <Labeled
+        id="food-budget"
+        label="Quanto você pode gastar por mês com a sua alimentação?"
+        help="Só com você, somando mercado e comida fora. Uma estimativa já ajuda."
+      >
         <FieldValidation error={foodBudgetError(data.foodBudgetCents)}>
           <CurrencyInput
             id="food-budget"
@@ -133,20 +169,13 @@ export function StepNutrition({
           />
         </FieldValidation>
       </Labeled>
-      <Labeled id="meals-per-day" label="Quantas refeições você faz por dia?">
-        <FieldValidation error={mealsPerDayError(data.mealsPerDay)}>
-          <UnitInput
-            id="meals-per-day"
-            unit={(meals) => (meals === '1' ? 'refeição' : 'refeições')}
-            maxInteger={1}
-            placeholder="0"
-            value={data.mealsPerDay}
-            onChange={(mealsPerDay) => onChange({ ...data, mealsPerDay })}
-          />
-        </FieldValidation>
-      </Labeled>
       <ChoiceGroup
-        legend="Quais refeições você costuma fazer?"
+        legend="Quais refeições você faz num dia comum?"
+        help={
+          data.usualMeals.length === 0
+            ? 'Marque todas, lanches incluídos. O plano é montado em cima delas.'
+            : `Marque todas, lanches incluídos. O plano é montado em cima delas. ${data.usualMeals.length} ${data.usualMeals.length === 1 ? 'refeição marcada' : 'refeições marcadas'}.`
+        }
         items={MEAL_ITEMS}
         selected={data.usualMeals}
         multi
@@ -155,7 +184,8 @@ export function StepNutrition({
       />
       <Combobox
         id="dietary-restrictions"
-        legend="Alguma restrição alimentar?"
+        legend="Você segue algum estilo de alimentação ou restrição?"
+        help="Por escolha, religião ou saúde. Alergias e intolerâncias têm uma pergunta própria logo abaixo."
         items={RESTRICTION_ITEMS}
         multiple
         value={data.dietaryRestrictions}
@@ -184,27 +214,28 @@ export function StepNutrition({
         data.allergies.map((allergy, index) => (
           <div key={index} className="flex flex-col gap-6 rounded-xl border border-border p-4">
             <QuestionField>
-              <FieldLabel htmlFor={`allergen-${index}`}>Alimento ou substância</FieldLabel>
+              <FieldLabel htmlFor={`allergen-${index}`}>Qual alimento ou substância?</FieldLabel>
               <FieldValidation
                 error={
-                  allergy.allergen.trim() === '' ? 'Informe o alimento ou a substância.' : undefined
+                  allergy.allergen.trim() === '' ? 'Escreva o alimento ou a substância.' : undefined
                 }
               >
                 <TextInput
                   id={`allergen-${index}`}
                   value={allergy.allergen}
                   onChange={(allergen) => setAllergy(index, { ...allergy, allergen })}
+                  placeholder="Ex.: amendoim, camarão, lactose"
                   maxLength={60}
                 />
               </FieldValidation>
             </QuestionField>
             <Combobox
               id={`severity-${index}`}
-              legend="Gravidade"
+              legend="Que tipo de reação você tem?"
               items={SEVERITY_ITEMS}
               value={allergy.severity}
               onChange={(severity) => setAllergy(index, { ...allergy, severity })}
-              placeholder="Selecione a gravidade"
+              placeholder="Selecione o tipo de reação"
             />
             <button
               type="button"
@@ -214,7 +245,7 @@ export function StepNutrition({
                 onChange({ ...data, allergies, hasAllergy: allergies.length > 0 });
               }}
             >
-              Remover
+              Remover este item
             </button>
           </div>
         ))}
@@ -226,11 +257,12 @@ export function StepNutrition({
             onChange({ ...data, allergies: [...data.allergies, { allergen: '', severity: null }] })
           }
         >
-          Adicionar outra
+          Adicionar outra alergia ou intolerância
         </button>
       )}
       <ChoiceGroup
-        legend="Você usa algum suplemento?"
+        legend="Você usa algum suplemento hoje?"
+        help="Se não usa nenhum, pode pular."
         items={SUPPLEMENT_ITEMS}
         selected={data.supplements}
         multi
@@ -262,7 +294,12 @@ export function StepNutrition({
         selected={data.hunger ? [data.hunger] : []}
         onToggle={(hunger) => onChange({ ...data, hunger })}
       />
-      <Labeled id="liked-foods" label="O que você gosta de comer?" optional>
+      <Labeled
+        id="liked-foods"
+        label="O que você gosta de comer?"
+        help="Comidas que você quer ver no plano. Ex.: frango, cuscuz, açaí."
+        optional
+      >
         <TextArea
           id="liked-foods"
           value={data.likedFoods}
@@ -270,7 +307,12 @@ export function StepNutrition({
           maxLength={300}
         />
       </Labeled>
-      <Labeled id="disliked-foods" label="O que você não come de jeito nenhum?" optional>
+      <Labeled
+        id="disliked-foods"
+        label="O que você não come de jeito nenhum?"
+        help="Por gosto. Ex.: fígado, coentro. Alergias já foram informadas acima."
+        optional
+      >
         <TextArea
           id="disliked-foods"
           value={data.dislikedFoods}

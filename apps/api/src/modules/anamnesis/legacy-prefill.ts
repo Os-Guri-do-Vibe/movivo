@@ -63,12 +63,10 @@ function modalitiesFrom(s: AnamnesisStructured) {
       {
         modality: 'STRENGTH',
         level: s.trainingStatus === 'NEVER' ? 'NONE' : s.experience,
-        sessionsPerWeek: s.daysPerWeek,
         wantsToStart: s.trainingStatus === 'NEVER',
         venue: s.location,
       },
     ],
-    externalSports: [],
   };
 }
 
@@ -116,7 +114,7 @@ export function legacyPrefill(dataBlock1: unknown, dataBlock3: unknown): Record<
   return blocks;
 }
 
-// --- Etapas salvas antes do local por modalidade e do teto por dias ------------------------
+// --- Etapas salvas antes do local por modalidade, do teto por dias e do esporte na semana ---
 
 const savedModalitiesSchema = z.object({
   modalities: z.array(
@@ -150,4 +148,23 @@ export function withSessionsWithinDays(block: Record<string, unknown>): Record<s
   if (!saved.success) return block;
   const days = new Set(saved.data.windows.map((w) => w.weekday)).size;
   return { ...block, maxSessionsPerWeek: Math.min(saved.data.maxSessionsPerWeek, days, 7) };
+}
+
+type Block = Record<string, unknown> | undefined;
+
+/**
+ * Etapa 3 antiga: o esporte externo era respondido junto das modalidades e agora é parte da
+ * semana (etapa 4). Leva o da etapa 3 para a 4 quando a 4 ainda não tem o campo (a 4 sempre
+ * ganha) e tira da 3, para não aparecer duas vezes. Sem etapa 4 salva, nada muda nela.
+ */
+export function withExternalSportsInWeek(
+  modalities: Block,
+  routine: Block,
+): { modalities: Block; routine: Block } {
+  if (!modalities || !('externalSports' in modalities)) return { modalities, routine };
+  const { externalSports, ...rest } = modalities;
+  return {
+    modalities: rest,
+    routine: routine && !('externalSports' in routine) ? { ...routine, externalSports } : routine,
+  };
 }

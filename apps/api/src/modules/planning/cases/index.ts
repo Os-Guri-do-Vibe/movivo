@@ -12,7 +12,7 @@ import {
 
 import type { Assertion, EvalCase, NamedCheck } from '../../../core/agents/eval-case';
 import { selectFoodCandidates } from '../calc/menu';
-import { nutritionRules } from '../calc/params';
+import { nutritionRules, type HybridRules } from '../calc/params';
 import {
   EVAL_TODAY,
   AVANCADO_COM_DOR_NO_OMBRO,
@@ -41,6 +41,15 @@ import { coordinatorInputOf } from '../tasks/coordinator';
 
 const NUTRITION_PARAMS = exampleParameters(methodologyDomainSpec('NUTRITION'));
 const NUTRITION_RULES = nutritionRules(NUTRITION_PARAMS);
+/** Regras do híbrido da metodologia padrão publicada (sessão dupla permitida, 1 dia de descanso). */
+const HYBRID_RULES: HybridRules = {
+  hoursBetweenHeavyLowerAndIntenseRun: 24,
+  maxIntenseSessionsPerWeek: 3,
+  allowTwoSessionsSameDay: true,
+  minRestDaysPerWeek: 1,
+  acuteChronicMax: null,
+  weeklyLoadIncreaseMaxPct: null,
+};
 
 function required<T>(value: T | null, what: string): T {
   if (value === null) throw new Error(`caso de avaliação inválido: ${what}`);
@@ -79,7 +88,10 @@ const caseOf = (
 // --- goals.define_strategy ------------------------------------------------------------------
 
 const strategyInput = (p: Persona) =>
-  required(strategyInputOf(view(p), NUTRITION_RULES, EVAL_TODAY), `estratégia de ${p.id}`);
+  required(
+    strategyInputOf(view(p), NUTRITION_RULES, EVAL_TODAY, HYBRID_RULES),
+    `estratégia de ${p.id}`,
+  );
 
 export const strategyCases: EvalCase[] = [
   caseOf(
@@ -121,6 +133,8 @@ export const strategyCases: EvalCase[] = [
       ),
       path('strategy.modalityFocus', 'eq', ['STRENGTH'], 'o foco é a musculação'),
       path('tasks', 'lengthGte', 1, 'há microtarefas'),
+      path('sessionPlan.weekly', 'lte', 4, 'quem está começando não enche a semana'),
+      exists('sessionPlan.reason', 'a frequência vem com a justificativa'),
     ],
     { minScore: 1 },
   ),

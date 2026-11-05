@@ -17,7 +17,7 @@ describe('local por modalidade', () => {
   });
 
   it('perfil antigo, sem local por modalidade, continua válido', () => {
-    const strength = { modality: 'STRENGTH', level: 'BEGINNER', sessionsPerWeek: 2 };
+    const strength = { modality: 'STRENGTH', level: 'BEGINNER' };
     expect(modalityExperienceSchema.safeParse({ ...strength, wantsToStart: false }).success).toBe(
       true,
     );

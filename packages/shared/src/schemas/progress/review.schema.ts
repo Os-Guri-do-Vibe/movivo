@@ -24,6 +24,14 @@ export const weekMetricsSchema = z.object({
       intensityFeel: z.string().max(80).nullable(),
       barrier: z.string().max(80).nullable(),
       foodDifficulty: z.string().max(80).nullable(),
+      /** 1 = tranquilo, 5 = muito estressado. */
+      stress: z.number().int().min(1).max(5).nullable().optional(),
+      motivation: z.number().int().min(1).max(5).nullable().optional(),
+      foodWeek: z.string().max(80).nullable().optional(),
+      nextWeek: z.string().max(80).nullable().optional(),
+      painWhere: z.string().max(80).nullable().optional(),
+      win: z.string().max(200).nullable().optional(),
+      helpWith: z.string().max(200).nullable().optional(),
     })
     .nullable()
     .optional(),

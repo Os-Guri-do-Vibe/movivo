@@ -126,7 +126,10 @@ export function OnboardingWizard({
   const [modalities, setModalities] = React.useState(() =>
     modalitiesFromBlock(initial.blocks.modalities),
   );
-  const [routine, setRoutine] = React.useState(() => routineFromBlock(initial.blocks.routine));
+  // Sessões salvas antes da mudança guardavam o esporte externo na etapa 3.
+  const [routine, setRoutine] = React.useState(() =>
+    routineFromBlock(initial.blocks.routine, initial.blocks.modalities),
+  );
   const [preferences, setPreferences] = React.useState(() =>
     preferencesFromBlock(initial.blocks.preferences),
   );
@@ -283,7 +286,9 @@ export function OnboardingWizard({
   async function handleParqAndFinish() {
     const pending = PARQ_QUESTION_IDS.findIndex((id) => parqAnswers[id].answer === undefined);
     if (pending >= 0) {
-      setError(`Responda a pergunta ${pending + 1} do questionário antes de finalizar.`);
+      setError(
+        `Falta responder a pergunta ${pending + 1} de 9 do questionário de saúde. Volte nela para finalizar.`,
+      );
       return;
     }
     const saved = await save(
@@ -429,7 +434,6 @@ export function OnboardingWizard({
           modalities={(Object.keys(modalities.modalities) as CoachedModalityKey[]).filter(
             (key) => modalities.modalities[key].selected,
           )}
-          externalSports={modalities.externalSports.flatMap((s) => (s.sport ? [s.sport] : []))}
           onChange={setRoutine}
           onContinue={() => void save(4, routinePayload(routine), 5)}
           onBack={back(3)}
