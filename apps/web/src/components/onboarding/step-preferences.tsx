@@ -2,32 +2,11 @@
 
 import type { MuscleEmphasisRegion } from '@movivo/shared';
 
+import { PRIORITY_ITEMS } from './anamnesis-options';
 import { ChoiceGroup, TextArea, YesNo } from './fields';
 import { MuscleEmphasisGrid } from './muscle-emphasis';
 import { preferencesComplete, type PreferencesDraft } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
-
-const PRIORITY_ITEMS: {
-  value: NonNullable<PreferencesDraft['priority']>;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: 'MAX_RESULT',
-    label: 'Puxado',
-    description: 'Mais exigente, para buscar o melhor resultado possível.',
-  },
-  {
-    value: 'BALANCED',
-    label: 'Equilibrado',
-    description: 'Desafiador, mas fácil de encaixar e manter na rotina.',
-  },
-  {
-    value: 'ENJOYMENT',
-    label: 'Leve e prazeroso',
-    description: 'Mais tranquilo, para criar e manter o hábito.',
-  },
-];
 
 export function StepPreferences({
   data,

@@ -1,4 +1,4 @@
-import type { PlannedMeal } from '@movivo/shared';
+import { normalizeFoodName, type PlannedMeal } from '@movivo/shared';
 
 import { brl, OPTION_LETTERS, optionSummary, quantityLabel } from '@/lib/meal-menu';
 
@@ -34,13 +34,15 @@ export function MealMenu({ meal }: { meal: PlannedMeal }) {
             {option.items.map((item) => (
               <li key={item.foodId} className="px-3 py-2">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-body">{item.name}</span>
+                  <span className="text-body">{normalizeFoodName(item.name)}</span>
                   <span className="shrink-0 text-body font-semibold">{quantityLabel(item)}</span>
                 </div>
                 {item.swaps.length > 0 ? (
                   <p className="mt-0.5 text-label text-muted-foreground">
                     Ou troque por:{' '}
-                    {item.swaps.map((s) => `${quantityLabel(s)} de ${s.name}`).join(' · ')}
+                    {item.swaps
+                      .map((s) => `${quantityLabel(s)} de ${normalizeFoodName(s.name)}`)
+                      .join(' · ')}
                   </p>
                 ) : null}
               </li>

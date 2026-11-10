@@ -14,8 +14,14 @@ import type {
   TrainingVenue,
   Weekday,
 } from '@movivo/shared';
-import { defaultVenueOf, EXTERNAL_SPORT_LABELS, MEASUREMENT_BOUNDS } from '@movivo/shared';
+import {
+  defaultVenueOf,
+  EXTERNAL_SPORT_LABELS,
+  MEASUREMENT_BOUNDS,
+  OTHER_SPORT_NAME_MAX,
+} from '@movivo/shared';
 
+import { AVAILABLE_MINUTES_OPTIONS } from './anamnesis-options';
 import { clockToTotal, minutesToClock, secondsToClock, secondsToRaceTime } from './masks';
 import { EMPTY_PAIN, type PainData } from './pain-section';
 
@@ -342,6 +348,8 @@ export function modalitiesFromBlock(block: unknown): ModalitiesDraft {
 
 export interface ExternalSportDraft {
   sport: ExternalSport | null;
+  /** Nome do esporte, digitado quando o aluno escolhe "Outro". */
+  sportOther: string;
   /** Dias por semana (1 a 7). */
   sessions: string;
   /** Duração média de uma sessão: `mm:ss` (45:00) ou `h:mm:ss` a partir de uma hora. */
@@ -352,6 +360,7 @@ export interface ExternalSportDraft {
 
 export const newExternalSport = (): ExternalSportDraft => ({
   sport: null,
+  sportOther: '',
   sessions: '',
   duration: '',
   rpe: null,
@@ -373,10 +382,15 @@ function durationMinutes(text: string): number | undefined {
   return seconds === undefined ? undefined : Math.round(seconds / 60);
 }
 
+/** Em "Outro" o nome do esporte é obrigatório: sem ele a MOVIVO não sabe o que planejar. */
+export const sportOtherError = (s: Pick<ExternalSportDraft, 'sport' | 'sportOther'>) =>
+  s.sport === 'OTHER' && s.sportOther.trim() === '' ? 'Informe qual é o esporte.' : undefined;
+
 function externalSportComplete(s: ExternalSportDraft): boolean {
   const sessions = num(s.sessions);
   return (
     s.sport !== null &&
+    !sportOtherError(s) &&
     sessions !== undefined &&
     sessions >= 1 &&
     sessions <= 7 &&
@@ -394,7 +408,10 @@ function externalSportsPayload(sports: readonly ExternalSportDraft[]) {
       : [
           {
             sport: s.sport,
-            label: EXTERNAL_SPORT_LABELS[s.sport],
+            label:
+              s.sport === 'OTHER'
+                ? s.sportOther.trim().slice(0, OTHER_SPORT_NAME_MAX)
+                : EXTERNAL_SPORT_LABELS[s.sport],
             sessionsPerWeek: Math.round(num(s.sessions) ?? 1),
             minutesPerSession: durationMinutes(s.duration) ?? 60,
             typicalRpe: s.rpe ?? 6,
@@ -407,6 +424,8 @@ function externalSportsPayload(sports: readonly ExternalSportDraft[]) {
 function externalSportsFromBlock(sports: Array<Record<string, unknown>>): ExternalSportDraft[] {
   return sports.map((s) => ({
     sport: s.sport as ExternalSport,
+    // O nome digitado só existe em "Outro"; nos demais o rótulo é o do próprio esporte.
+    sportOther: s.sport === 'OTHER' && typeof s.label === 'string' ? s.label : '',
     sessions: s.sessionsPerWeek ? String(s.sessionsPerWeek) : '',
     duration: s.minutesPerSession ? secondsToRaceTime(Number(s.minutesPerSession) * 60) : '',
     rpe: s.typicalRpe === undefined ? null : Number(s.typicalRpe),
@@ -414,8 +433,6 @@ function externalSportsFromBlock(sports: Array<Record<string, unknown>>): Extern
   }));
 }
 
-/** Tempo disponível por treino (minutos); `90` representa "mais de 60 minutos". */
-export const AVAILABLE_MINUTES_OPTIONS = ['30', '45', '60', '90'] as const;
 const MIN_SLEEP_HOURS = 3;
 const MAX_SLEEP_HOURS = 12;
 

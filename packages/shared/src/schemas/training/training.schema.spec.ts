@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { runningSegmentSchema, hyroxSessionContentSchema } from './endurance.schema';
 import { sessionLoad } from './execution.schema';
-import { enduranceTargetSchema } from './modality.schema';
+import { enduranceTargetSchema, externalSportName, isUnnamedOtherSport } from './modality.schema';
 import {
   planSessionSchema,
   sessionContentSchema,
@@ -158,5 +158,21 @@ describe('carga interna (sRPE)', () => {
   it('é PSE × minutos, arredondada', () => {
     expect(sessionLoad(7, 50)).toBe(350);
     expect(sessionLoad(6.5, 45)).toBe(293);
+  });
+});
+
+describe('nome do esporte externo', () => {
+  it('em "Outro" vale o que o aluno digitou; nos demais, o rótulo do esporte', () => {
+    expect(externalSportName('OTHER', ' Escalada ')).toBe('Escalada');
+    expect(externalSportName('SWIMMING', 'qualquer coisa')).toBe('Natação');
+  });
+
+  it('"Outro" sem nome (vazio ou o rótulo genérico) cai no rótulo genérico', () => {
+    for (const label of [undefined, null, '', '  ', 'Outro', 'outro']) {
+      expect(externalSportName('OTHER', label)).toBe('Outro');
+      expect(isUnnamedOtherSport('OTHER', label)).toBe(true);
+    }
+    expect(isUnnamedOtherSport('OTHER', 'Escalada')).toBe(false);
+    expect(isUnnamedOtherSport('FOOTBALL', '')).toBe(false);
   });
 });

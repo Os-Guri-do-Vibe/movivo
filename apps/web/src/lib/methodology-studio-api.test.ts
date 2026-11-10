@@ -55,6 +55,27 @@ describe('erros do estúdio de metodologia', () => {
     },
   );
 
+  it('descartar o rascunho chama a API por POST (e não por GET)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ data: { discarded: true } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(discardDraft('abc')).resolves.toEqual({ discarded: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/dashboard/control/methodology/documents/abc/discard',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('texto técnico de rota ("Cannot GET ...") nunca vai para a tela', async () => {
+    respond(404, { message: 'Cannot GET /api/v1/control-center/methodology/documents/x/discard' });
+    expect((await failure(() => discardDraft('x'))).message).toBe(
+      'Não encontramos o que você pediu. Atualize a página e tente de novo.',
+    );
+  });
+
   it('sem resposta legível, usa a frase do status', async () => {
     vi.stubGlobal(
       'fetch',

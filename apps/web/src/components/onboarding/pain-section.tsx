@@ -4,6 +4,7 @@ import * as React from 'react';
 
 import { PAIN_REGION_LABELS, type PainRegion, type PainTrend } from '@movivo/shared';
 
+import { TREND_ITEMS } from './anamnesis-options';
 import {
   ChoiceGroup,
   FieldHelp,
@@ -51,13 +52,6 @@ const REGION_ITEMS = (Object.keys(PAIN_REGION_LABELS) as PainRegion[]).map((valu
   value,
   label: PAIN_REGION_LABELS[value],
 }));
-
-export const TREND_ITEMS: { value: PainTrend; label: string }[] = [
-  { value: 'IMPROVING', label: 'Melhorando' },
-  { value: 'STABLE', label: 'Sem mudança' },
-  { value: 'WORSENING', label: 'Piorando' },
-  { value: 'UNKNOWN', label: 'Não sei dizer' },
-];
 
 /**
  * Seção 4 — dores e limitações (Sofia §6-7). "Não" encerra a seção (pergunta-porta);

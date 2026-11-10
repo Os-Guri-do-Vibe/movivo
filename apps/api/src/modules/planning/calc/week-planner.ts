@@ -22,6 +22,11 @@ export interface WeekOccurrence {
   heavyLower: boolean;
   /** Corrida intensa: sofre a interferência de uma sessão de inferiores pesada. */
   intenseRun: boolean;
+  /**
+   * Sessão de musculação. Os dias leves entre sessões intensas vêm da metodologia de CORRIDA
+   * (qualidade) e não valem entre musculações: entre elas vale o descanso de 48 h de inferiores.
+   */
+  strength?: boolean;
   /** Dia fixo (esporte externo com dia marcado). */
   fixedOn?: string;
 }
@@ -154,9 +159,17 @@ export function planWeek(input: WeekInput): WeekPlan {
     for (const other of placed) {
       const gap = Math.abs(other.day - day);
       if (other.occurrence.planSessionKey === occ.planSessionKey && gap < 2) return false;
-      if (occ.intense && other.occurrence.intense && gap <= input.minEasyDaysBetweenIntense) {
+      if (
+        occ.intense &&
+        other.occurrence.intense &&
+        !occ.strength &&
+        !other.occurrence.strength &&
+        gap <= input.minEasyDaysBetweenIntense
+      ) {
         return false;
       }
+      // Duas sessões pesadas de inferiores: ao menos 48 h entre elas (dia sim, dia não).
+      if (occ.heavyLower && other.occurrence.heavyLower && gap < 2) return false;
       const lowerVsRun =
         (occ.heavyLower && other.occurrence.intenseRun) ||
         (occ.intenseRun && other.occurrence.heavyLower);

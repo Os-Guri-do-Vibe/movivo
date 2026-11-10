@@ -288,6 +288,8 @@ export function MethodologyStudioEditor({ domain, canEdit }: { domain: string; c
     }
     return counts;
   }, [pending]);
+  // Sem nenhuma versão publicada ainda, a primeira pode ir ao ar sem o teste com os agentes.
+  const firstVersion = doc?.status === 'DRAFT' && !versions.some((v) => v.status === 'PUBLISHED');
   const tested = doc?.status === 'TESTING' && !dirty;
   const step: 1 | 2 | 3 = dirty || pending.length > 0 ? 1 : doc?.status === 'TESTING' ? 3 : 2;
   const changes = useMemo(() => readableChanges(spec, diff), [spec, diff]);
@@ -985,6 +987,8 @@ export function MethodologyStudioEditor({ domain, canEdit }: { domain: string; c
                 `${pending.length} valor(es) fora da faixa usual precisam de justificativa.`
               ) : doc.status === 'TESTING' ? (
                 'Tudo certo! Publique para a versão valer para os alunos.'
+              ) : firstVersion ? (
+                'Rascunho salvo. Por ser a primeira versão, pode ser publicada sem teste.'
               ) : (
                 'Rascunho salvo. Falta testar com os agentes.'
               )}
@@ -1030,11 +1034,26 @@ export function MethodologyStudioEditor({ domain, canEdit }: { domain: string; c
                   onConfirm={publish}
                 />
               ) : (
-                testAction({
-                  label: 'Testar com os agentes',
-                  className: 'flex-1 @lg:flex-none',
-                  disabled: !idle,
-                })
+                <>
+                  {firstVersion ? (
+                    <ConfirmAction
+                      triggerLabel="Publicar sem testar"
+                      title={`Publicar a versão ${doc.version} sem testar?`}
+                      description="É a primeira versão desta metodologia, então ela pode valer agora sem o teste com os agentes. Ela passa a valer para todos os alunos. Nas próximas alterações o teste com os agentes volta a ser obrigatório."
+                      confirmLabel="Publicar agora"
+                      triggerVariant="outline"
+                      triggerSize="default"
+                      triggerClassName="flex-1 @lg:flex-none"
+                      disabled={!idle}
+                      onConfirm={publish}
+                    />
+                  ) : null}
+                  {testAction({
+                    label: 'Testar com os agentes',
+                    className: 'flex-1 @lg:flex-none',
+                    disabled: !idle,
+                  })}
+                </>
               )}
             </div>
           </div>

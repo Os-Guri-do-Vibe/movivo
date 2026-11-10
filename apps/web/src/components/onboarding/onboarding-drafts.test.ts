@@ -251,6 +251,41 @@ describe('payloads aceitos pelos contratos da API', () => {
     expect(routinePayload({ ...draft, practicesOtherSport: false }).externalSports).toEqual([]);
   });
 
+  it('semana: em "Outro" o nome do esporte é obrigatório e vai como rótulo, no envio e na retomada', () => {
+    const draft: typeof EMPTY_ROUTINE = {
+      ...EMPTY_ROUTINE,
+      days: ['TUE', 'THU'],
+      slot: 'EVENING',
+      availableMinutes: '60',
+      variesWeekly: false,
+      practicesOtherSport: true,
+    };
+    const other = {
+      ...newExternalSport(),
+      sport: 'OTHER' as const,
+      sessions: '3',
+      duration: '1:00:00',
+      rpe: 6,
+    };
+    draft.externalSports = [other];
+    expect(routineComplete(draft)).toBe(false); // "Outro" sem dizer qual
+    draft.externalSports = [{ ...other, sportOther: '   ' }];
+    expect(routineComplete(draft)).toBe(false);
+    draft.externalSports = [{ ...other, sportOther: '  Jiu-jitsu ' }];
+    expect(routineComplete(draft)).toBe(true);
+    const payload = routinePayload(draft);
+    expect(payload.externalSports[0]).toMatchObject({ sport: 'OTHER', label: 'Jiu-jitsu' });
+    expect(onboardingRoutineStepSchema.safeParse(payload).success).toBe(true);
+    // Ao retomar, o nome volta para o campo de texto.
+    expect(routineFromBlock(payload).externalSports[0]).toMatchObject({
+      sport: 'OTHER',
+      sportOther: 'Jiu-jitsu',
+    });
+    // Texto que sobrou de um "Outro" anterior não vaza para um esporte da lista.
+    draft.externalSports = [{ ...other, sport: 'SWIMMING', sportOther: 'Jiu-jitsu' }];
+    expect(routinePayload(draft).externalSports[0]).toMatchObject({ label: 'Natação' });
+  });
+
   it('rotina: dia com período ou tempo próprio gera a sua janela; os outros seguem o padrão', () => {
     const draft: typeof EMPTY_ROUTINE = {
       ...EMPTY_ROUTINE,
@@ -518,6 +553,7 @@ describe('retomada a partir do que o servidor devolve', () => {
     });
     expect(routine.externalSports[0]).toEqual({
       sport: 'SWIMMING',
+      sportOther: '',
       sessions: '2',
       duration: '1:15:00',
       rpe: 5,

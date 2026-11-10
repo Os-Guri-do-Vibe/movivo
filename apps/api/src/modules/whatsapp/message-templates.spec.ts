@@ -14,6 +14,8 @@ const allTexts = [
   confirmationMessage('Ana'),
   phoneVerificationMessage('268267'),
   confirmationCareMessage(),
+  confirmationCareMessage('Ana'),
+  confirmationMessage(null),
   staffQueueAlertMessage('sinal de segurança', 'urgente'),
 ];
 
@@ -30,6 +32,10 @@ describe('templates de WhatsApp', () => {
     for (const text of allTexts) expect(text).not.toContain('—');
   });
 
+  it('nenhuma mensagem do fluxo leva link', () => {
+    for (const text of allTexts) expect(text).not.toMatch(/https?:\/\/|www\.|\.com\b/i);
+  });
+
   it('variante de cuidado cita o CREF', () => {
     expect(confirmationCareMessage()).toMatch(/CREF/);
   });
@@ -41,20 +47,28 @@ describe('templates de WhatsApp', () => {
 
   it('código de verificação sai em negrito do WhatsApp (*código*)', () => {
     expect(phoneVerificationMessage('268267')).toBe(
-      'Seu código de confirmação da MOVIVO é *268267*.\n\n' +
-        'Ele confirma que este WhatsApp é seu e é válido por 10 minutos.\n\n' +
-        'Não compartilhe este código com ninguém.',
+      'Seu código de verificação da MOVIVO é *268267*.\n' +
+        'Ele vale por 10 minutos e confirma que este WhatsApp é seu.\n' +
+        'Não compartilhe com ninguém, nem com quem disser ser da MOVIVO.\n' +
+        'Se não foi você que pediu, é só ignorar esta mensagem.',
     );
+    // Uma bolha só: o código não pode ser quebrado em várias mensagens.
+    expect(phoneVerificationMessage('268267')).not.toContain('\n---\n');
   });
 
   it('confirma sincronamente sem prometer prazo operacional', () => {
-    expect(confirmationMessage('Ana')).toMatch(/Recebemos suas informações/i);
+    expect(confirmationMessage('Ana')).toMatch(/Recebemos suas respostas/i);
+    // v2: são dois protocolos, treino e alimentar.
+    expect(confirmationMessage('Ana')).toMatch(/\*treino\*/);
+    expect(confirmationMessage('Ana')).toMatch(/\*alimentar\*/);
     expect(confirmationMessage('Ana')).not.toMatch(/2 horas|em até 2h|prazo/i);
   });
 
   it('confirmação saúda pelo primeiro nome quando disponível, e genericamente quando não', () => {
-    expect(confirmationMessage('Ana')).toMatch(/^Olá, Ana! 💚/);
-    expect(confirmationMessage(null)).toMatch(/^Olá! 💚/);
+    expect(confirmationMessage('Ana')).toMatch(/^Oi, Ana! Recebemos suas respostas 💚/);
+    expect(confirmationMessage(null)).toMatch(/^Oi! Recebemos suas respostas 💚/);
+    expect(confirmationCareMessage('Ana')).toMatch(/^Ana, recebemos suas respostas/);
+    expect(confirmationCareMessage()).toMatch(/^Recebemos suas respostas/);
   });
 
   it('alerta à equipe leva só tipo e prioridade, sem nome nem dado de saúde', () => {

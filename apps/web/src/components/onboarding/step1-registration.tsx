@@ -33,6 +33,7 @@ import {
   QuestionStack,
   TextInput,
 } from './fields';
+import { BIOLOGICAL_SEX_ITEMS } from './anamnesis-options';
 import { DatePicker } from './date-picker';
 import { maskNumber } from './masks';
 import { PhoneInput } from './phone-input';
@@ -180,10 +181,7 @@ export function Step1Registration({
       <ChoiceGroup<BiologicalSex>
         legend="Qual é o seu sexo biológico?"
         help="Usado só nos cálculos, como gasto de energia e progressão de carga."
-        items={[
-          { value: 'FEMALE', label: 'Feminino' },
-          { value: 'MALE', label: 'Masculino' },
-        ]}
+        items={BIOLOGICAL_SEX_ITEMS}
         selected={data.biologicalSex ? [data.biologicalSex] : []}
         onToggle={(biologicalSex) => onChange({ ...data, biologicalSex })}
       />

@@ -12,6 +12,35 @@ export function shortenFactor(plannedMinutes: number, targetMinutes: number): nu
 
 const KEEP_WHOLE = ['WARMUP', 'COOLDOWN'];
 
+/**
+ * Periodização: a corrida da semana cresce `factor` sobre o conteúdo do plano. Repetições de
+ * qualidade sobem quando o trecho se repete; trechos contínuos (leve, longão) ganham distância
+ * ou tempo. Aquecimento e desaquecimento não mudam.
+ */
+function scaleRunningVolume<T extends Extract<SessionContent, { modality: 'RUNNING' }>>(
+  content: T,
+  factor: number,
+): T {
+  return {
+    ...content,
+    segments: content.segments.map((segment) => {
+      if (KEEP_WHOLE.includes(segment.type) || segment.type === 'RECOVERY') return segment;
+      if (segment.repeat && segment.repeat > 1) {
+        return {
+          ...segment,
+          repeat: Math.min(40, Math.max(segment.repeat, Math.round(segment.repeat * factor))),
+        };
+      }
+      return segment.distanceMeters !== undefined
+        ? { ...segment, distanceMeters: Math.round((segment.distanceMeters * factor) / 50) * 50 }
+        : {
+            ...segment,
+            durationSeconds: Math.round(((segment.durationSeconds ?? 0) * factor) / 5) * 5,
+          };
+    }),
+  };
+}
+
 export function applyAdjustment(
   content: SessionContent,
   adjustment: SessionAdjustment | null | undefined,
@@ -28,6 +57,11 @@ export function applyAdjustment(
         return swap ? { ...exercise, exerciseId: swap.toExerciseId, name: swap.toName } : exercise;
       }),
     };
+  }
+
+  const progress = adjustment.progress?.factor;
+  if (progress !== undefined && progress > 1 && result.modality === 'RUNNING') {
+    result = scaleRunningVolume(result, progress);
   }
 
   const factor = adjustment.shorten?.factor;

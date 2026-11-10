@@ -209,7 +209,8 @@ describe('selectFoodCandidates', () => {
     const picked = names(
       selectFoodCandidates(rows, { dietaryRestrictions: [], allergenTerms: [] }),
     );
-    expect(picked).toContain('Arroz, integral, cozido');
+    // Nome como se fala, não como a tabela escreve.
+    expect(picked).toContain('Arroz integral cozido');
     expect(picked).not.toContain('Arroz, integral, cru');
     expect(picked).not.toContain('Linguiça, de porco, frita');
     expect(picked).not.toContain('Refrigerante, cola');
@@ -228,7 +229,7 @@ describe('selectFoodCandidates', () => {
     expect(picked).not.toContain('Frango, peito, grelhado');
     expect(picked).not.toContain('Pasta de amendoim');
     expect(picked).not.toContain('Maçã, fuji');
-    expect(picked).toContain('Banana, prata');
+    expect(picked).toContain('Banana prata');
   });
 
   it('extrai palavras do texto livre do aluno', () => {

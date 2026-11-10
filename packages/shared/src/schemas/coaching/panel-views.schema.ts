@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { medicalExamViewSchema } from '../medical/exam.schema';
 import { exceptionDomainSchema } from './council';
 import {
+  coachingActionTypeSchema,
   exceptionKindSchema,
   exceptionPrioritySchema,
   exceptionStatusSchema,
@@ -30,6 +31,14 @@ export const exceptionListItemSchema = z.object({
   reviewUrgency: reviewUrgencySchema.nullable(),
   /** Quando o protocolo opcional é liberado sozinho; `null` na revisão obrigatória. */
   autoReleaseAt: iso.nullable(),
+  /**
+   * Tipo da ação proposta pela IA (ex.: `PUBLISH_TRAINING_PLAN`, `SUBSTITUTE_EXERCISE`), para a
+   * Fila dizer em poucas palavras o que está pendente. `null` quando o caso não tem proposta
+   * (geração que falhou, troca sem equivalente). Opcional: respostas antigas não trazem.
+   */
+  actionType: coachingActionTypeSchema.nullish(),
+  /** Origem do caso sem proposta (ex.: `SWAP_GAP`, `CYCLE_REASSESSMENT`). */
+  source: z.string().max(64).nullish(),
 });
 export type ExceptionListItem = z.infer<typeof exceptionListItemSchema>;
 export const exceptionListResponseSchema = z.array(exceptionListItemSchema);
@@ -53,7 +62,11 @@ const countsSchema = z.object({
   open: z.number().int().nonnegative(),
   urgent: z.number().int().nonnegative(),
 });
-/** Casos abertos no total e em cada painel (o sino soma os dois; cada menu mostra o seu). */
+/**
+ * Abertos no total e em cada painel (o sino soma os dois; cada menu mostra o seu). `queue` conta
+ * ALUNOS distintos (a Fila mostra um cartão por aluno; urgente se qualquer caso dele for);
+ * `alerts` conta casos (um item por caso). `urgent` = prioridade `URGENT` ou `HIGH`.
+ */
 export const exceptionsSummarySchema = countsSchema.extend({
   queue: countsSchema,
   alerts: countsSchema,
@@ -65,6 +78,8 @@ export type ExceptionsSummary = z.infer<typeof exceptionsSummarySchema>;
  * etapa como o aluno respondeu (já sem a separação comum/cifrada); a tela traduz os rótulos.
  */
 export const anamnesisAnswersViewSchema = z.object({
+  /** Nome do aluno, para o cabeçalho da leitura (opcional: servidores anteriores não mandam). */
+  studentName: z.string().nullable().optional(),
   submittedAt: iso.nullable(),
   flow: z.enum(['INITIAL', 'COMPLEMENTARY']),
   steps: z.array(
@@ -219,4 +234,3 @@ export const agentCostsSchema = z.object({
   ),
 });
 export type AgentCosts = z.infer<typeof agentCostsSchema>;
-

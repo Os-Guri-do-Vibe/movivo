@@ -5,20 +5,23 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, gte } from 'drizzle-orm';
 
-import type { PlanRead } from '@movivo/shared';
+import { ageInYears, type PlanRead } from '@movivo/shared';
 
 import {
+  bodyMeasurements,
   goalMilestones,
   goalTasks,
   nutritionPlans,
   planSessions,
   scheduledSessions,
   studentGoals,
+  studentProfiles,
   trainingPlans,
   users,
 } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { todayIn } from './plan-generation.service';
+import type { PdfStudent } from './protocol-pdf';
 
 const UPCOMING_DAYS = 14;
 const DAY_MS = 86_400_000;
@@ -26,6 +29,37 @@ const DAY_MS = 86_400_000;
 @Injectable()
 export class PlanViewService {
   constructor(private readonly db: TenantDatabase) {}
+
+  /**
+   * Dados do cabeçalho do PDF do protocolo. Ficam fora de `PlanRead` (a página pública por token
+   * não carrega dado pessoal); só o PDF os mostra.
+   */
+  async readStudent(userId: string, now: Date = new Date()): Promise<PdfStudent> {
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [user] = await tx
+        .select({ name: users.name, sex: users.biologicalSex })
+        .from(users)
+        .where(eq(users.id, userId));
+      const [profile] = await tx
+        .select({ profile: studentProfiles.profile })
+        .from(studentProfiles)
+        .where(eq(studentProfiles.userId, userId));
+      const [firstWeight] = await tx
+        .select({ value: bodyMeasurements.value })
+        .from(bodyMeasurements)
+        .where(and(eq(bodyMeasurements.userId, userId), eq(bodyMeasurements.kind, 'WEIGHT')))
+        .orderBy(asc(bodyMeasurements.measuredOn), asc(bodyMeasurements.createdAt))
+        .limit(1);
+      const birthDate = profile?.profile.birthDate;
+      return {
+        fullName: user?.name?.trim() || null,
+        ageYears: birthDate ? ageInYears(birthDate, now) : null,
+        initialWeightKg: firstWeight?.value ?? null,
+        heightCm: profile?.profile.heightCm ?? null,
+        biologicalSex: user?.sex ?? null,
+      };
+    });
+  }
 
   async read(userId: string, now: Date = new Date()): Promise<PlanRead | null> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {

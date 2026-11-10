@@ -12,6 +12,7 @@ import {
   type DashboardCapability,
   type DashboardRole,
 } from '@/lib/control-center-access';
+import { friendlyMessage } from '@/lib/api-message';
 import { publicEnv, secureCookies } from '@/lib/env';
 
 import { trustedOrigins } from '../../_lib/trusted-origins';
@@ -449,12 +450,7 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
   }
 
   const record = isRecord(value) ? value : {};
-  const message =
-    typeof record.message === 'string'
-      ? record.message
-      : response.status === 401
-        ? 'Sua sessão expirou. Entre novamente.'
-        : 'Não foi possível concluir a solicitação.';
+  const message = friendlyMessage(response.status, record.message);
   const safeBody: Record<string, unknown> = { error: `request_failed_${response.status}`, message };
   if (typeof record.code === 'string') safeBody.code = record.code;
   if (Array.isArray(record.issues)) safeBody.issues = record.issues;

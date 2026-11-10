@@ -1,6 +1,8 @@
 /**
  * TASK-0.3.5 — "nunca logar PII em claro" precisa ser um teste, não um comentário.
  */
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 import { describe, expect, it } from 'vitest';
 
 import { maskPhone, REDACT_PATHS, REDACTED, redactObject, redactPii } from './redaction.util';
@@ -82,6 +84,60 @@ describe('redactObject', () => {
     let deep: unknown = 'fim';
     for (let i = 0; i < 20; i += 1) deep = { nested: deep };
     expect(() => redactObject(deep)).not.toThrow();
+  });
+});
+
+describe('redactObject — payloads grandes (regressão: envio de fotos derrubava a API)', () => {
+  it('troca Buffer e arrays tipados pelo tamanho, sem iterar os bytes', () => {
+    const photo = Buffer.alloc(8 * 1024 * 1024, 7);
+    const started = Date.now();
+    const result = redactObject({ req: { body: photo }, other: new Uint8Array(10) }) as {
+      req: { body: unknown };
+      other: unknown;
+    };
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(result.req.body).toBe(`[binário ${photo.byteLength} bytes]`);
+    expect(result.other).toBe('[binário 10 bytes]');
+  });
+
+  it('reduz a requisição/resposta HTTP crua ao que o serializer usa, sem arrastar o corpo', () => {
+    const request = new IncomingMessage(new Socket());
+    Object.assign(request, {
+      id: 'abc',
+      method: 'PUT',
+      url: '/api/v1/anamnesis/session/t/photo/FRONT',
+      body: Buffer.alloc(4 * 1024 * 1024),
+      rawBody: Buffer.alloc(4 * 1024 * 1024),
+    });
+    const response = new ServerResponse(request);
+    const started = Date.now();
+    const result = redactObject({ req: request, res: response, responseTime: 5 });
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(result).toEqual({
+      req: { id: 'abc', method: 'PUT', url: '/api/v1/anamnesis/session/t/photo/FRONT' },
+      res: { statusCode: 200 },
+      responseTime: 5,
+    });
+  });
+
+  it('limita arrays e objetos enormes e avisa que houve corte', () => {
+    const big = redactObject({ list: Array.from({ length: 5000 }, (_, i) => i) }) as {
+      list: unknown[];
+    };
+    expect(big.list).toHaveLength(201);
+    expect(big.list.at(-1)).toBe('[+4800 itens omitidos]');
+    const wide = redactObject(
+      Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`k${i}`, i])),
+    ) as Record<string, unknown>;
+    expect(Object.keys(wide)).toHaveLength(201);
+    expect(wide['[omitidos]']).toBe(true);
+  });
+
+  it('continua redigindo PII mesmo dentro de objetos truncados', () => {
+    const result = redactObject({ list: [{ phone: '+5511987654321' }] }) as {
+      list: { phone: string }[];
+    };
+    expect(result.list[0]?.phone).toBe(REDACTED);
   });
 });
 

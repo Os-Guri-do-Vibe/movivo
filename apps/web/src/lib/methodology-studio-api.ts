@@ -19,6 +19,8 @@ import {
   type MethodologyVersionSummary,
 } from '@movivo/shared';
 
+import { friendlyMessage } from './api-message';
+
 export type {
   MethodologyChangeView,
   MethodologyDocumentView,
@@ -53,37 +55,14 @@ const listOf = <T>(item: Parser<T>): Parser<T[]> => ({
 
 const BASE = '/api/dashboard/control/methodology';
 
-/** Mensagens-padrão por status, para quando a resposta não traz uma frase útil em português. */
-const STATUS_MESSAGE: Readonly<Record<number, string>> = {
-  400: 'Alguns dados não são válidos. Confira os campos e tente de novo.',
-  401: 'Sua sessão expirou. Entre de novo para continuar.',
+/** Textos próprios do estúdio, mais úteis que os genéricos para estes dois casos. */
+const STUDIO_STATUS_MESSAGE: Readonly<Record<number, string>> = {
   403: 'Seu papel pode ver a metodologia, mas não editar nem publicar.',
-  404: 'Não encontramos o que você pediu. Atualize a página e tente de novo.',
   409: 'Esta ação não é possível no estado atual da versão. Atualize a página e confira.',
-  429: 'Muitas tentativas seguidas. Aguarde um instante e tente de novo.',
-  502: 'O servidor não respondeu como esperado. Tente de novo em instantes.',
-  503: 'O serviço está indisponível agora. Tente de novo em instantes.',
 };
-const SERVER_ERROR_MESSAGE = 'Algo deu errado do nosso lado. Tente de novo em instantes.';
-const GENERIC_MESSAGE = 'Não foi possível concluir a operação. Tente de novo.';
-/** Textos em inglês que o servidor devolve quando nenhuma regra própria respondeu. */
-const ENGLISH_DEFAULTS = new Set([
-  'Bad Request',
-  'Unauthorized',
-  'Forbidden',
-  'Forbidden resource',
-  'Not Found',
-  'Conflict',
-  'Too Many Requests',
-  'Internal Server Error',
-  'Internal server error',
-  'Bad Gateway',
-  'Service Unavailable',
-]);
 
 function messageOf(status: number, raw: unknown): string {
-  if (typeof raw === 'string' && raw.trim() && !ENGLISH_DEFAULTS.has(raw)) return raw;
-  return STATUS_MESSAGE[status] ?? (status >= 500 ? SERVER_ERROR_MESSAGE : GENERIC_MESSAGE);
+  return friendlyMessage(status, raw, STUDIO_STATUS_MESSAGE[status]);
 }
 
 async function call<T>(path: string, parser: Parser<T>, body?: unknown): Promise<T> {
@@ -249,7 +228,11 @@ export function publishDraft(id: string): Promise<MethodologyDocumentView> {
 }
 
 export function discardDraft(id: string): Promise<{ discarded: boolean }> {
-  return call(`documents/${id}/discard`, {
-    parse: (value) => ({ discarded: (value as { discarded?: unknown })?.discarded === true }),
-  });
+  return call(
+    `documents/${id}/discard`,
+    {
+      parse: (value) => ({ discarded: (value as { discarded?: unknown })?.discarded === true }),
+    },
+    {},
+  );
 }

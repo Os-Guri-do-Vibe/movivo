@@ -718,6 +718,9 @@ export class AnamnesisService {
         .limit(1),
     );
     if (!row) return null;
+    const [student] = await this.db.runAsSystem((tx) =>
+      tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1),
+    );
     const secret = await this.readSensitive(row.sensitive);
     const steps: AnamnesisAnswersView['steps'] = [];
     const mergedOf = (step: OnboardingStepNumber): Record<string, unknown> => ({
@@ -742,6 +745,7 @@ export class AnamnesisService {
       steps.push({ step, title: ANAMNESIS_STEP_TITLES[step], data });
     }
     return {
+      studentName: student?.name ?? null,
       submittedAt: row.submittedAt?.toISOString() ?? null,
       flow: row.flow as AnamnesisAnswersView['flow'],
       steps,

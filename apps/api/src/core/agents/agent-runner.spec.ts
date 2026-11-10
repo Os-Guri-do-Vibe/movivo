@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { GatewayRequest, GatewayResult } from '../ai/ai.types';
+import type { GatewayRequest, GatewayResult, TierRoute } from '../ai/ai.types';
 import type { ModelGateway } from '../ai/model-gateway';
 import type { TenantDatabase } from '../database/tenant-database.service';
 import type { AgentContextSources } from './agent-context';
@@ -50,7 +50,9 @@ function gatewayReplying(...texts: string[]) {
       modelRunId: `run-${requests.length}`,
     };
   });
-  return { gateway: { complete } as unknown as ModelGateway, requests };
+  // Sem rota reserva por padrão: os testes de correção veem só as rodadas do modelo principal.
+  const routesFor = vi.fn(async (): Promise<TierRoute[]> => []);
+  return { gateway: { complete, routesFor } as unknown as ModelGateway, requests, routesFor };
 }
 
 describe('AgentRunner', () => {
@@ -76,6 +78,129 @@ describe('AgentRunner', () => {
     expect(first?.system).toContain('"sessoes"');
     expect(first?.messages[0]?.content).toContain('<dados>');
     expect(first?.messages[0]?.content).toContain('"diasDisponiveis":3');
+  });
+
+  it('texto longo demais não derruba a tarefa: é cortado na última frase que cabe', async () => {
+    const wordy = defineAgentTask({
+      ...task,
+      id: 'teste.texto',
+      output: z.object({ sessoes: z.number().int(), motivo: z.string().min(1).max(60) }),
+      validators: [],
+    });
+    const motivo =
+      'Três dias livres bastam. Mais que isso pesaria na recuperação e no sono do aluno.';
+    const { gateway, requests } = gatewayReplying(JSON.stringify({ sessoes: 3, motivo }));
+    const result = await new AgentRunner(gateway).run(
+      wordy,
+      { diasDisponiveis: 3 },
+      { userId: null, sources },
+    );
+    // Uma rodada só: nada de gastar chamada de IA corrigindo 20 caracteres a mais.
+    expect(requests).toHaveLength(1);
+    expect(result.correctionRounds).toBe(0);
+    expect(result.output.motivo).toBe('Três dias livres bastam.');
+  });
+
+  it('o principal não converge: tenta do zero com o modelo reserva de outro fornecedor', async () => {
+    const { gateway, requests, routesFor } = gatewayReplying(
+      '{"sessoes":9,"motivo":"a"}',
+      '{"sessoes":8,"motivo":"b"}',
+      '{"sessoes":7,"motivo":"c"}',
+      '{"sessoes":3,"motivo":"3 dias livres"}',
+    );
+    const route = (vendor: TierRoute['vendor'], model: string): TierRoute => ({
+      vendor,
+      model,
+      maxOutputTokens: 1_000,
+      timeoutMs: 1_000,
+      temperature: 0.3,
+      vision: false,
+    });
+    routesFor.mockResolvedValue([
+      route('DEEPSEEK', 'deepseek-v4-pro'),
+      route('OPENAI', 'gpt-6.1-sol'),
+    ]);
+    const result = await new AgentRunner(gateway).run(
+      task,
+      { diasDisponiveis: 3 },
+      { userId: null, sources },
+    );
+    expect(result.output.sessoes).toBe(3);
+    // 3 rodadas no principal (1 + 2 correções) e a 4ª, do zero, na reserva.
+    expect(requests).toHaveLength(4);
+    expect(requests.slice(0, 3).every((r) => r.routeOverride === undefined)).toBe(true);
+    expect(requests[3]?.routeOverride).toMatchObject({ vendor: 'OPENAI', model: 'gpt-6.1-sol' });
+    expect(requests[3]?.messages).toHaveLength(1);
+    expect(result.modelRunIds).toEqual(['run-1', 'run-2', 'run-3', 'run-4']);
+  });
+
+  it('resposta idêntica encerra as correções; reserva sem crédito passa para a próxima', async () => {
+    const same = '{"sessoes":9,"motivo":"x"}';
+    const requests: GatewayRequest[] = [];
+    const complete = vi.fn(async (request: GatewayRequest): Promise<GatewayResult> => {
+      requests.push(structuredClone(request));
+      if (request.routeOverride?.vendor === 'OPENAI') throw new Error('VENDOR_AUTH');
+      const text =
+        request.routeOverride?.vendor === 'ANTHROPIC' ? '{"sessoes":3,"motivo":"ok"}' : same;
+      return {
+        text,
+        vendor: request.routeOverride?.vendor ?? 'DEEPSEEK',
+        model: 'm',
+        usage: { tokensInput: 1, tokensCached: 0, tokensOutput: 1 },
+        latencyMs: 1,
+        costBrl: 0,
+        modelRunId: `run-${requests.length}`,
+      };
+    });
+    const route = (vendor: TierRoute['vendor']): TierRoute => ({
+      vendor,
+      model: vendor.toLowerCase(),
+      maxOutputTokens: 1_000,
+      timeoutMs: 1_000,
+      temperature: 0.3,
+      vision: false,
+    });
+    const routesFor = vi.fn(async () => [route('DEEPSEEK'), route('OPENAI'), route('ANTHROPIC')]);
+    const gateway = { complete, routesFor } as unknown as ModelGateway;
+    const result = await new AgentRunner(gateway).run(
+      task,
+      { diasDisponiveis: 3 },
+      { userId: null, sources },
+    );
+    expect(result.output.sessoes).toBe(3);
+    // DeepSeek: 1ª resposta e a repetida (para aí); OpenAI sem crédito cai; Anthropic resolve.
+    expect(requests.map((r) => r.routeOverride?.vendor ?? 'DEEPSEEK')).toEqual([
+      'DEEPSEEK',
+      'DEEPSEEK',
+      'OPENAI',
+      'ANTHROPIC',
+    ]);
+  });
+
+  it('em avaliação (rota fixa) não troca de modelo', async () => {
+    const { gateway, requests, routesFor } = gatewayReplying('{"sessoes":9,"motivo":"x"}');
+    routesFor.mockResolvedValue([]);
+    await expect(
+      new AgentRunner(gateway).run(
+        task,
+        { diasDisponiveis: 3 },
+        {
+          userId: null,
+          sources,
+          routeOverride: {
+            vendor: 'DEEPSEEK',
+            model: 'deepseek-flash',
+            maxOutputTokens: 1_000,
+            timeoutMs: 1_000,
+            temperature: 0.1,
+            vision: false,
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentTaskError);
+    // A mesma resposta duas vezes encerra as correções; e sem trocar de modelo.
+    expect(requests).toHaveLength(2);
+    expect(routesFor).not.toHaveBeenCalled();
   });
 
   it('devolve ao modelo a lista exata de violações e aceita a correção', async () => {

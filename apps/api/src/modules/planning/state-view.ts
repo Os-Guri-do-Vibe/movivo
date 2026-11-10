@@ -11,6 +11,7 @@ import type {
   ExternalSportPractice,
   LifeContext,
   MealSlot,
+  Mesocycle,
   ModalityExperience,
   TrainingVenue,
 } from '@movivo/shared';
@@ -50,6 +51,8 @@ export interface StateView {
     externalSports: ExternalSportPractice[];
     venues: TrainingVenue[];
     executions: ExecutionRow[];
+    /** Mesociclo de musculação do plano ativo; na renovação, define o próximo. */
+    activeMesocycle: Mesocycle | null;
   };
   body: Record<string, { latest: number; on: string }>;
   /** Leitura visual por foto (faixa de gordura corporal em %), quando o aluno enviou fotos. */
@@ -139,6 +142,10 @@ export function parseStateView(slices: Record<string, unknown>): StateView {
       externalSports: list<ExternalSportPractice>(training.externalSports),
       venues: list<TrainingVenue>(training.venues),
       executions: list<ExecutionRow>(training.last21Days),
+      activeMesocycle:
+        list<{ mesocycle?: Mesocycle }>(record(training.activePlan).phases).findLast(
+          (phase) => phase.mesocycle,
+        )?.mesocycle ?? null,
     },
     body: Object.fromEntries(
       Object.entries(record(slices.body)).flatMap(([kind, entry]) => {

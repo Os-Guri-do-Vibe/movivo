@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildOption, quantityLabel, type FoodCandidate } from './calc/menu';
 import { pdfText, sessionLines } from './plan-pdf';
-import { nutritionPlanPdf, trainingPlanPdf } from './protocol-pdf';
+import { nutritionPlanPdf, protocolPdfFileName, trainingPlanPdf } from './protocol-pdf';
 
 const plan: PlanRead = {
   firstName: 'Ana',
@@ -152,6 +152,120 @@ describe('plan-pdf', () => {
     expect(training.subarray(0, 5).toString()).toBe('%PDF-');
     expect(nutrition.subarray(0, 5).toString()).toBe('%PDF-');
     expect(training.length).toBeGreaterThan(2000);
+  });
+
+  it('o PDF de treino traz o cabeçalho do aluno e os treinos pelos dias da semana', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const week = structuredClone(plan);
+    const [strength, running] = week.training?.structure.sessions ?? [];
+    if (!strength || !running) throw new Error('fixture');
+    strength.weekdays = ['MON', 'THU'];
+    running.weekdays = ['THU'];
+    const buffer = await trainingPlanPdf(week, {
+      fullName: 'Ana Souza Lima',
+      ageYears: 34,
+      initialWeightKg: 68.5,
+      heightCm: 168,
+      biologicalSex: 'FEMALE',
+    });
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    for (const expected of [
+      'Ana Souza Lima',
+      '34 anos',
+      '68,5 kg',
+      '168 cm',
+      'Feminino',
+      'Peso inicial',
+      'Data final do protocolo',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    // O título do dia tem espaçamento entre letras, que a extração separa.
+    const compact = text.replace(/\s+/g, '');
+    expect(compact).toContain('SEGUNDA');
+    expect(compact).toContain('QUINTA');
+    expect(text).not.toContain('Versão do protocolo');
+    expect(text).not.toContain('Duração');
+    expect(text).not.toContain('Planejado com apoio de inteligência artificial');
+    // Os dois treinos de quinta aparecem no mesmo dia; a repetição de "Força A" só referencia.
+    expect(text).toContain('mesmo treino de segunda');
+    expect(compact.indexOf('SEGUNDA')).toBeLessThan(compact.indexOf('QUINTA'));
+  });
+
+  it('sem dia marcado pelo profissional, usa os dias da agenda', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const buffer = await trainingPlanPdf(plan);
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    const compact = text.replace(/\s+/g, '');
+    expect(compact).toContain('TERÇA'); // 2026-11-03 é terça
+    expect(compact).toContain('DIAADEFINIR'); // a corrida ainda não tem dia
+  });
+
+  it('o PDF alimentar diz "Caloria" (não "Energia") e traz o nome do alimento como se fala', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const withMenu = structuredClone(plan);
+    const meal = withMenu.nutrition?.structure.meals[0];
+    if (!meal) throw new Error('fixture');
+    meal.options = [
+      {
+        title: 'Ovos com pão',
+        items: [
+          {
+            foodId: 'ovo',
+            name: 'Ovo, de galinha, inteiro, cozido',
+            grams: 100,
+            energyKcal: 146,
+            swaps: [{ foodId: 'pao', name: 'Pão, trigo, francês', grams: 50, energyKcal: 150 }],
+          },
+        ],
+        totals: { energyKcal: 146, proteinG: 13, carbsG: 1, fatG: 9, fiberG: 0 },
+        estimatedCostBrl: 3,
+      },
+    ] as never;
+    const buffer = await nutritionPlanPdf(withMenu);
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    expect(text).toContain('Caloria do dia');
+    expect(text).not.toMatch(/Energia do dia/);
+    expect(text).toContain('Ovo de galinha cozido');
+    expect(text).toContain('Pão francês');
+    expect(text).not.toContain('Ovo, de galinha');
+  });
+
+  it('o PDF alimentar usa o nome completo e as datas do protocolo de treino', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const buffer = await nutritionPlanPdf(plan, {
+      fullName: 'Ana Souza Lima',
+      ageYears: null,
+      initialWeightKg: null,
+      heightCm: null,
+      biologicalSex: null,
+    });
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    const energyChart = text.split('Sobre o seu plano alimentar')[0] ?? text;
+
+    expect(text).toContain('Ana Souza Lima');
+    expect(text).toContain('Data início do plano');
+    expect(text).toContain('03/11/2026');
+    expect(text).toContain('Data fim do plano');
+    expect(text).toContain('30/11/2026');
+    expect(text).not.toContain('Versão do plano');
+    expect(text).not.toContain('Planejado com apoio de inteligência artificial');
+    expect(text).not.toContain('A barra escura é a caloria mínima do dia');
+    expect(text).toContain('2.200 kcal');
+    expect(text).toContain('2.000 kcal');
+    expect(energyChart).not.toContain('2.000–2.200 kcal');
+    expect(energyChart).not.toContain('1.800–2.000 kcal');
+  });
+
+  it('gera nomes de arquivo de PDF seguros, com o nome completo em slug', () => {
+    expect(protocolPdfFileName('treino', 'João da Silva')).toBe(
+      'protocolo-de-treino-joao-da-silva.pdf',
+    );
+    expect(protocolPdfFileName('alimentacao', null)).toBe('plano-alimentar-aluno.pdf');
   });
 
   it('detalha a sessão: séries, reps, descanso, reserva, tempo e ritmo', () => {

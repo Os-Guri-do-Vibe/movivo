@@ -8,12 +8,18 @@
  */
 import {
   defaultVenueOf,
+  eligibleRunningWorkouts,
+  externalSportName,
+  MESOCYCLE_LABELS,
   MUSCLE_EMPHASIS_GROUPS,
+  RUNNING_WORKOUTS,
   type CoachedModality,
   type DeclaredGoalKind,
   type ExperienceLevel,
+  type Mesocycle,
   type MethodologyParameters,
   type MuscleEmphasisRegion,
+  type PlanPhase,
   type PlanSession,
   type SessionPlan,
   type TrainingVenue,
@@ -30,6 +36,7 @@ import {
   servesLocation,
 } from '../catalog/exercises/exercise-catalog';
 import { bodyIndicators } from './calc/body';
+import { CARDIO_PROFILE, cardioPrescription } from './calc/cardio';
 import { dayBounds, estimateExpenditure, type BodyInputs } from './calc/energy';
 import type { PlanCheckContext } from './calc/plan-check';
 import {
@@ -42,13 +49,19 @@ import {
   type NutritionRules,
   type RulesLevel,
 } from './calc/params';
+import { isStarter, runningWeekRoles } from './calc/running-week';
 import type { ScheduleContext } from './plan-publisher.service';
 import { preferenceOf, usualMealsOf, type StateView } from './state-view';
 import type { HyroxInput } from './tasks/hyrox';
 import type { NutritionInput } from './tasks/nutrition';
 import type { RunningInput } from './tasks/running';
 import type { SessionLimits, StrategyInput } from './tasks/strategy';
-import type { StrengthCandidate, StrengthInput } from './tasks/strength';
+import {
+  strengthTimeBudget,
+  type CardioCandidate,
+  type StrengthCandidate,
+  type StrengthInput,
+} from './tasks/strength';
 
 const DAY_MS = 86_400_000;
 
@@ -163,6 +176,13 @@ export function strategyInputOf(
       modality: m.modality,
       level: m.level,
       wantsToStart: m.wantsToStart,
+    })),
+    externalSports: view.training.externalSports.map((sport) => ({
+      name: externalSportName(sport.sport, sport.label),
+      sessionsPerWeek: sport.sessionsPerWeek,
+      minutesPerSession: sport.minutesPerSession,
+      typicalRpe: sport.typicalRpe,
+      fixedDays: sport.fixedDays,
     })),
     derived: {
       adiposity: indicators.adiposity,
@@ -294,6 +314,47 @@ export function selectStrengthCandidates(
   return { candidates, preferredExerciseIds: [...liked].filter((id) => ids.has(id)) };
 }
 
+/**
+ * Cardio de apoio à musculação: só os exercícios de cardio JÁ cadastrados no catálogo e listados
+ * em `CARDIO_PROFILE`, viáveis no local e no nível do aluno, sem contraindicação nem rejeição.
+ * Iniciante só recebe cardio moderado; o vigoroso (HIIT, tiros) fica para quem já tem base.
+ */
+export function selectCardioCandidates(
+  view: StateView,
+  level: RulesLevel,
+  catalog: readonly CatalogExercise[] = EXERCISE_CATALOG,
+): CardioCandidate[] {
+  const location = VENUE_TO_LOCATION[venueOf(view, 'STRENGTH')];
+  const catalogLevel = LEVEL_TO_CATALOG[level];
+  const blocked = contraindicationsOf(view);
+  const disliked = exercisePreference(view, 'DISLIKES');
+  const liked = exercisePreference(view, 'LIKES');
+  return catalog
+    .filter((e) => {
+      const intensity = CARDIO_PROFILE[e.id];
+      return (
+        e.pattern === 'CARDIO' &&
+        intensity !== undefined &&
+        (level !== 'BEGINNER' || intensity === 'MODERATE') &&
+        offeredToLevel(e, catalogLevel) &&
+        servesLocation(e, location) &&
+        !disliked.has(e.id) &&
+        !e.contraindicatedFor.some((tag) => blocked.has(tag))
+      );
+    })
+    .sort(
+      (a, b) =>
+        (liked.has(a.id) ? 0 : 2) +
+        (a.isFavorite ? 0 : 1) -
+        ((liked.has(b.id) ? 0 : 2) + (b.isFavorite ? 0 : 1)),
+    )
+    .map<CardioCandidate>((e) => ({
+      id: e.id,
+      name: e.name,
+      intensity: CARDIO_PROFILE[e.id] ?? 'MODERATE',
+    }));
+}
+
 const SPLITS = ['FULL_BODY', 'UPPER_LOWER', 'PUSH_PULL_LEGS', 'BODY_PART'] as const;
 
 function strengthGoalOf(primary: DeclaredGoalKind, strengthIsPrimary: boolean) {
@@ -314,15 +375,22 @@ export function strengthInputOf(
     priority: number;
     strengthIsPrimary: boolean;
     catalog?: readonly CatalogExercise[];
+    /** Mesociclo escolhido pela reavaliação do ciclo anterior. */
+    mesocycle?: Mesocycle;
+    /** O que o plano já tem de outra atividade aeróbia: desconta da meta de cardio da OMS. */
+    otherCardio?: { runningSessions: number; externalMinutesPerWeek: number };
   },
 ): StrengthInput | null {
   if (!view.goal) return null;
   const level = levelOf(view, 'STRENGTH');
   const rules = strengthRules(params, level);
   const experience = view.training.modalities.find((m) => m.modality === 'STRENGTH');
-  const goal = strengthGoalOf(view.goal.declared.primary, options.strengthIsPrimary);
+  const declaredGoal = strengthGoalOf(view.goal.declared.primary, options.strengthIsPrimary);
   const months = experience?.monthsPracticing;
-  const beginner = level === 'BEGINNER' || (months !== undefined && months < 3);
+  const beginner =
+    level === 'BEGINNER' ||
+    experience?.wantsToStart === true ||
+    (months !== undefined && months < 3);
   const preferredSplit = preferenceOf(view, 'TRAINING_STRUCTURE', 'split');
   const split =
     typeof preferredSplit === 'string' && (SPLITS as readonly string[]).includes(preferredSplit)
@@ -334,20 +402,137 @@ export function strengthInputOf(
     options.catalog,
   );
   if (candidates.length < 8) return null;
-  const phase = beginner ? 'ADAPTATION' : goal === 'STRENGTH' ? 'STRENGTH' : 'HYPERTROPHY';
+  const phase = mesocycleOf({
+    goal: declaredGoal,
+    beginner,
+    previous: view.training.activeMesocycle,
+    chosen: options.mesocycle,
+  });
+  // As faixas de repetição seguem o mesociclo quando ele é de Força ou de Hipertrofia.
+  const goal =
+    phase === 'STRENGTH'
+      ? 'STRENGTH'
+      : phase === 'HYPERTROPHY' && declaredGoal === 'STRENGTH'
+        ? 'HYPERTROPHY'
+        : declaredGoal;
   const blockWeeks = rules.blockWeeksByPhase[phase];
+  const sessionMinutes = minutesPerSession(view, 20, 180);
+  const cardio = cardioOf(view, level, {
+    beginner,
+    strengthSessions: Math.min(6, options.sessions),
+    minutesPerSession: sessionMinutes,
+    otherCardio: options.otherCardio,
+    catalog: options.catalog,
+  });
   return {
     level,
     goal,
     phase,
     sessionsPerWeek: Math.min(6, options.sessions),
-    minutesPerSession: minutesPerSession(view, 20, 180),
-    weeksInBlock: blockWeeks ? Math.max(2, Math.round(blockWeeks.min)) : 4,
+    minutesPerSession: sessionMinutes,
+    weeksInBlock: blockWeeks
+      ? Math.min(12, Math.max(1, Math.round(blockWeeks.min)))
+      : DEFAULT_BLOCK_WEEKS[phase],
     split,
     modalityPriority: options.priority,
     candidates,
     preferredExerciseIds,
     emphasisMuscleGroups: emphasisGroupsOf(view),
+    ...cardio,
+    timeBudget: strengthTimeBudget(
+      {
+        minutesPerSession: sessionMinutes,
+        sessionsPerWeek: Math.min(6, options.sessions),
+        candidates,
+        cardio: cardio.cardio,
+      },
+      rules,
+    ),
+  };
+}
+
+/** Tempo típico de uma sessão de corrida do plano para contar como atividade aeróbia da semana. */
+const RUNNING_MINUTES_PER_SESSION = 40;
+
+/** Quanto de cardio (OMS) a musculação carrega, o que sobra para o dia a dia e o que pode usar. */
+function cardioOf(
+  view: StateView,
+  level: RulesLevel,
+  options: {
+    beginner: boolean;
+    strengthSessions: number;
+    minutesPerSession: number;
+    otherCardio?: { runningSessions: number; externalMinutesPerWeek: number };
+    catalog?: readonly CatalogExercise[];
+  },
+): Pick<StrengthInput, 'cardio' | 'dailyActivityMinutes'> {
+  if (!view.goal) return {};
+  const prescription = cardioPrescription({
+    goals: [view.goal.declared.primary, ...view.goal.declared.secondary],
+    beginner: options.beginner,
+    strengthSessions: options.strengthSessions,
+    minutesPerSession: options.minutesPerSession,
+    runningMinutesPerWeek:
+      (options.otherCardio?.runningSessions ?? 0) *
+      Math.min(RUNNING_MINUTES_PER_SESSION, options.minutesPerSession),
+    externalMinutesPerWeek: options.otherCardio?.externalMinutesPerWeek ?? 0,
+  });
+  const candidates = selectCardioCandidates(view, level, options.catalog);
+  if (prescription.weeklyMinutes === 0 || candidates.length === 0) {
+    // Não coube na sessão (curta) ou não há cardio viável: a meta se completa no dia a dia.
+    const missing = Math.max(0, prescription.targetMinutes - prescription.coveredMinutes);
+    return missing >= 5 ? { dailyActivityMinutes: missing } : {};
+  }
+  return {
+    cardio: {
+      targetMinutes: prescription.targetMinutes,
+      coveredMinutes: prescription.coveredMinutes,
+      weeklyMinutes: prescription.weeklyMinutes,
+      perSessionMinutes: prescription.perSession,
+      leftoverMinutes: prescription.leftoverMinutes,
+      candidates: candidates.slice(0, 12),
+    },
+  };
+}
+
+/** Sem a tabela publicada na Metodologia: faixas clássicas (Adaptação curta, deload de 1 semana). */
+const DEFAULT_BLOCK_WEEKS: Readonly<Record<Mesocycle, number>> = {
+  ADAPTATION: 3,
+  HYPERTROPHY: 4,
+  STRENGTH: 4,
+  DELOAD: 1,
+};
+
+/**
+ * Mesociclo do bloco de musculação. A reavaliação do ciclo escolhe o próximo; sem ela, o ponto de
+ * entrada: Adaptação para iniciante ou quem não treina hoje (retorno após parada), salvo se o
+ * aluno já cumpriu um ciclo na MOVIVO; depois, Força ou Hipertrofia conforme o objetivo.
+ */
+export function mesocycleOf(input: {
+  goal: StrengthInput['goal'];
+  beginner: boolean;
+  previous: Mesocycle | null;
+  chosen?: Mesocycle;
+}): Mesocycle {
+  if (input.chosen) return input.chosen;
+  if (input.beginner && input.previous === null) return 'ADAPTATION';
+  return input.goal === 'STRENGTH' ? 'STRENGTH' : 'HYPERTROPHY';
+}
+
+/**
+ * A fase do bloco é o mesociclo decidido pelo código, com a duração da Metodologia: a IA só
+ * descreve o foco e diz se o bloco termina com semana leve.
+ */
+export function mesocyclePhaseOf(
+  input: Pick<StrengthInput, 'phase' | 'weeksInBlock'>,
+  drafted: readonly PlanPhase[],
+): PlanPhase {
+  return {
+    mesocycle: input.phase,
+    name: MESOCYCLE_LABELS[input.phase],
+    focus: drafted[0]?.focus ?? MESOCYCLE_LABELS[input.phase],
+    weeks: input.weeksInBlock,
+    endsWithDeload: input.phase !== 'DELOAD' && drafted.some((phase) => phase.endsWithDeload),
   };
 }
 
@@ -372,9 +557,48 @@ export function racePhase(weeksToRace: number | null, taperWeeks = 2): RacePhase
   return 'BASE';
 }
 
+/** Treinos que dependem de uma prova marcada: sem prova, não entram no bloco. */
+const RACE_ONLY_WORKOUTS: readonly string[] = [
+  'RACE_SIMULATION',
+  'RACE_PACE_RUN',
+  'RACE_PACE_REPEATS',
+];
+
+const GYM_VENUES: readonly TrainingVenue[] = ['FULL_GYM', 'HYROX_GYM', 'CONDO_GYM'];
+
+/** O treino cabe no local de corrida do aluno? (trilha, areia e descida pedem rua; esteira, academia) */
+function workoutFitsVenue(
+  spec: (typeof RUNNING_WORKOUTS)[keyof typeof RUNNING_WORKOUTS],
+  type: string,
+  venue: TrainingVenue,
+): boolean {
+  const outdoors = venue === 'OUTDOOR' || venue === 'TRACK';
+  if (spec.terrain === 'TRAIL' || spec.terrain === 'SAND' || type === 'DOWNHILL_RUN')
+    return venue === 'OUTDOOR';
+  if (spec.terrain === 'TREADMILL') return GYM_VENUES.includes(venue);
+  // Subida: na rua, no morro; na academia, a inclinação da esteira.
+  if (spec.terrain === 'HILLS') return outdoors || GYM_VENUES.includes(venue);
+  return true;
+}
+
+/** Objetivos declarados (principal e secundários): quem quer correr melhor, em qualquer posição. */
+function wantsRunningPerformance(view: StateView): boolean {
+  const declared = view.goal?.declared;
+  if (!declared) return false;
+  return [declared.primary, ...declared.secondary].some(
+    (goal) => goal === 'RUNNING_PERFORMANCE' || goal === 'RACE_PREPARATION',
+  );
+}
+
 export function runningInputOf(
   view: StateView,
-  options: { sessions: number; priority: number; today: string; runningIsPrimary: boolean },
+  options: {
+    sessions: number;
+    priority: number;
+    today: string;
+    /** Parâmetros publicados da metodologia de corrida (teto de sessões de qualidade). */
+    params?: Parameters<typeof runningRules>[0];
+  },
 ): RunningInput | null {
   if (!view.goal) return null;
   const experience = view.training.modalities.find((m) => m.modality === 'RUNNING');
@@ -387,26 +611,67 @@ export function runningInputOf(
           targetSeconds: event.targetSeconds ?? null,
         }
       : null;
-  const primary = view.goal.declared.primary;
+  // Quem escolhe corrida na anamnese quer treino estruturado, não só "cardio": sem prova nem
+  // objetivo de desempenho, o treino segue estruturado (qualidade + longão), em foco de condicionamento.
   const goal = race
     ? ('RACE' as const)
-    : primary === 'RUNNING_PERFORMANCE'
+    : wantsRunningPerformance(view)
       ? ('PERFORMANCE' as const)
-      : options.runningIsPrimary
-        ? ('FITNESS' as const)
-        : ('COMPLEMENT' as const);
+      : ('FITNESS' as const);
+  const level = levelOf(view, 'RUNNING');
+  const currentWeeklyKm = experience?.weeklyKm ?? 0;
+  const starter = isStarter(currentWeeklyKm, level);
+  // Periodização: com prova, pela distância até ela; sem, a base aeróbia vem antes da construção
+  // (iniciante ou com pouco volume começa na base; quem já corre bem entra em construção).
+  const phase = race
+    ? racePhase(race.weeksToRace)
+    : level === 'BEGINNER' || currentWeeklyKm < 15
+      ? ('BASE' as const)
+      : ('BUILD' as const);
   const weeks = race ? Math.max(2, Math.min(4, race.weeksToRace)) : 4;
+  const sessions = Math.min(6, options.sessions);
+  const venue = venueOf(view, 'RUNNING');
+  const qualityMax = options.params
+    ? runningRules(options.params, level).qualitySessionsPerWeekMax
+    : null;
+  const roles = runningWeekRoles({ sessions, goal, phase, level, qualityMax, starter });
+  const workouts = eligibleRunningWorkouts({ level, phase })
+    .filter((type) => {
+      const spec = RUNNING_WORKOUTS[type];
+      if (!race && RACE_ONLY_WORKOUTS.includes(type)) return false;
+      if (starter && (spec.intensity === 'HARD' || spec.kind === 'MODERATE')) return false;
+      return workoutFitsVenue(spec, type, venue);
+    })
+    .map((type) => {
+      const spec = RUNNING_WORKOUTS[type];
+      return {
+        type,
+        label: spec.label,
+        kind: spec.kind,
+        intensity: spec.intensity,
+        stimulus: spec.stimulus,
+        objective: spec.objective,
+        adaptation: spec.adaptation,
+        needsPaceAnchor: spec.needsPaceAnchor,
+        ...(spec.terrain ? { terrain: spec.terrain } : {}),
+        ...(spec.caution ? { caution: spec.caution } : {}),
+      };
+    });
   return {
-    level: levelOf(view, 'RUNNING'),
+    level,
     goal,
-    phase: race ? racePhase(race.weeksToRace) : 'BASE',
-    sessionsPerWeek: Math.min(6, options.sessions),
+    phase,
+    sessionsPerWeek: sessions,
     minutesPerSession: minutesPerSession(view, 20, 240),
     weeksInBlock: weeks,
-    currentWeeklyKm: experience?.weeklyKm ?? 0,
+    currentWeeklyKm,
     recent5kSeconds: experience?.recent5kSeconds ?? null,
     race,
     modalityPriority: options.priority,
+    venue,
+    starter,
+    weekRoles: roles,
+    workouts,
   };
 }
 

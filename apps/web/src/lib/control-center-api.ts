@@ -31,6 +31,7 @@ import {
   type AgentProfileKey,
   type AgentProfileUpdate,
   protocolAdjustmentResponseSchema,
+  protocolRegenerationResponseSchema,
   protocolReviewSchema,
   type EditProtocolRequest,
   type ProtocolReview,
@@ -102,6 +103,7 @@ import {
   type ControlCenterScriptsResponse,
   type ControlCenterScriptRunResponse,
 } from '@movivo/shared';
+import { looksPortuguese } from './api-message';
 
 interface Parser<T> {
   parse(value: unknown): T;
@@ -248,7 +250,7 @@ async function request<T>(path: string, schema: Parser<T>, signal?: AbortSignal)
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? 'Seu papel não pode acessar este setor.'
@@ -441,7 +443,7 @@ async function mutate<T>(
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? messages.forbidden
@@ -789,15 +791,61 @@ export function requestProtocolAdjustment(id: string, instruction: string) {
   );
 }
 
+/**
+ * Descarta a proposta e manda os agentes gerarem o protocolo INTEIRO de novo, do zero e sem
+ * orientação (publicação de treino ou alimentar). O caso é encerrado; o novo protocolo volta
+ * para a fila como caso novo. Falha de geração continua usando `resolveException`.
+ */
+export function regenerateProtocol(id: string) {
+  return mutate(
+    `exceptions/${id}/regenerate`,
+    {},
+    protocolRegenerationResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/** Um problema da conferência do servidor, com o caminho do campo (`sessions.0.content…`). */
+export interface ProtocolEditIssue {
+  path: readonly (string | number)[];
+  message: string;
+}
+
 /** Erro da edição com cada problema apontado pela conferência do servidor, em PT-BR. */
 export class ProtocolEditError extends ControlCenterApiError {
   constructor(
     status: number,
     message: string,
     readonly issues: readonly string[],
+    /** Os mesmos problemas com o caminho, para apontar a sessão, o exercício ou a refeição. */
+    readonly details: readonly ProtocolEditIssue[] = issues.map((text) => ({
+      path: [],
+      message: text,
+    })),
   ) {
     super(status, message);
   }
+}
+
+function protocolEditIssuesOf(value: unknown): ProtocolEditIssue[] {
+  if (!isRecord(value) || !Array.isArray(value.issues)) return [];
+  return value.issues.flatMap((issue) =>
+    isRecord(issue) && typeof issue.message === 'string'
+      ? [
+          {
+            path: Array.isArray(issue.path)
+              ? issue.path.filter(
+                  (part): part is string | number =>
+                    typeof part === 'string' || typeof part === 'number',
+                )
+              : typeof issue.path === 'string'
+                ? issue.path.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+                : [],
+            message: issue.message,
+          },
+        ]
+      : [],
+  );
 }
 
 export async function saveExceptionProtocol(
@@ -812,19 +860,19 @@ export async function saveExceptionProtocol(
   });
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
-    const issues =
-      isRecord(value) && Array.isArray(value.issues)
-        ? value.issues.flatMap((issue) =>
-            isRecord(issue) && typeof issue.message === 'string' ? [issue.message] : [],
-          )
-        : [];
+    const details = protocolEditIssuesOf(value);
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? EXCEPTION_MESSAGES.forbidden
           : 'Não foi possível salvar o protocolo.';
-    throw new ProtocolEditError(response.status, message, issues);
+    throw new ProtocolEditError(
+      response.status,
+      message,
+      details.map((issue) => issue.message),
+      details,
+    );
   }
   const parsed = protocolReviewSchema.safeParse(value);
   if (!parsed.success) throw new ControlCenterApiError(502, EXCEPTION_MESSAGES.contract);
@@ -917,7 +965,7 @@ export async function saveTierRoutes(
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? 'Seu papel não pode trocar o modelo de um nível.'
@@ -952,19 +1000,19 @@ export async function amendActiveProtocol(
   });
   const value = (await response.json().catch(() => null)) as unknown;
   if (response.ok) return;
-  const issues =
-    isRecord(value) && Array.isArray(value.issues)
-      ? value.issues.flatMap((issue) =>
-          isRecord(issue) && typeof issue.message === 'string' ? [issue.message] : [],
-        )
-      : [];
+  const details = protocolEditIssuesOf(value);
   const message =
-    isRecord(value) && typeof value.message === 'string'
+    isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
       ? value.message
       : response.status === 403
         ? EXCEPTION_MESSAGES.forbidden
         : 'Não foi possível salvar a emenda do protocolo.';
-  throw new ProtocolEditError(response.status, message, issues);
+  throw new ProtocolEditError(
+    response.status,
+    message,
+    details.map((issue) => issue.message),
+    details,
+  );
 }
 
 export function getStudentEvolution(id: string, signal?: AbortSignal): Promise<StudentEvolution> {

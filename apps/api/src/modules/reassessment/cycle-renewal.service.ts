@@ -336,6 +336,7 @@ export class CycleRenewalService {
           name: p.name,
           focus: p.focus,
           endsWithDeload: p.endsWithDeload,
+          mesocycle: p.mesocycle,
         })),
       },
       weeks,

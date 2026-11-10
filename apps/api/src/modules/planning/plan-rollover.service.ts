@@ -12,7 +12,13 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { StudentStateReader } from '../student-state/student-state.reader';
-import { deloadAdjustment, horizonWeeks, isDeloadWeek, weekIndexOf } from './calc/rollover';
+import {
+  deloadAdjustment,
+  horizonWeeks,
+  isDeloadWeek,
+  runningProgressionAdjustment,
+  weekIndexOf,
+} from './calc/rollover';
 import { scheduleContextOf } from './inputs';
 import { PLAN_STATE_SLICES, todayIn } from './plan-generation.service';
 import { scheduleWeek } from './plan-publisher.service';
@@ -59,6 +65,7 @@ export class PlanRolloverService {
         .where(eq(planSessions.planId, plan.id));
       const idByKey = new Map(models.map((row) => [row.key, row.id]));
       const minutesByKey = new Map(plan.structure.sessions.map((s) => [s.key, s.estimatedMinutes]));
+      const sessionByKey = new Map(plan.structure.sessions.map((s) => [s.key, s]));
 
       let scheduled = 0;
       let weeks = 0;
@@ -81,10 +88,15 @@ export class PlanRolloverService {
           weekStart,
           index === 0 ? today : weekStart,
         );
-        const deload = isDeloadWeek(plan.structure.phases, weekIndexOf(plan.startsOn, weekStart));
+        const weekIndex = weekIndexOf(plan.startsOn, weekStart);
+        const deload = isDeloadWeek(plan.structure.phases, weekIndex);
         const rows = week.assignments.flatMap((assignment) => {
           const planSessionId = idByKey.get(assignment.planSessionKey);
           if (!planSessionId) return [];
+          const session = sessionByKey.get(assignment.planSessionKey);
+          const progression = session
+            ? runningProgressionAdjustment(session, weekIndex, deload)
+            : undefined;
           return [
             {
               userId,
@@ -100,7 +112,9 @@ export class PlanRolloverService {
                 ? {
                     adjustment: deloadAdjustment(minutesByKey.get(assignment.planSessionKey) ?? 40),
                   }
-                : {}),
+                : progression
+                  ? { adjustment: progression }
+                  : {}),
             },
           ];
         });

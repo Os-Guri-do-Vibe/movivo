@@ -62,4 +62,33 @@ describe('validação de parâmetros', () => {
       expect.objectContaining({ path: 'volume.weeklySets.BEGINNER.sets', plausible: [4, 25] }),
     ]);
   });
+
+  it('a recuperação de 1 a 2 semanas é normal; os outros blocos de 1 semana não', () => {
+    const spec = methodologyDomainSpec('STRENGTH');
+    const base = exampleParameters(spec) as Record<string, Record<string, unknown>>;
+    const withBlocks = (blocks: Record<string, unknown>) => ({
+      ...base,
+      periodization: {
+        ...base.periodization,
+        blockWeeksByPhase: {
+          ...(base.periodization?.blockWeeksByPhase as object),
+          ...blocks,
+        },
+      },
+    });
+    const paths = (blocks: Record<string, unknown>) =>
+      plausibilityIssues(spec, withBlocks(blocks)).map((i) => i.path);
+
+    expect(
+      paths({
+        ADAPTATION: { weeks: { min: 2, max: 4 } },
+        HYPERTROPHY: { weeks: { min: 6, max: 8 } },
+        STRENGTH: { weeks: { min: 4, max: 6 } },
+        DELOAD: { weeks: { min: 1, max: 2 } },
+      }),
+    ).toEqual([]);
+    expect(paths({ HYPERTROPHY: { weeks: { min: 1, max: 2 } } })).toEqual([
+      'periodization.blockWeeksByPhase.HYPERTROPHY.weeks',
+    ]);
+  });
 });

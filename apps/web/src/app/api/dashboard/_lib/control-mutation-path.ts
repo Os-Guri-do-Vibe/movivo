@@ -31,10 +31,11 @@ const PARAMETERIZED_MUTATIONS = [
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
   // de novo no backend, que só executa o que está no catálogo).
   /^scripts\/[a-z0-9-]{1,80}\/run$/,
-  // Fila de exceções: assumir, aprovar, recusar, encerrar, pedir ajuste do protocolo aos agentes
-  // e avisar que a tela de revisão está aberta (a autorização por domínio é do backend).
+  // Fila de exceções: assumir, aprovar, recusar, encerrar, pedir ajuste do protocolo aos agentes,
+  // regerá-lo do zero e avisar que a tela de revisão está aberta (a autorização por domínio é do
+  // backend).
   new RegExp(
-    `^exceptions/${UUID_SEGMENT}/(?:claim|approve|reject|resolve|request-adjustment|review-hold|substitute)$`,
+    `^exceptions/${UUID_SEGMENT}/(?:claim|approve|reject|resolve|request-adjustment|regenerate|review-hold|substitute)$`,
     'i',
   ),
   // Estúdio de metodologia: abrir rascunho de um domínio e editar/testar/publicar/descartar.

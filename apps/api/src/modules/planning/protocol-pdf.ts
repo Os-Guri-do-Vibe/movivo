@@ -21,7 +21,8 @@ import type {
 } from 'pdfmake/interfaces';
 
 import {
-  EXTERNAL_SPORT_LABELS,
+  externalSportName,
+  normalizeFoodName,
   HYROX_STATION_LABELS,
   MEAL_SLOT_LABELS,
   SESSION_MODALITY_LABELS,
@@ -33,6 +34,7 @@ import {
   type PlanRead,
   type PlanSession,
   type StrengthExercise,
+  type Weekday,
 } from '@movivo/shared';
 
 import { quantityLabel } from './calc/menu';
@@ -424,7 +426,7 @@ function externalSpec(
     head: [colHead('Atividade'), colHead('Duração e esforço')],
     rows: [
       [
-        { text: EXTERNAL_SPORT_LABELS[content.sport], fontSize: 9.5, bold: true },
+        { text: t(externalSportName(content.sport, content.label)), fontSize: 9.5, bold: true },
         mono(`${content.plannedMinutes} min · esforço ~${content.plannedRpe}/10`, {
           fontSize: 8.5,
         }),
@@ -449,13 +451,183 @@ const LOAD_GLOSSARY: Readonly<Record<StrengthExercise['loadStrategy'], string>> 
   RIR: 'escolha a carga que deixe as repetições em reserva indicadas ao fim da série.',
 };
 
-export function trainingPlanPdf(plan: PlanRead): Promise<Buffer> {
+/** Dados do aluno que o PDF mostra no cabeçalho; vêm do perfil, não do plano (a página pública não os carrega). */
+export interface PdfStudent {
+  fullName: string | null;
+  ageYears: number | null;
+  /** Primeira pesagem registrada (a do cadastro). */
+  initialWeightKg: number | null;
+  heightCm: number | null;
+  biologicalSex: 'MALE' | 'FEMALE' | null;
+}
+
+export function protocolPdfFileName(
+  kind: 'treino' | 'alimentacao',
+  fullName: string | null,
+): string {
+  const student = (fullName?.trim() || 'aluno')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  const prefix = kind === 'treino' ? 'protocolo-de-treino' : 'plano-alimentar';
+  return `${prefix}-${student || 'aluno'}.pdf`;
+}
+
+const SEX_LABELS = { MALE: 'Masculino', FEMALE: 'Feminino' } as const;
+const WEEK: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const WEEKDAY_NAMES: Readonly<Record<Weekday, string>> = {
+  MON: 'Segunda',
+  TUE: 'Terça',
+  WED: 'Quarta',
+  THU: 'Quinta',
+  FRI: 'Sexta',
+  SAT: 'Sábado',
+  SUN: 'Domingo',
+};
+
+function weekdayOf(isoDate: string): Weekday {
+  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay(); // 0 = domingo
+  return WEEK[(day + 6) % 7] as Weekday;
+}
+
+/**
+ * Dias da semana de um treino: os que o profissional marcou na revisão; sem marcação, os dias em
+ * que a agenda o colocou na primeira semana. Vazio = o dia ainda não foi definido.
+ */
+function sessionWeekdays(
+  training: NonNullable<PlanRead['training']>,
+  session: PlanSession,
+): Weekday[] {
+  const days = new Set<Weekday>(session.weekdays ?? []);
+  if (days.size === 0) {
+    // A agenda pode mudar de dia entre semanas: só as primeiras ocorrências (uma semana) valem.
+    const first = training.upcoming
+      .filter((occurrence) => occurrence.planSessionKey === session.key)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(0, session.weeklyFrequency);
+    first.forEach((occurrence) => days.add(weekdayOf(occurrence.date)));
+  }
+  return WEEK.filter((day) => days.has(day));
+}
+
+interface DayGroup {
+  /** `null` = treinos sem dia definido. */
+  day: Weekday | null;
+  sessions: PlanSession[];
+}
+
+/** Treinos agrupados pelos dias da semana (segunda a domingo); vários no mesmo dia ficam juntos. */
+function weekGroups(
+  training: NonNullable<PlanRead['training']>,
+  sessions: readonly PlanSession[],
+): DayGroup[] {
+  const byDay = new Map<Weekday | null, PlanSession[]>();
+  const add = (day: Weekday | null, session: PlanSession) =>
+    byDay.set(day, [...(byDay.get(day) ?? []), session]);
+  for (const session of sessions) {
+    const days = sessionWeekdays(training, session);
+    if (days.length === 0) add(null, session);
+    else days.forEach((day) => add(day, session));
+  }
+  return [...WEEK, null]
+    .filter((day) => byDay.has(day))
+    .map((day) => ({ day, sessions: byDay.get(day) ?? [] }));
+}
+
+const dayName = (day: Weekday | null) => (day ? WEEKDAY_NAMES[day] : 'Dia a definir');
+
+/** Visão rápida da semana: um dia por linha, com todos os treinos do dia. */
+function weekOverview(groups: readonly DayGroup[]): Content {
+  return styledTable({
+    headerRows: 1,
+    widths: [90, '*'],
+    body: [
+      [th('Dia'), th('Treino')],
+      ...groups.map(({ day, sessions }): Row => [
+        { text: dayName(day), fontSize: 9.5, bold: true },
+        {
+          stack: sessions.map((session): Content => ({
+            text: [
+              { text: t(session.title), bold: true, fontSize: 9.5 },
+              {
+                text: `  ·  ${SESSION_MODALITY_LABELS[session.content.modality]}  ·  ~${session.estimatedMinutes} min`,
+                fontSize: 8,
+                color: COLOR.musgo,
+              },
+            ],
+          })),
+        },
+      ]),
+    ],
+  });
+}
+
+function dayHeading(day: Weekday | null): Content {
+  return {
+    columns: [
+      {
+        text: dayName(day).toUpperCase(),
+        font: 'JetBrainsMono',
+        fontSize: 9,
+        bold: true,
+        characterSpacing: 1,
+        color: COLOR.petroleo,
+        width: 'auto',
+      },
+      {
+        width: '*',
+        canvas: [
+          {
+            type: 'line',
+            x1: 0,
+            y1: 5,
+            x2: CONTENT_WIDTH - 90,
+            y2: 5,
+            lineWidth: 0.5,
+            lineColor: COLOR.musgoTenue,
+          },
+        ],
+      },
+    ],
+    columnGap: 8,
+    margin: [0, 6, 0, 8],
+    unbreakable: true,
+  };
+}
+
+/** Os treinos dia a dia; um treino que se repete na semana só traz a tabela na primeira vez. */
+function weekSessions(groups: readonly DayGroup[]): Content[] {
+  const shown = new Map<string, Weekday | null>();
+  return groups.flatMap(({ day, sessions }) => [
+    dayHeading(day),
+    ...sessions.map((session): Content => {
+      const first = shown.get(session.key);
+      if (first === undefined) {
+        shown.set(session.key, day);
+        return sessionTable(session, sessionSpec(session));
+      }
+      return {
+        text: `${t(session.title)}: mesmo treino de ${dayName(first).toLowerCase()} (tabela acima).`,
+        fontSize: 9,
+        color: COLOR.musgo,
+        margin: [0, 0, 0, 12],
+      };
+    }),
+  ]);
+}
+
+const kg = (value: number) => `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg`;
+
+export function trainingPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<Buffer> {
   const training = plan.training;
   if (!training) throw new Error('aluno sem plano de treino ativo');
   const { structure } = training;
   const weeks = structure.phases.reduce((sum, p) => sum + p.weeks, 0);
   const perWeek = structure.sessions.reduce((sum, s) => sum + s.weeklyFrequency, 0);
   const phase = structure.phases[0]?.name ?? '-';
+  const groups = weekGroups(training, structure.sessions);
 
   const exercises = structure.sessions.flatMap((s) =>
     s.content.modality === 'STRENGTH' ? s.content.exercises : [],
@@ -468,20 +640,31 @@ export function trainingPlanPdf(plan: PlanRead): Promise<Buffer> {
     .filter((x): x is string => Boolean(x))
     .map(t)
     .join(' ');
+  const name = student?.fullName?.trim() || plan.firstName;
 
   const content: Content[] = [
     { text: 'Informações do aluno', style: 'h2', margin: [0, 0, 0, 8] },
     infoGrid(
       [
-        infoRow('Nome', plan.firstName ? t(plan.firstName) : '-'),
+        infoRow('Nome', name ? t(name) : '-'),
+        infoRow('Idade', student?.ageYears != null ? `${student.ageYears} anos` : '-'),
         infoRow('Objetivo', plan.strategy ? t(plan.strategy.title) : '-'),
         infoRow('Mesociclo', t(phase)),
         infoRow('Data início do protocolo', br(training.startsOn), true),
       ],
       [
+        infoRow(
+          'Peso inicial',
+          student?.initialWeightKg != null ? kg(student.initialWeightKg) : '-',
+          student?.initialWeightKg != null,
+        ),
+        infoRow(
+          'Altura',
+          student?.heightCm != null ? `${student.heightCm} cm` : '-',
+          student?.heightCm != null,
+        ),
+        infoRow('Sexo', student?.biologicalSex ? SEX_LABELS[student.biologicalSex] : '-'),
         infoRow('Frequência', `${perWeek}x por semana`),
-        infoRow('Duração', `${weeks} semanas`),
-        infoRow('Versão do protocolo', String(training.version), true),
         infoRow('Data final do protocolo', br(endDate(training.startsOn, weeks)), true),
       ],
     ),
@@ -490,17 +673,21 @@ export function trainingPlanPdf(plan: PlanRead): Promise<Buffer> {
       label: 'Como o protocolo funciona',
       text: explanation,
       steps: [
-        ['01', 'Siga os treinos na frequência semanal indicada em cada tabela.'],
+        ['01', 'Siga os treinos nos dias da semana indicados no protocolo.'],
         ['02', 'Controle a carga pelo RIR: pare a série com as repetições em reserva indicadas.'],
         ['03', 'Dor aguda, tontura ou mal-estar: pare o exercício e avise a equipe.'],
       ],
-      note: 'Planejado com apoio de inteligência artificial e acompanhado pela equipe de profissionais da MOVIVO (Educação Física, CREF).',
     }),
     ...sectionTitle(
-      'Seus treinos',
-      'Uma tabela por treino, com séries, repetições, descanso e RIR (repetições em reserva).',
+      'Sua semana base',
+      'Estes são os dias de cada treino. Se precisar, você pode trocar ou ajustar durante a semana.',
     ),
-    ...structure.sessions.map((session) => sessionTable(session, sessionSpec(session))),
+    weekOverview(groups),
+    ...sectionTitle(
+      'Seus treinos',
+      'Dia a dia, com séries, repetições, descanso e RIR (repetições em reserva).',
+    ),
+    ...weekSessions(groups),
     ...sectionTitle('Legenda', undefined, 14),
     {
       fontSize: 8.5,
@@ -583,7 +770,7 @@ function energyChart(s: NutritionPlanStructure): Content {
       },
       {
         text: [
-          { text: rangeValue(d), bold: true },
+          { text: kcal(d.energyKcal.max), bold: true },
           { text: ' kcal', color: COLOR.musgo },
         ],
         width: valueW,
@@ -600,11 +787,6 @@ function energyChart(s: NutritionPlanStructure): Content {
     stack: [
       row('Dia de treino', s.trainingDay, COLOR.petroleo),
       row('Dia de descanso', s.restDay, COLOR.pulso),
-      {
-        text: 'A barra escura é a energia mínima do dia; o trecho claro, até o máximo da faixa.',
-        style: 'muted',
-        margin: [0, 2, 0, 0],
-      },
     ],
   };
 }
@@ -613,7 +795,7 @@ interface SummaryCard {
   label: string;
   text: string;
   steps: ReadonlyArray<readonly [string, string]>;
-  note: string;
+  note?: string;
 }
 
 /** Cartão de resumo: texto do plano e três regras de uso, em colunas iguais, com filete verde. */
@@ -650,7 +832,16 @@ function summaryCard({ label, text, steps, note }: SummaryCard): Content {
                 })),
                 columnGap: 14,
               },
-              { text: note, fontSize: 7.5, color: COLOR.musgo, margin: [0, 11, 0, 0] },
+              ...(note
+                ? [
+                    {
+                      text: note,
+                      fontSize: 7.5,
+                      color: COLOR.musgo,
+                      margin: [0, 11, 0, 0],
+                    } as Content,
+                  ]
+                : []),
             ],
           },
         ],
@@ -835,61 +1026,76 @@ const FREE_MEALS_HINT =
 const FREE_MEALS_GUIDANCE =
   'Tudo bem escolher outra refeição livre. Conte no WhatsApp da MOVIVO o que você está pensando, e a gente te ajuda a encaixar no seu dia.';
 
-function freeMealCard(option: FreeMealOption, index: number): Content {
+function freeMealCard(
+  option: FreeMealOption,
+  index: number,
+): {
+  number: Content;
+  title: Content;
+  description: Content;
+  calories: Content;
+  divider: Content;
+  howTo: Content;
+  fitTip: Content;
+} {
   return {
-    stack: [
-      {
-        text: String(index + 1).padStart(2, '0'),
-        font: 'JetBrainsMono',
-        fontSize: 11,
-        bold: true,
-        color: COLOR.petroleo,
-      },
-      {
-        text: t(option.title),
-        fontSize: 10.5,
-        bold: true,
-        color: COLOR.grafite,
-        lineHeight: 1.2,
-        margin: [0, 4, 0, 3],
-      },
-      { text: t(option.description), fontSize: 8.5, color: COLOR.grafite, lineHeight: 1.3 },
-      {
-        text: [
-          {
-            text: `~${kcal(option.energyKcal)}`,
-            font: 'JetBrainsMono',
-            bold: true,
-            fontSize: 13,
-            color: COLOR.petroleo,
-          },
-          { text: '  kcal', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
-        ],
-        margin: [0, 8, 0, 8],
-      },
-      {
-        canvas: [
-          {
-            type: 'line',
-            x1: 0,
-            y1: 0,
-            x2: FREE_CARD_WIDTH,
-            y2: 0,
-            lineWidth: 0.5,
-            lineColor: COLOR.musgoTenue,
-          },
-        ],
-        margin: [0, 0, 0, 6],
-      },
-      caps('Como encaixar', COLOR.musgo),
-      {
-        text: t(option.fitTip),
-        fontSize: 8,
-        color: COLOR.musgo,
-        lineHeight: 1.3,
-        margin: [0, 3, 0, 0],
-      },
-    ],
+    number: {
+      text: String(index + 1).padStart(2, '0'),
+      font: 'JetBrainsMono',
+      fontSize: 11,
+      bold: true,
+      color: COLOR.petroleo,
+      margin: [0, 12, 0, 0],
+    },
+    title: {
+      text: t(option.title),
+      fontSize: 10.5,
+      bold: true,
+      color: COLOR.grafite,
+      lineHeight: 1.2,
+      margin: [0, 4, 0, 3],
+    },
+    description: {
+      text: t(option.description),
+      fontSize: 8.5,
+      color: COLOR.grafite,
+      lineHeight: 1.3,
+    },
+    calories: {
+      text: [
+        {
+          text: `~${kcal(option.energyKcal)}`,
+          font: 'JetBrainsMono',
+          bold: true,
+          fontSize: 13,
+          color: COLOR.petroleo,
+        },
+        { text: '  kcal', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
+      ],
+      margin: [0, 8, 0, 8],
+    },
+    divider: {
+      canvas: [
+        {
+          type: 'line',
+          x1: 0,
+          y1: 0,
+          x2: FREE_CARD_WIDTH,
+          y2: 0,
+          lineWidth: 0.5,
+          lineColor: COLOR.musgoTenue,
+        },
+      ],
+      margin: [0, 0, 0, 6],
+    },
+    howTo: caps('Como encaixar', COLOR.musgo),
+    fitTip: {
+      text: t(option.fitTip),
+      fontSize: 8,
+      color: COLOR.musgo,
+      lineHeight: 1.3,
+      margin: [0, 3, 0, 12],
+    },
   };
 }
 
@@ -898,6 +1104,16 @@ function freeMealCard(option: FreeMealOption, index: number): Content {
  * escolher outra com a ajuda da MOVIVO. Bloco indivisível: nenhum cartão sai cortado.
  */
 function freeMealsSection(free: FreeMeals): Content {
+  const cards = free.options.map(freeMealCard);
+  const cardRows = [
+    cards.map((card) => card.number),
+    cards.map((card) => card.title),
+    cards.map((card) => card.description),
+    cards.map((card) => card.calories),
+    cards.map((card) => card.divider),
+    cards.map((card) => card.howTo),
+    cards.map((card) => card.fitTip),
+  ];
   return {
     unbreakable: true,
     stack: [
@@ -931,7 +1147,7 @@ function freeMealsSection(free: FreeMeals): Content {
         table: {
           widths: [FREE_CARD_WIDTH, FREE_CARD_WIDTH, FREE_CARD_WIDTH],
           dontBreakRows: true,
-          body: [free.options.map((option, index) => freeMealCard(option, index))],
+          body: cardRows,
         },
         layout: {
           fillColor: () => COLOR.nevoa,
@@ -940,8 +1156,8 @@ function freeMealsSection(free: FreeMeals): Content {
           vLineColor: () => COLOR.branco,
           paddingLeft: () => 12,
           paddingRight: () => 12,
-          paddingTop: () => 12,
-          paddingBottom: () => 12,
+          paddingTop: () => 0,
+          paddingBottom: () => 0,
         },
       },
       {
@@ -1061,12 +1277,17 @@ function mealTable(meal: NutritionPlanStructure['meals'][number]): Content {
       push('item', [
         {
           stack: [
-            { text: t(item.name), fontSize: 9.5, bold: true, color: COLOR.grafite },
+            {
+              text: t(normalizeFoodName(item.name)),
+              fontSize: 9.5,
+              bold: true,
+              color: COLOR.grafite,
+            },
             ...(item.swaps.length > 0
               ? [
                   {
                     text: `Troque por: ${item.swaps
-                      .map((swap) => `${quantityLabel(swap)} de ${t(swap.name)}`)
+                      .map((swap) => `${quantityLabel(swap)} de ${t(normalizeFoodName(swap.name))}`)
                       .join(' · ')}`,
                     fontSize: 7.5,
                     color: COLOR.musgo,
@@ -1112,7 +1333,7 @@ function guidelinesTable(guidelines: readonly string[]): Content {
   };
 }
 
-export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
+export function nutritionPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<Buffer> {
   const nutrition = plan.nutrition;
   if (!nutrition) throw new Error('aluno sem plano alimentar ativo');
   const s = nutrition.structure;
@@ -1125,10 +1346,17 @@ export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
     { text: 'Informações do aluno', style: 'h2', margin: [0, 0, 0, 8] },
     infoGrid(
       [
-        infoRow('Nome', plan.firstName ? t(plan.firstName) : '-'),
+        infoRow(
+          'Nome',
+          student?.fullName?.trim()
+            ? t(student.fullName.trim())
+            : plan.firstName
+              ? t(plan.firstName)
+              : '-',
+        ),
         infoRow('Estratégia', ENERGY_LABELS[s.strategy] ?? s.strategy),
         infoRow('Refeições por dia', String(s.meals.length)),
-        infoRow('Data início do plano', br(nutrition.startsOn), true),
+        infoRow('Data início do plano', br(plan.training?.startsOn ?? nutrition.startsOn), true),
       ],
       [
         infoRow('Proteína por dia', `${s.trainingDay.proteinG} g`, true),
@@ -1138,10 +1366,21 @@ export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
           true,
         ),
         infoRow('Custo estimado', daily ? `${brl(daily)} por dia` : 'não estimado', Boolean(daily)),
-        infoRow('Versão do plano', String(nutrition.version), true),
+        infoRow(
+          'Data fim do plano',
+          plan.training
+            ? br(
+                endDate(
+                  plan.training.startsOn,
+                  plan.training.structure.phases.reduce((sum, phase) => sum + phase.weeks, 0),
+                ),
+              )
+            : '-',
+          true,
+        ),
       ],
     ),
-    ...sectionTitle('Energia do dia', 'Quantas calorias cada tipo de dia pede.', 4),
+    ...sectionTitle('Caloria do dia', 'Quantas calorias cada tipo de dia pede.', 4),
     energyChart(s),
     ...sectionTitle('Sobre o seu plano alimentar'),
     summaryCard({
@@ -1158,7 +1397,6 @@ export function nutritionPlanPdf(plan: PlanRead): Promise<Buffer> {
             ['02', 'Mantenha a proteína distribuída ao longo do dia.'],
             ['03', 'As metas valem pela média da semana, não por um dia perfeito.'],
           ],
-      note: 'Planejado com apoio de inteligência artificial e acompanhado pela equipe de profissionais da MOVIVO (Nutrição, CRN).',
     }),
     ...sectionTitle(
       'Metas do dia',

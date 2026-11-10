@@ -26,6 +26,7 @@ import { ConversationEventsService } from '../../core/event-bus/conversation-eve
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
+import { PlanDocumentRegistry } from '../jobs/plan-document.registry';
 import type { WhatsappJobType, WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { FEEDBACK_BUTTONS } from './feedback';
@@ -41,6 +42,17 @@ export type { WhatsappJobType, WhatsappOutboundJob };
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
 const SENT_MARKER_TTL_SECONDS = 7 * 24 * 3600;
+
+/**
+ * Segmento da chave do marcador de envio. A chave aceita só [A-Za-z0-9._-] e até 64 caracteres:
+ * `dedupeId` longo (ex.: `plan-updated_TRAINING_<uuid>_<id>`) vira um resumo curto e estável, em
+ * vez de derrubar todas as tentativas do envio.
+ */
+export function markerSegment(dedupeId: string): string {
+  return /^[A-Za-z0-9._-]{1,40}$/.test(dedupeId)
+    ? dedupeId
+    : `h.${createHash('sha256').update(dedupeId).digest('hex').slice(0, 32)}`;
+}
 const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
   'CONFIRMATION_CARE',
   'CONVERSATION_MESSAGE',
@@ -62,6 +74,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     private readonly logger: PinoLogger,
     private readonly cipher: HealthCipherService,
     private readonly conversationEvents: ConversationEventsService,
+    private readonly planDocuments: PlanDocumentRegistry,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
   }
@@ -116,7 +129,11 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
     // `|| 'na'` (e não `??`): um `dedupeId` vazio precisa cair no default igual a um ausente;
     // a string vazia viraria segmento inválido de chave Redis e derrubaria todas as tentativas.
-    const markerKey = this.keys.forUser(userId, 'wa-sent', type, String(dedupeId ?? '') || 'na');
+    const marker = markerSegment(String(dedupeId ?? '') || 'na');
+    const markerKey = this.keys.forUser(userId, 'wa-sent', type, marker);
+    /** Marcador de UMA parte (bolha ou PDF): a nova tentativa só reenvia o que faltou. */
+    const partKey = (part: string) =>
+      this.keys.forUser(userId, 'wa-sent', type, `${marker}.${part}`);
 
     // Idempotência: envio já concluído não reenvia (retry/duplicata). check→envia→marca —
     // uma falha no meio deixa o marcador ausente, então o retry reenvia (ao menos uma vez).
@@ -130,9 +147,34 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     // `CONVERSATION_MESSAGE` e `MANUAL_MESSAGE` já são gravados em `conversations` por quem os cria
     // (o worker da conversa e a API do painel); gravar de novo duplicaria.
     const alreadyRecorded = type === 'CONVERSATION_MESSAGE' || type === 'MANUAL_MESSAGE';
-    await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId);
-    for (const document of job.data.documents ?? []) {
-      await this.transport.sendDocument?.(phone, document.url, document.caption, document.fileName);
+    await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId, partKey);
+    for (const [index, document] of (job.data.documents ?? []).entries()) {
+      const key = partKey(`d${index}`);
+      if ((await this.redis.exists(key)) === 1) continue;
+      if (document.plan) {
+        const pdf = await this.planDocuments.render(userId, document.plan);
+        if (!pdf) {
+          this.logger.warn(
+            { userId, plan: document.plan },
+            'protocolo sem versão ativa — PDF não enviado',
+          );
+          continue;
+        }
+        await this.transport.sendDocumentFile?.(
+          phone,
+          pdf.buffer.toString('base64'),
+          document.caption,
+          pdf.fileName,
+        );
+      } else if (document.url) {
+        await this.transport.sendDocument?.(
+          phone,
+          document.url,
+          document.caption,
+          document.fileName,
+        );
+      }
+      await this.redis.set(key, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       await this.recordOutbound(userId, `[PDF] ${document.caption}`, type);
     }
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
@@ -148,14 +190,19 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     phone: string,
     data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback' | 'type'>,
     recordForUserId?: string,
+    partKey?: (part: string) => string,
   ): Promise<void> {
     const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
     for (const [i, bubble] of bubbles.entries()) {
+      // Bolha já enviada numa tentativa anterior (o job falhou depois dela): não repete.
+      const key = partKey?.(`b${i}`);
+      if (key && (await this.redis.exists(key)) === 1) continue;
       const isLast = i === bubbles.length - 1;
       const buttons = isLast
         ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined))
         : undefined;
       await this.transport.send({ to: phone, text: bubble, buttons });
+      if (key) await this.redis.set(key, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       if (recordForUserId) await this.recordOutbound(recordForUserId, bubble, data.type);
     }
   }
@@ -252,7 +299,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'CONFIRMATION':
         return confirmationMessage(await this.resolveFirstName(data.userId));
       case 'CONFIRMATION_CARE':
-        return confirmationCareMessage();
+        return confirmationCareMessage(await this.resolveFirstName(data.userId));
       case 'CONVERSATION_MESSAGE':
       case 'CHECKIN_MESSAGE':
       case 'TRAINING_LINK':

@@ -87,9 +87,9 @@ describe('rotina alimentar', () => {
       ],
     } as MealOption;
     expect(optionLines(option)).toEqual([
-      '- 200 ml de leite, de vaca, desnatado, UHT',
-      '- 2 ovos de ovo, de galinha, mexido',
-      '- 30 g de requeijão, light',
+      '- 200 ml de leite desnatado UHT',
+      '- 2 ovos de ovo de galinha mexido',
+      '- 30 g de requeijão light',
     ]);
   });
 

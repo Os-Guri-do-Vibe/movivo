@@ -2,6 +2,7 @@
 
 import { DECLARED_GOAL_LABELS, type DeclaredGoalKind } from '@movivo/shared';
 
+import { EMPHASIS_ITEMS, EVENT_ITEMS } from './anamnesis-options';
 import { DatePicker } from './date-picker';
 import {
   ChoiceGroup,
@@ -20,8 +21,6 @@ import {
   eventDistanceError,
   goalsComplete,
   lastEventDate,
-  type EventKind,
-  type GoalEmphasis,
   type GoalsDraft,
 } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
@@ -48,32 +47,6 @@ const GOAL_ITEMS = (Object.keys(DECLARED_GOAL_LABELS) as DeclaredGoalKind[]).map
   label: DECLARED_GOAL_LABELS[value],
   description: GOAL_DESCRIPTIONS[value],
 }));
-
-const EMPHASIS_ITEMS: { value: GoalEmphasis; label: string; description: string }[] = [
-  {
-    value: 'AESTHETICS',
-    label: 'Estética e composição corporal',
-    description: 'Como o corpo fica: mais músculo, menos gordura.',
-  },
-  {
-    value: 'PERFORMANCE',
-    label: 'Desempenho',
-    description: 'O que o corpo faz: mais força, velocidade ou resistência.',
-  },
-  {
-    value: 'HEALTH',
-    label: 'Saúde e qualidade de vida',
-    description: 'Como você se sente: energia, disposição e bem-estar.',
-  },
-  { value: 'BALANCED', label: 'Um pouco de tudo', description: 'Sem prioridade entre os três.' },
-];
-
-const EVENT_ITEMS: { value: EventKind; label: string }[] = [
-  { value: 'RUNNING_RACE', label: 'Corrida' },
-  { value: 'HYROX_RACE', label: 'HYROX' },
-  { value: 'STRENGTH_EVENT', label: 'Fisiculturismo ou força' },
-  { value: 'OTHER_EVENT', label: 'Outro esporte' },
-];
 
 /** Hoje, no calendário do aluno: um evento futuro não pode ser anterior a isso. */
 function todayDate(): Date {

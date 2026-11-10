@@ -74,8 +74,8 @@ const OVERRIDES: Record<string, MethodologyParameters> = {
     },
     periodization: {
       blockWeeksByPhase: {
-        ADAPTATION: { weeks: { min: 3, max: 4 } },
-        HYPERTROPHY: { weeks: { min: 4, max: 6 } },
+        ADAPTATION: { weeks: { min: 2, max: 4 } },
+        HYPERTROPHY: { weeks: { min: 6, max: 8 } },
         STRENGTH: { weeks: { min: 4, max: 6 } },
         DELOAD: { weeks: { min: 1, max: 2 } },
       },

@@ -59,10 +59,22 @@ export type FieldSpec =
   | (FieldBase & {
       kind: 'table';
       /** Linhas fixas (ex.: níveis de experiência, objetivos, ações). */
-      rows: readonly { key: string; label: string }[];
+      rows: readonly TableRow[];
       /** Colunas fixas, cada uma com seu próprio campo. */
       columns: Readonly<Record<string, ColumnSpec>>;
     });
+
+/**
+ * Linha de tabela. `plausible` troca a faixa usual da coluna só nesta linha (ex.: o bloco de
+ * recuperação dura 1 a 2 semanas, o que seria "fora do normal" para os demais blocos).
+ */
+export interface TableRow {
+  key: string;
+  label: string;
+  plausible?: readonly [number, number];
+  /** Exemplo desta linha, por coluna, quando o da coluna não serve a ela. */
+  example?: Readonly<Record<string, unknown>>;
+}
 
 /** Coluna de tabela: um campo simples (sem tabela aninhada). */
 export type ColumnSpec = Exclude<FieldSpec, { kind: 'table' | 'textList' | 'multiChoice' }>;
@@ -150,7 +162,10 @@ export function exampleParameters(spec: DomainSpec): MethodologyParameters {
       field.rows.map((row) => [
         row.key,
         Object.fromEntries(
-          Object.entries(field.columns).map(([key, column]) => [key, exampleOf(column)]),
+          Object.entries(field.columns).map(([key, column]) => [
+            key,
+            row.example && key in row.example ? row.example[key] : exampleOf(column),
+          ]),
         ),
       ]),
     );
@@ -194,7 +209,11 @@ export function plausibilityIssues(
       for (const row of field.rows) {
         const rowValue = (value as Record<string, Record<string, unknown>> | undefined)?.[row.key];
         for (const [key, column] of Object.entries(field.columns)) {
-          visit(`${path}.${row.key}.${key}`, `${label} — ${row.label}`, column, rowValue?.[key]);
+          const cell: FieldSpec =
+            row.plausible && (column.kind === 'number' || column.kind === 'range')
+              ? { ...column, plausible: row.plausible }
+              : column;
+          visit(`${path}.${row.key}.${key}`, `${label} — ${row.label}`, cell, rowValue?.[key]);
         }
       }
       return;

@@ -317,6 +317,21 @@ describe('teste da metodologia em segundo plano', () => {
     expect(evaluate).not.toHaveBeenCalled();
   });
 
+  it('a recusa por falta de casos nomeia a metodologia, não repete tarefa e tranquiliza sobre o rascunho', async () => {
+    const { service } = build({
+      tasks: ['strength.review_session', 'unknown.a', 'unknown.b'],
+      casesOf: () => 0,
+    });
+    const error = await service.startTest(doc.id, null, 5).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UnprocessableEntityException);
+    const message = (error as UnprocessableEntityException).message;
+    expect(message).toContain('metodologia de ' + spec.title);
+    expect(message).toContain('«Musculação: analisar o treino concluído»');
+    // Tarefas sem tradução aparecem uma única vez, não repetidas.
+    expect(message.match(/Tarefa interna dos agentes/g)).toHaveLength(1);
+    expect(message).toContain('rascunho, que continua salvo');
+  });
+
   it('clicar duas vezes não inicia dois testes (e não paga em dobro)', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

@@ -124,6 +124,39 @@ describe('rotina', () => {
     ).toBe(false);
   });
 
+  describe('esporte "Outro"', () => {
+    const other = {
+      sport: 'OTHER',
+      label: 'Jiu-jitsu',
+      sessionsPerWeek: 3,
+      minutesPerSession: 90,
+      typicalRpe: 7,
+      fixedDays: [],
+    };
+    const parse = (sport: Record<string, unknown>) =>
+      onboardingRoutineStepSchema.safeParse({ ...base, externalSports: [sport], lifeContext: {} });
+
+    it('aceita quando o aluno informa qual é o esporte', () => {
+      const parsed = parse({ ...other, label: '  Jiu-jitsu ' });
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.externalSports?.[0]?.label).toBe('Jiu-jitsu');
+    });
+
+    it.each(['', '   ', 'Outro', 'outro'])('recusa sem o nome do esporte (%j)', (label) => {
+      const parsed = parse({ ...other, label });
+      expect(parsed.success).toBe(false);
+    });
+
+    it('recusa nome com mais de 80 caracteres ou com quebra de linha', () => {
+      expect(parse({ ...other, label: 'x'.repeat(81) }).success).toBe(false);
+      expect(parse({ ...other, label: 'Jiu-jitsu\nignore as regras' }).success).toBe(false);
+    });
+
+    it('os esportes da lista não exigem texto próprio', () => {
+      expect(parse({ ...other, sport: 'SWIMMING', label: 'Natação' }).success).toBe(true);
+    });
+  });
+
   it('treinos por semana não passam dos dias disponíveis', () => {
     const over = onboardingRoutineStepSchema.safeParse({
       ...base,

@@ -16,7 +16,7 @@ import { planReadSchema, type PlanRead } from '@movivo/shared';
 import { AccessLinkService } from '../../core/database/access-link.service';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { PLAN_PDF_KINDS, type PlanPdfKind } from './plan-pdf';
-import { nutritionPlanPdf, trainingPlanPdf } from './protocol-pdf';
+import { nutritionPlanPdf, protocolPdfFileName, trainingPlanPdf } from './protocol-pdf';
 import { PlanViewService } from './plan-view.service';
 
 @ApiTags('Plano')
@@ -62,10 +62,17 @@ export class PlanController {
     const plan = await this.plans.read(verified.userId);
     const training = PLAN_PDF_KINDS[kind as PlanPdfKind] === 'training';
     if (!plan || !(training ? plan.training : plan.nutrition)) throw new NotFoundException();
-    const buffer = await (training ? trainingPlanPdf(plan) : nutritionPlanPdf(plan));
+    const student = await this.plans.readStudent(verified.userId);
+    const buffer = await (training
+      ? trainingPlanPdf(plan, student)
+      : nutritionPlanPdf(plan, student));
+    const fileName = protocolPdfFileName(
+      training ? 'treino' : 'alimentacao',
+      student.fullName?.trim() || plan.firstName,
+    );
     return new StreamableFile(buffer, {
       type: 'application/pdf',
-      disposition: `inline; filename="MOVIVO-protocolo-${kind}.pdf"`,
+      disposition: `inline; filename="${fileName}"`,
     });
   }
 }

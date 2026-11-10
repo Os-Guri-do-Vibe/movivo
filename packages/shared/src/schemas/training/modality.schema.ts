@@ -76,3 +76,23 @@ export const enduranceTargetSchema = z.discriminatedUnion('by', [
   z.object({ by: z.literal('RPE'), rpe: rangeSchema(0, 10) }),
 ]);
 export type EnduranceTarget = z.infer<typeof enduranceTargetSchema>;
+
+/** Tamanho máximo do nome do esporte quando o aluno escolhe "Outro" e digita qual é. */
+export const OTHER_SPORT_NAME_MAX = 80;
+
+/**
+ * Nome do esporte para exibir e planejar. Em "Outro" o nome é o que o aluno digitou (`label`);
+ * sem texto próprio, ou com o rótulo genérico, volta para o rótulo do tipo.
+ */
+export function externalSportName(sport: ExternalSport, label?: string | null): string {
+  if (sport === 'OTHER') {
+    const name = label?.trim();
+    if (name && name.toLowerCase() !== EXTERNAL_SPORT_LABELS.OTHER.toLowerCase()) return name;
+  }
+  return EXTERNAL_SPORT_LABELS[sport];
+}
+
+/** "Outro" sem o nome do esporte: o aluno não disse qual é. */
+export function isUnnamedOtherSport(sport: ExternalSport, label?: string | null): boolean {
+  return sport === 'OTHER' && externalSportName(sport, label) === EXTERNAL_SPORT_LABELS.OTHER;
+}

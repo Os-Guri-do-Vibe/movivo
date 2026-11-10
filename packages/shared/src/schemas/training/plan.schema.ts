@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { weekdaySchema } from '../anamnesis.schema';
 import { uuidSchema } from '../common.schema';
 import { hyroxSessionContentSchema, runningSessionContentSchema } from './endurance.schema';
 import {
@@ -56,12 +57,40 @@ export const planSessionSchema = z
     /** PSE prevista (CR-10). A carga prevista é PSE × minutos (sRPE). */
     estimatedRpe: rpeSchema,
     content: sessionContentSchema,
+    /**
+     * Dia da semana de cada ocorrência, definido pelo profissional na revisão (a 1ª ocorrência no
+     * 1º dia da lista…). Ausente = o planejador distribui pelos horários do aluno. Esporte
+     * externo usa os dias fixos do próprio perfil e ignora este campo.
+     */
+    weekdays: z.array(weekdaySchema).max(7).optional(),
   })
   .refine((s) => s.content.modality !== 'EXTERNAL_SPORT' || s.priority !== 'KEY', {
     message: 'Esporte externo não é sessão-chave do plano MOVIVO.',
     path: ['priority'],
+  })
+  .refine((s) => !s.weekdays || s.weekdays.length <= s.weeklyFrequency, {
+    message: 'Há mais dias marcados do que vezes por semana.',
+    path: ['weekdays'],
+  })
+  .refine((s) => !s.weekdays || new Set(s.weekdays).size === s.weekdays.length, {
+    message: 'A mesma sessão não pode cair duas vezes no mesmo dia.',
+    path: ['weekdays'],
   });
 export type PlanSession = z.infer<typeof planSessionSchema>;
+
+/**
+ * Mesociclo de musculação: Adaptação (iniciante ou retorno após parada), Hipertrofia, Força ou
+ * Recuperação (deload). A duração de cada um vem da Metodologia publicada (`blockWeeksByPhase`).
+ */
+export const mesocycleSchema = z.enum(['ADAPTATION', 'HYPERTROPHY', 'STRENGTH', 'DELOAD']);
+export type Mesocycle = z.infer<typeof mesocycleSchema>;
+
+export const MESOCYCLE_LABELS: Readonly<Record<Mesocycle, string>> = {
+  ADAPTATION: 'Adaptação',
+  HYPERTROPHY: 'Hipertrofia',
+  STRENGTH: 'Força',
+  DELOAD: 'Recuperação (deload)',
+};
 
 /** Fase do plano (bloco de semanas com um foco). */
 export const planPhaseSchema = z.object({
@@ -70,6 +99,8 @@ export const planPhaseSchema = z.object({
   weeks: z.number().int().min(1).max(16),
   /** Semana de recuperação (deload/redução) ao final da fase. */
   endsWithDeload: z.boolean(),
+  /** Mesociclo de musculação; ausente em planos anteriores e em fases de corrida/HYROX. */
+  mesocycle: mesocycleSchema.optional(),
 });
 export type PlanPhase = z.infer<typeof planPhaseSchema>;
 
@@ -156,6 +187,11 @@ export const sessionAdjustmentSchema = z.object({
       factor: z.number().min(0.2).max(1),
     })
     .optional(),
+  /**
+   * Progressão de volume da corrida na semana (periodização): fração do conteúdo do plano
+   * acrescentada (1 = sem alteração). O plano guarda a semana de partida; as seguintes crescem.
+   */
+  progress: z.object({ factor: z.number().min(1).max(1.5) }).optional(),
   /** Trocas de exercício só nesta ocorrência (catálogo). */
   substitutions: z
     .array(

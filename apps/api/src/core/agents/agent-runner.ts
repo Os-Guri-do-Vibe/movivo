@@ -25,6 +25,7 @@ import {
 } from './agent-profile.reader';
 import type { AgentTask, Violation } from './agent-task';
 import { CONSTITUTION } from './constitution';
+import { fitLongTexts } from './fit-texts';
 
 export interface AgentRunOptions {
   /** Titular sobre quem é a tarefa (nulo em tarefas sem aluno). */
@@ -73,6 +74,20 @@ export function extractJson(text: string): unknown {
   const start = body.search(/[[{]/);
   if (start < 0) throw new SyntaxError('resposta sem JSON');
   return JSON.parse(body.slice(start));
+}
+
+const jsonSchemas = new WeakMap<object, Parameters<typeof fitLongTexts>[1]>();
+
+/** Resposta do modelo como JSON, com os textos longos demais cortados no limite do contrato. */
+function parseOutput<I, O>(task: AgentTask<I, O>, text: string): unknown {
+  let schema = jsonSchemas.get(task);
+  if (!schema) {
+    schema = z.toJSONSchema(task.output, { unrepresentable: 'any' }) as Parameters<
+      typeof fitLongTexts
+    >[1];
+    jsonSchemas.set(task, schema);
+  }
+  return fitLongTexts(extractJson(text), schema);
 }
 
 function zodViolations(error: z.ZodError): Violation[] {
@@ -146,41 +161,66 @@ export class AgentRunner {
     const modelRunIds: string[] = [];
     let costBrl = 0;
     let violations: Violation[] = [];
-    for (let round = 0; round <= task.maxCorrectionRounds; round += 1) {
-      const result = await this.gateway.complete({
-        tier: task.tier,
-        taskId: task.id,
-        promptVersion,
-        userId: options.userId,
-        scrubUser: options.scrubUser,
-        system,
-        messages,
-        json: true,
-        routeOverride: options.routeOverride,
-      });
-      modelRunIds.push(result.modelRunId);
-      costBrl += result.costBrl;
 
-      violations = await this.validate(
-        task,
-        input,
-        result.text,
-        state.slices,
-        methodology.parameters ?? {},
-      );
-      if (violations.length === 0) {
-        return {
-          output: task.output.parse(extractJson(result.text)),
-          modelRunIds,
-          correctionRounds: round,
-          stateVersion: state.version,
-          methodologyVersions: methodology.versions,
-          costBrl,
+    /** As rodadas de correção numa rota (a do tier, ou uma rota fixa). */
+    const attempt = async (route?: TierRoute): Promise<AgentRunResult<O> | null> => {
+      const conversation = [...messages];
+      let previous: string | null = null;
+      for (let round = 0; round <= task.maxCorrectionRounds; round += 1) {
+        const result = await this.gateway.complete({
+          tier: task.tier,
+          taskId: task.id,
           promptVersion,
-        };
+          userId: options.userId,
+          scrubUser: options.scrubUser,
+          system,
+          messages: conversation,
+          json: true,
+          routeOverride: route,
+        });
+        modelRunIds.push(result.modelRunId);
+        costBrl += result.costBrl;
+
+        violations = await this.validate(
+          task,
+          input,
+          result.text,
+          state.slices,
+          methodology.parameters ?? {},
+        );
+        if (violations.length === 0) {
+          return {
+            output: task.output.parse(parseOutput(task, result.text)),
+            modelRunIds,
+            correctionRounds: round,
+            stateVersion: state.version,
+            methodologyVersions: methodology.versions,
+            costBrl,
+            promptVersion,
+          };
+        }
+        // Resposta idêntica à da rodada anterior: o modelo não está corrigindo; insistir só gasta.
+        if (result.text === previous) return null;
+        previous = result.text;
+        conversation.push({ role: 'assistant', content: result.text });
+        conversation.push({ role: 'user', content: correctionMessage(violations) });
       }
-      messages.push({ role: 'assistant', content: result.text });
-      messages.push({ role: 'user', content: correctionMessage(violations) });
+      return null;
+    };
+
+    const first = await attempt(options.routeOverride);
+    if (first) return first;
+    // O modelo principal não convergiu nas rodadas de correção: uma nova tentativa, do zero, com o
+    // modelo reserva do tier (outro fornecedor erra de outro jeito). Rota fixa (avaliação) não troca.
+    // Cada reserva de outro fornecedor, na ordem do tier: fornecedor fora do ar ou sem crédito
+    // (erro na chamada) passa para o próximo.
+    if (!options.routeOverride) {
+      const routes = await this.gateway.routesFor(task.tier);
+      const primary = routes[0]?.vendor;
+      for (const fallback of routes.slice(1).filter((route) => route.vendor !== primary)) {
+        const next = await attempt(fallback).catch(() => null);
+        if (next) return next;
+      }
     }
     throw new AgentTaskError(task.id, violations, modelRunIds);
   }
@@ -194,7 +234,7 @@ export class AgentRunner {
   ): Promise<Violation[]> {
     let raw: unknown;
     try {
-      raw = extractJson(text);
+      raw = parseOutput(task, text);
     } catch {
       return [{ path: '(raiz)', message: 'a resposta não é um JSON válido' }];
     }

@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { z } from 'zod';
 
 import {
@@ -42,6 +43,7 @@ const amendParamsSchema = z.object({
   kind: z.enum(['TRAINING', 'NUTRITION']),
 });
 const reviewHoldSchema = z.object({ active: z.boolean() }).strict();
+const regenerateRequestSchema = z.object({}).strict();
 
 @ApiTags('Admin · Fila de exceções')
 @ApiBearerAuth('access-token')
@@ -140,6 +142,26 @@ export class ExceptionsController {
   ) {
     const { instruction } = parseBody(protocolAdjustmentRequestSchema, raw);
     return this.exceptions.requestAdjustment(user, id, instruction);
+  }
+
+  @Post(':id/regenerate')
+  @RequireCapabilities(Capability.EXCEPTIONS_RESOLVE)
+  // Cada pedido dispara uma geração completa pelos agentes (custo de modelo): teto por cliente.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Regera do zero o protocolo de treino ou alimentar em revisão',
+    description:
+      'Sem corpo. Descarta a proposta atual (não chega ao aluno), encerra o caso e pede aos agentes outro protocolo do mesmo tipo, sem orientação do profissional; o novo volta à Fila como caso novo. Repetir no mesmo caso devolve a mesma resposta (uma geração só). 422 para casos que não são publicação de protocolo (troca, ajuste, falha de geração — esta usa `resolve`); 409 para caso já encerrado de outro jeito ou proposta que não está mais pendente.',
+  })
+  regenerate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() raw: unknown,
+  ) {
+    // Do zero: não há orientação a mandar, e um campo a mais é recusado (não ignorado).
+    parseBody(regenerateRequestSchema, raw ?? {});
+    return this.exceptions.regenerateProtocol(user, id);
   }
 
   @Post(':id/review-hold')

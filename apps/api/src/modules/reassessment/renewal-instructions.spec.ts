@@ -40,6 +40,7 @@ const review: CycleReview = {
   goalStatus: 'CHANGED',
   nextCycle: {
     training: {
+      mesocycle: 'STRENGTH',
       focus: 'Base aeróbia somada à força, rumo aos 10 km',
       volume: 'INCREASE',
       changes: ['Incluir duas corridas leves por semana'],
@@ -83,6 +84,21 @@ describe('renewalOf', () => {
       answers,
     );
     expect(withDeload.trainingInstruction).toContain('mesociclo de recuperação');
+  });
+
+  it('o mesociclo escolhido na reavaliação vai ao planejador e ao briefing', () => {
+    expect(renewal.trainingMesocycle).toBe('STRENGTH');
+    expect(renewal.trainingInstruction).toContain('Mesociclo: Força.');
+  });
+
+  it('análise salva antes do mesociclo existir deixa a escolha para o planejador', () => {
+    const { mesocycle: _omitted, ...legacy } = review.nextCycle.training;
+    const old = renewalOf(
+      { ...review, nextCycle: { ...review.nextCycle, training: legacy as never } },
+      answers,
+    );
+    expect(old.trainingMesocycle).toBeUndefined();
+    expect(old.trainingInstruction).not.toContain('Mesociclo:');
   });
 
   it('as notas da Fila trazem o resumo e os pontos de atenção', () => {

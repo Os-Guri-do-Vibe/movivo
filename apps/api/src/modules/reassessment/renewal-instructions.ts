@@ -2,7 +2,7 @@
  * Do fechamento do ciclo ao briefing dos protocolos novos: texto objetivo para os agentes que
  * montam o treino e a alimentação, e as notas que o profissional vê na Fila. Funções puras.
  */
-import type { CycleReassessmentAnswers } from '@movivo/shared';
+import { MESOCYCLE_LABELS, type CycleReassessmentAnswers } from '@movivo/shared';
 
 import type { PlanRenewal } from '../planning/plan-generation.service';
 import type { CycleReview } from './reassessment-tasks';
@@ -73,6 +73,7 @@ export function renewalOf(review: CycleReview, answers: CycleReassessmentAnswers
 
   const trainingInstruction = [
     'Próximo ciclo de treino (reavaliação do ciclo anterior).',
+    training.mesocycle ? `Mesociclo: ${MESOCYCLE_LABELS[training.mesocycle]}.` : null,
     `Foco: ${training.focus}`,
     `Volume: ${VOLUME_TEXT[training.volume]}.`,
     training.includeDeloadMesocycle
@@ -111,6 +112,8 @@ export function renewalOf(review: CycleReview, answers: CycleReassessmentAnswers
   return {
     trainingInstruction: trainingInstruction.filter(Boolean).join('\n'),
     nutritionInstruction: nutritionInstruction.filter(Boolean).join('\n'),
+    // Análises salvas antes deste campo não têm mesociclo: o planejador decide pela regra.
+    trainingMesocycle: training.mesocycle ?? undefined,
     notes,
   };
 }

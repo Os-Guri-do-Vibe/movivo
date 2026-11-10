@@ -4,6 +4,7 @@
  * (treino, conversa) não importa o domínio WhatsApp; a definição é compartilhada com o painel.
  */
 export { WHATSAPP_BUBBLE_SEPARATOR } from '@movivo/shared';
+import type { PlanDocumentKind } from './plan-document.registry';
 
 export interface WhatsappQuickReplyButton {
   id: string;
@@ -24,6 +25,13 @@ export type WhatsappJobType =
   | 'STAFF_QUEUE_ALERT'
   | 'TYPING';
 
+export type WhatsappDocument = {
+  caption: string;
+} & (
+  | { plan: PlanDocumentKind; fileName?: never; url?: never }
+  | { url: string; fileName: string; plan?: never }
+);
+
 /** Contrato de fila compartilhado: produtores não importam o domínio WhatsApp. */
 export interface WhatsappOutboundJob {
   /**
@@ -42,6 +50,9 @@ export interface WhatsappOutboundJob {
   /** `PHONE_VERIFICATION`: destino e código. Só neste tipo o telefone viaja no payload. */
   phoneNumber?: string;
   code?: string;
-  /** PDFs enviados depois do texto, na ordem (a EvolutionAPI baixa cada um pela URL). */
-  documents?: readonly { url: string; fileName: string; caption: string }[];
+  /**
+   * PDFs enviados depois do texto, na ordem. `plan`: o protocolo vigente do aluno, gerado na hora
+   * do envio e mandado como arquivo (sem link). `url`: legado, a EvolutionAPI baixa pela URL.
+   */
+  documents?: readonly WhatsappDocument[];
 }

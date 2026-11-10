@@ -16,6 +16,7 @@ import type {
   PlanStatus,
   ProtocolReview,
   TrainingPlanStructure,
+  Weekday,
 } from '@movivo/shared';
 
 import type { Violation } from '../../core/agents/agent-task';
@@ -24,6 +25,7 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
+import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { StudentStateReader } from '../student-state/student-state.reader';
@@ -71,6 +73,11 @@ export function protocolKindOf(action: PublishPlanAction): 'TRAINING' | 'NUTRITI
 export type ValidatedProtocol =
   | { kind: 'TRAINING'; structure: TrainingPlanStructure }
   | { kind: 'NUTRITION'; structure: NutritionPlanStructure };
+
+const WEEKDAY_BY_OFFSET: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+const daysBetween = (from: string, to: string) =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 @Injectable()
 export class ProtocolReviewService {
@@ -132,6 +139,7 @@ export class ProtocolReviewService {
     const kind = protocolKindOf(action);
     const plan = await this.plan(userId, action);
     const strategy = await this.strategyOf(userId, plan.goalId);
+    const { view, today } = await this.readState(userId, now);
     const base = {
       planId: plan.id,
       version: plan.version,
@@ -145,12 +153,13 @@ export class ProtocolReviewService {
             studentMessage: strategy.studentMessage,
           }
         : null,
+      // A aprovação ativa o rascunho a partir do dia em que é liberado.
+      startsOn: plan.status === 'ACTIVE' ? plan.startsOn : today,
     };
     if (kind === 'NUTRITION') {
       const structure = plan.structure as NutritionPlanStructure;
-      const { view: stateView } = await this.readState(userId, now);
       const [allowed, inPlan] = await Promise.all([
-        this.foods.forStudent(userId, stateView.dietaryRestrictions),
+        this.foods.forStudent(userId, view.dietaryRestrictions),
         this.foods.byIds(foodIdsOf(structure)),
       ]);
       const foodOptions = [...new Map([...inPlan, ...allowed].map((f) => [f.id, f])).values()]
@@ -167,7 +176,6 @@ export class ProtocolReviewService {
       return { kind, ...base, structure, foodOptions };
     }
     const structure = plan.structure as TrainingPlanStructure;
-    const { view, today } = await this.readState(userId, now);
     const schedule = scheduleContextOf(
       view,
       (await this.methodology.publishedOf('HYBRID'))?.parameters,
@@ -176,10 +184,25 @@ export class ProtocolReviewService {
     const weekStart = mondayOf(today);
     const week = scheduleWeek(structure.sessions, schedule, weekStart, today);
     const byKey = new Map(structure.sessions.map((s) => [s.key, s]));
+    // Semana inteira (sem o corte do dia de início): o desenho que as semanas seguintes repetem.
+    const model = scheduleWeek(structure.sessions, schedule, weekStart, weekStart);
     return {
       kind,
       ...base,
       structure,
+      weekModel: {
+        sessions: model.assignments.map((a) => ({
+          weekday: WEEKDAY_BY_OFFSET[daysBetween(weekStart, a.date)] ?? 'MON',
+          slot: a.slot,
+          sessionKey: a.planSessionKey,
+          occurrence: a.occurrence,
+        })),
+        dropped: model.dropped.map((d) => ({
+          sessionKey: d.planSessionKey,
+          occurrence: d.occurrence,
+          reason: d.reason,
+        })),
+      },
       weekPreview: {
         weekStart,
         startsOn: today,
@@ -205,13 +228,9 @@ export class ProtocolReviewService {
           reason: d.reason,
         })),
       },
-      exerciseOptions: viableStrengthExercises(
-        view,
-        levelOf(view, 'STRENGTH'),
-        this.catalog.getAll(),
-      )
-        .map((e) => ({ id: e.id, name: e.name, measurement: e.measurement ?? 'REPS' }))
-        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+      exerciseOptions: exerciseOptionsOf(
+        viableStrengthExercises(view, levelOf(view, 'STRENGTH'), this.catalog.getAll()),
+      ),
     };
   }
 
@@ -387,6 +406,7 @@ export class ProtocolReviewService {
           version: table.version,
           status: table.status,
           goalId: table.goalId,
+          startsOn: table.startsOn,
           structure: table.structure,
         })
         .from(table)
@@ -399,6 +419,27 @@ export class ProtocolReviewService {
   private strategyOf(userId: string, goalId: string | null) {
     return goalId ? this.db.runAsSystem((tx) => goalStrategyOf(tx, userId, goalId)) : null;
   }
+}
+
+/**
+ * Opções do catálogo para trocar ou adicionar exercício na edição, em ordem alfabética, com o que
+ * a busca da tela filtra (grupos musculares e equipamento, como cadastrados no painel Exercícios).
+ */
+export function exerciseOptionsOf(
+  exercises: readonly Pick<
+    CatalogExercise,
+    'id' | 'name' | 'measurement' | 'muscleGroups' | 'equipment'
+  >[],
+): Extract<ProtocolReview, { kind: 'TRAINING' }>['exerciseOptions'] {
+  return exercises
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      measurement: e.measurement ?? 'REPS',
+      muscleGroups: [...e.muscleGroups],
+      equipment: [...e.equipment],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
 function rejectIfAny(violations: readonly Violation[]): void {

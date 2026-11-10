@@ -54,6 +54,8 @@ function setup(replies: string[]) {
         modelRunId: `run-${requests.length}`,
       };
     }),
+    // Sem modelo reserva: a avaliação mede o modelo do tier, sem segunda tentativa.
+    routesFor: vi.fn(async () => []),
   } as unknown as ModelGateway;
   const registry = new AgentTaskRegistry();
   registry.register(task, [evalCase('dentro-do-limite'), evalCase('estoura-o-limite')], {

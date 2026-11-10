@@ -9,9 +9,14 @@ import { conversations } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
+import { PlanDocumentRegistry, type PlanDocumentKind } from '../jobs/plan-document.registry';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
-import { WhatsappOutboundWorker, type WhatsappOutboundJob } from './whatsapp-outbound.worker';
+import {
+  markerSegment,
+  WhatsappOutboundWorker,
+  type WhatsappOutboundJob,
+} from './whatsapp-outbound.worker';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -77,9 +82,14 @@ function makeWorker(deps: Deps = {}) {
     ),
     runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(staffTx)),
   } as unknown as TenantDatabase;
+  // Marcadores gravados de verdade: uma nova tentativa do mesmo job enxerga o que já saiu.
+  const markers = new Set<string>();
   const redis = {
-    exists: vi.fn(() => Promise.resolve(deps.markerExists ? 1 : 0)),
-    set: vi.fn(() => Promise.resolve('OK')),
+    exists: vi.fn((key: string) => Promise.resolve(deps.markerExists || markers.has(key) ? 1 : 0)),
+    set: vi.fn((key: string) => {
+      markers.add(key);
+      return Promise.resolve('OK');
+    }),
   } as unknown as Redis;
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
   const sendTyping = vi.fn((_to: string) => Promise.resolve());
@@ -89,13 +99,26 @@ function makeWorker(deps: Deps = {}) {
   const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
     Promise.resolve(),
   );
+  const sendDocumentFile = vi.fn(
+    (_to: string, _base64: string, _caption: string, _fileName: string) => Promise.resolve(),
+  );
   const transport = {
     send,
     sendTemplate,
     sendTyping,
     sendDocument,
+    sendDocumentFile,
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
+  const planDocuments = new PlanDocumentRegistry();
+  const render = vi.fn(async (_userId: string, kind: PlanDocumentKind) => ({
+    buffer: Buffer.from(`%PDF-${kind}`),
+    fileName:
+      kind === 'treino'
+        ? 'protocolo-de-treino-ana-souza-lima.pdf'
+        : 'plano-alimentar-ana-souza-lima.pdf',
+  }));
+  planDocuments.register({ render });
   const config = {
     whatsapp: { publicSiteUrl: 'https://movivo.test', staffQueueAlertPhone: deps.staffPhone },
   } as unknown as AppConfigService;
@@ -116,8 +139,19 @@ function makeWorker(deps: Deps = {}) {
       encryptText: vi.fn(async (text: string) => `enc(${text})`),
     } as unknown as HealthCipherService,
     { emitMessage } as unknown as ConversationEventsService,
+    planDocuments,
   );
-  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage };
+  return {
+    worker,
+    send,
+    sendTemplate,
+    sendTyping,
+    sendDocument,
+    sendDocumentFile,
+    render,
+    redis,
+    emitMessage,
+  };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -277,27 +311,30 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
-  it('confirmação: envia uma bolha saudando pelo primeiro nome e marca como enviado', async () => {
+  it('confirmação: três bolhas saudando pelo primeiro nome, citando os dois protocolos, e marca como enviado', async () => {
     const { worker, send, redis } = makeWorker();
 
     const result = await worker.process(job({ type: 'CONFIRMATION' }));
 
     expect(result).toEqual({ status: 'SENT' });
-    expect(send).toHaveBeenCalledOnce();
-    expect(send.mock.calls[0]?.[0].text).toMatch(/^Olá, Ana! 💚/);
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send.mock.calls[0]?.[0].text).toMatch(/^Oi, Ana! Recebemos suas respostas 💚/);
+    expect(send.mock.calls[1]?.[0].text).toMatch(/treino.*alimentar/);
     expect(redis.set).toHaveBeenCalled();
   });
 
   it('confirmação sem nome salvo: saúda genericamente', async () => {
     const { worker, send } = makeWorker({ name: null });
     await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(send.mock.calls[0]?.[0].text).toMatch(/^Olá! 💚/);
+    expect(send.mock.calls[0]?.[0].text).toMatch(/^Oi! Recebemos suas respostas 💚/);
   });
 
   it('variante de cuidado é enviada para PAR-Q de risco', async () => {
     const { worker, send } = makeWorker();
     await worker.process(job({ type: 'CONFIRMATION_CARE' }));
-    expect(send.mock.calls[0]?.[0].text).toMatch(/CREF/);
+    const texts = send.mock.calls.map((call) => call[0].text).join('\n');
+    expect(texts).toMatch(/CREF/);
+    expect(texts).toMatch(/treino e alimentar/);
   });
 
   it('CONVERSATION_MESSAGE: envia o texto em bolhas, com botões de feedback só na última', async () => {
@@ -342,13 +379,82 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(inserted).toHaveLength(2);
   });
 
+  it('PDF do protocolo vai como arquivo gerado na hora (sem link nem URL para baixar)', async () => {
+    const { worker, sendDocumentFile, sendDocument, render } = makeWorker();
+
+    await worker.process(
+      job({
+        type: 'CONVERSATION_MESSAGE',
+        dedupeId: 'plan-ready_x',
+        text: 'Seus protocolos estão prontos.',
+        documents: [
+          { plan: 'treino', caption: 'Treino' },
+          { plan: 'alimentacao', caption: 'Dieta' },
+        ],
+      }),
+    );
+
+    expect(render.mock.calls.map((call) => call[1])).toEqual(['treino', 'alimentacao']);
+    expect(sendDocument).not.toHaveBeenCalled();
+    expect(sendDocumentFile).toHaveBeenCalledTimes(2);
+    const [, base64, caption, fileName] = sendDocumentFile.mock.calls[0] ?? [];
+    expect(Buffer.from(base64 ?? '', 'base64').toString()).toBe('%PDF-treino');
+    expect(caption).toBe('Treino');
+    expect(fileName).toBe('protocolo-de-treino-ana-souza-lima.pdf');
+  });
+
+  it('se o PDF falha, a nova tentativa NÃO repete as mensagens que já saíram (fim do loop)', async () => {
+    const { worker, send, sendDocumentFile } = makeWorker();
+    sendDocumentFile.mockRejectedValueOnce(new Error('EvolutionAPI respondeu 500'));
+    const delivery = job({
+      type: 'CONVERSATION_MESSAGE',
+      dedupeId: 'plan-ready_8ee4daec-03d4-4e42-bb5c-d37725939689_eb0c010b-e785-42b1',
+      text: 'Primeira\n---\nSegunda\n---\nTerceira',
+      documents: [
+        { plan: 'treino', caption: 'Treino' },
+        { plan: 'alimentacao', caption: 'Dieta' },
+      ],
+    });
+
+    await expect(worker.process(delivery)).rejects.toThrow('500');
+    expect(send).toHaveBeenCalledTimes(3);
+
+    // Retry do BullMQ: as 3 bolhas já foram; só os PDFs saem agora.
+    await worker.process(delivery);
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(sendDocumentFile).toHaveBeenCalledTimes(3);
+
+    // Uma terceira execução (duplicata) não manda mais nada.
+    expect(await worker.process(delivery)).toEqual({ status: 'ALREADY_SENT' });
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(sendDocumentFile).toHaveBeenCalledTimes(3);
+  });
+
+  it('dedupeId longo (aviso de protocolo atualizado) não derruba o envio por chave inválida', async () => {
+    const { worker, send } = makeWorker();
+    const result = await worker.process(
+      job({
+        type: 'CONVERSATION_MESSAGE',
+        dedupeId: 'plan-updated_TRAINING_8ee4daec-03d4-4e42-bb5c-d37725939689_1794342430854',
+        text: 'Atualizei seu protocolo de treino.',
+      }),
+    );
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(markerSegment('plan-updated_TRAINING_8ee4daec-03d4-4e42-bb5c-d37725939689_1')).toMatch(
+      /^h\.[0-9a-f]{32}$/,
+    );
+    expect(markerSegment('plan-ready_1')).toBe('plan-ready_1');
+  });
+
   it('a mensagem enviada entra no histórico de conversas e o painel é avisado', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker, emitMessage } = makeWorker({ inserted });
 
     await worker.process(job({ type: 'CONFIRMATION' }));
 
-    expect(inserted).toHaveLength(1);
+    // Uma linha do histórico por bolha enviada (a confirmação tem três).
+    expect(inserted).toHaveLength(3);
     expect(inserted[0]?.table).toBe(conversations);
     expect(inserted[0]?.values).toMatchObject({
       userId: USER_ID,
@@ -385,7 +491,7 @@ describe('WhatsappOutboundWorker.process', () => {
     const result = await worker.process(job({ type: 'CONFIRMATION' }));
 
     expect(result).toEqual({ status: 'SENT' });
-    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledTimes(3);
     expect(redis.set).toHaveBeenCalled();
     expect(emitMessage).not.toHaveBeenCalled();
   });

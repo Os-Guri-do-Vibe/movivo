@@ -14,6 +14,7 @@ export const runningSessionKindSchema = z.enum([
   'EASY',
   'RECOVERY',
   'LONG',
+  'MODERATE',
   'TEMPO',
   'THRESHOLD',
   'INTERVALS',
@@ -29,6 +30,7 @@ export const RUNNING_SESSION_KIND_LABELS: Readonly<Record<RunningSessionKind, st
   EASY: 'Rodagem leve',
   RECOVERY: 'Regenerativo',
   LONG: 'Longão',
+  MODERATE: 'Contínuo moderado',
   TEMPO: 'Ritmo sustentado',
   THRESHOLD: 'Limiar',
   INTERVALS: 'Intervalado',
@@ -38,6 +40,55 @@ export const RUNNING_SESSION_KIND_LABELS: Readonly<Record<RunningSessionKind, st
   TEST: 'Teste',
   RACE: 'Prova',
 };
+
+export const runningWorkoutTypeSchema = z.enum([
+  // 1. Velocidade e potência
+  'SPRINT_INTERVALS',
+  'SHORT_SPRINTS',
+  'PROGRESSIVE_ACCELERATIONS',
+  'STRIDES',
+  'TOP_SPEED',
+  // 2. Limiar e resistência em ritmos elevados
+  'LACTATE_THRESHOLD',
+  'TEMPO_RUN',
+  'CRUISE_INTERVALS',
+  'RACE_PACE_RUN',
+  'STEADY_STATE',
+  // 3. Desenvolvimento aeróbio
+  'RECOVERY_RUN',
+  'EASY_RUN',
+  'MODERATE_CONTINUOUS',
+  'LONG_RUN',
+  'PROGRESSIVE_LONG_RUN',
+  'FAST_FINISH_LONG_RUN',
+  // 4. Intervalados e variações de estímulo
+  'AEROBIC_INTERVALS',
+  'VO2MAX_INTERVALS',
+  'RUNNING_HIIT',
+  'FARTLEK',
+  'VARIABLE_INTERVALS',
+  'REPETITION_TRAINING',
+  // 5. Terrenos e condições específicas
+  'HILL_REPEATS',
+  'CONTINUOUS_UPHILL',
+  'DOWNHILL_RUN',
+  'TRAIL_RUN',
+  'SAND_RUN',
+  'TREADMILL_RUN',
+  // 6. Técnica e neuromuscular
+  'RUNNING_DRILLS',
+  'COORDINATION',
+  'CADENCE',
+  'RUNNING_ECONOMY',
+  // 7. Provas e competição
+  'RACE_SIMULATION',
+  'RACE_PACE_REPEATS',
+  'NEGATIVE_SPLIT',
+  'POSITIVE_SPLIT',
+  'PACING',
+  'HYROX_TRANSITION',
+]);
+export type RunningWorkoutType = z.infer<typeof runningWorkoutTypeSchema>;
 
 export const runningSegmentTypeSchema = z.enum([
   'WARMUP',
@@ -63,10 +114,13 @@ export type RunningSegment = z.infer<typeof runningSegmentSchema>;
 
 export const runningSessionContentSchema = z.object({
   modality: z.literal('RUNNING'),
+  /** Classe do treino (leve, longão, limiar…): é a que a metodologia e a agenda enxergam. */
   kind: runningSessionKindSchema,
+  /** Treino específico do catálogo MOVIVO; ausente em planos anteriores ao catálogo. */
+  workoutType: runningWorkoutTypeSchema.optional(),
   segments: z.array(runningSegmentSchema).min(1).max(20),
-  /** Terreno sugerido quando importa para o estímulo (subida, pista, esteira). */
-  terrain: z.enum(['ANY', 'FLAT', 'HILLS', 'TRACK', 'TREADMILL', 'TRAIL']).default('ANY'),
+  /** Terreno sugerido quando importa para o estímulo (subida, pista, esteira, areia). */
+  terrain: z.enum(['ANY', 'FLAT', 'HILLS', 'TRACK', 'TREADMILL', 'TRAIL', 'SAND']).default('ANY'),
 });
 export type RunningSessionContent = z.infer<typeof runningSessionContentSchema>;
 

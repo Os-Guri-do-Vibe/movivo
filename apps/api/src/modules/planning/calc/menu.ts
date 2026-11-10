@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   mealSlotSchema,
   mealUnitSchema,
+  normalizeFoodName,
   type MealItem,
   type MealOption,
   type MealSwap,
@@ -221,12 +222,9 @@ const CATEGORY_CAP: ReadonlyArray<[string, number]> = [
   ['Gorduras e óleos', 4],
 ];
 
-/** Nome da TACO sem ruído de tabela ("cozido/10minutos"). */
+/** Nome da TACO como se fala ("Ovo, de galinha, inteiro, cozido" → "Ovo de galinha cozido"). */
 export function cleanFoodName(name: string): string {
-  return name
-    .replace(/\s*\/\s*\d+\s*minutos/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return normalizeFoodName(name);
 }
 
 /** Palavras do texto livre do aluno ("arroz, frango e banana") com 3 letras ou mais. */

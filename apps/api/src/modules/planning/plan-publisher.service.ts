@@ -33,6 +33,7 @@ import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { occurrencesOf, windowsByWeekday } from './calc/plan-check';
 import { sessionLoad } from './calc/load';
 import type { HybridRules } from './calc/params';
+import { runningProgressionAdjustment } from './calc/rollover';
 import { addDays, mondayOf, planWeek, type WeekPlan } from './calc/week-planner';
 import type { StrategyOutput } from './tasks/strategy';
 
@@ -290,6 +291,7 @@ export class PlanPublisher {
             slot: assignment.slot,
             changeSource: 'PLANNER' as const,
             decisionId: input.decisionId,
+            ...progressionOf(input.structure.sessions, assignment.planSessionKey, week),
           })),
         );
         scheduled += result.assignments.length;
@@ -363,6 +365,17 @@ export class PlanPublisher {
       payload: { planId: input.planId, version: plan.version },
     });
   }
+}
+
+/** Progressão de volume da corrida (periodização) da semana do plano, se houver. */
+function progressionOf(
+  sessions: TrainingPlanStructure['sessions'],
+  key: string,
+  weekIndex: number,
+): { adjustment: NonNullable<ReturnType<typeof runningProgressionAdjustment>> } | object {
+  const session = sessions.find((s) => s.key === key);
+  const adjustment = session ? runningProgressionAdjustment(session, weekIndex, false) : undefined;
+  return adjustment ? { adjustment } : {};
 }
 
 function modalitiesOf(structure: TrainingPlanStructure): string {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExceptionListItem } from '@movivo/shared';
@@ -53,10 +53,10 @@ describe('ExceptionsQueue', () => {
     expect(await screen.findByText('Somente leitura para o seu papel.')).toBeVisible();
   });
 
-  it('a Fila não tem abas: pede só o que está em aberto', async () => {
+  it('a Fila usa o painel próprio (um item por aluno), sem abas', async () => {
     getExceptions.mockResolvedValue([]);
     render(<ExceptionsQueue scope="QUEUE" />);
-    expect(await screen.findByText(/Nenhum item na fila no seu domínio/)).toBeVisible();
+    expect(await screen.findByText('Fila em dia')).toBeVisible();
     expect(screen.queryByRole('tablist')).toBeNull();
     expect(getExceptions).toHaveBeenCalledWith(undefined, 'QUEUE', expect.anything());
   });
@@ -72,51 +72,5 @@ describe('ExceptionsQueue', () => {
       expect(getExceptions).toHaveBeenLastCalledWith('RESOLVED', 'ALERTS', expect.anything()),
     );
     expect(await screen.findByText(/Nenhum caso resolvido no seu domínio/)).toBeVisible();
-  });
-
-  it('separa a revisão obrigatória da opcional e mostra o prazo do envio automático', async () => {
-    getExceptions.mockResolvedValue([
-      item({
-        id: '33333333-3333-4333-8333-333333333333',
-        kind: 'PROTOCOL_REVIEW',
-        priority: 'HIGH',
-        domain: 'TRAINING',
-        studentName: 'Bruno Lima',
-        reviewUrgency: 'MANDATORY',
-      }),
-      item({
-        id: '44444444-4444-4444-8444-444444444444',
-        kind: 'PROTOCOL_REVIEW',
-        priority: 'NORMAL',
-        domain: 'NUTRITION',
-        studentName: 'Carla Dias',
-        reviewUrgency: 'OPTIONAL',
-        autoReleaseAt: new Date(Date.now() + 72 * 60_000).toISOString(),
-      }),
-    ]);
-    render(<ExceptionsQueue scope="QUEUE" />);
-
-    const mandatory = await screen.findByRole('region', { name: 'Revisão humana obrigatória' });
-    const optional = screen.getByRole('region', { name: 'Revisão humana opcional' });
-    expect(within(mandatory).getByRole('link', { name: /Bruno Lima/ })).toHaveTextContent(
-      'Revisão obrigatória',
-    );
-    expect(within(mandatory).queryByText(/Carla Dias/)).toBeNull();
-    const carla = within(optional).getByRole('link', { name: /Carla Dias/ });
-    expect(carla).toHaveAttribute('href', '/dashboard/fila/44444444-4444-4444-8444-444444444444');
-    expect(carla).toHaveTextContent('Envio automático em 1 h 12 min');
-    expect(within(optional).queryByText(/Bruno Lima/)).toBeNull();
-  });
-
-  it('na Fila, o caso sem urgência de revisão (geração que falhou) fica na obrigatória', async () => {
-    getExceptions.mockResolvedValue([item({ kind: 'DECISION_FAILURE', domain: 'TRAINING' })]);
-    render(<ExceptionsQueue scope="QUEUE" />);
-    const mandatory = await screen.findByRole('region', { name: 'Revisão humana obrigatória' });
-    expect(within(mandatory).getByRole('link', { name: /Ana Souza/ })).toBeVisible();
-    expect(
-      within(screen.getByRole('region', { name: 'Revisão humana opcional' })).getByText(
-        /Nada aguardando a janela de revisão/,
-      ),
-    ).toBeVisible();
   });
 });

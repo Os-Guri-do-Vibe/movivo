@@ -2,7 +2,7 @@
  * Continuidade da agenda: o plano publica 2 semanas e uma rotina diária mantém a agenda sempre
  * 2 semanas à frente. Funções puras: semana do plano e semana leve (deload) de cada fase.
  */
-import type { PlanPhase, SessionAdjustment } from '@movivo/shared';
+import type { PlanPhase, PlanSession, SessionAdjustment } from '@movivo/shared';
 
 import { addDays, mondayOf } from './week-planner';
 
@@ -42,6 +42,32 @@ export function deloadAdjustment(estimatedMinutes: number): SessionAdjustment {
       factor: DELOAD_FACTOR,
     },
   };
+}
+
+/** Crescimento semanal do volume da corrida dentro do plano (metade do teto de 10% da metodologia). */
+export const RUNNING_WEEKLY_PROGRESS = 0.05;
+/** Teto do acúmulo no plano; o longão cresce menos para não passar do limite de duração. */
+export const RUNNING_PROGRESS_CAP = 1.2;
+export const RUNNING_LONG_PROGRESS_CAP = 1.1;
+
+/**
+ * Periodização da corrida: a semana `weekIndex` (0 = primeira do plano) cresce 5% sobre a anterior
+ * até o teto. O plano guarda o volume da primeira semana, já validado contra o que o aluno corre
+ * hoje; a agenda sobe daí. Só planos com treino do catálogo (`workoutType`) progridem, e a semana
+ * leve (deload) nunca cresce.
+ */
+export function runningProgressionAdjustment(
+  session: Pick<PlanSession, 'content'>,
+  weekIndex: number,
+  deload: boolean,
+): SessionAdjustment | undefined {
+  const content = session.content;
+  if (deload || weekIndex <= 0 || content.modality !== 'RUNNING' || !content.workoutType) {
+    return undefined;
+  }
+  const cap = content.kind === 'LONG' ? RUNNING_LONG_PROGRESS_CAP : RUNNING_PROGRESS_CAP;
+  const factor = Math.min(cap, 1 + RUNNING_WEEKLY_PROGRESS * weekIndex);
+  return factor > 1 ? { progress: { factor: Math.round(factor * 100) / 100 } } : undefined;
 }
 
 /** Segundas-feiras que a agenda precisa cobrir a partir de hoje. */

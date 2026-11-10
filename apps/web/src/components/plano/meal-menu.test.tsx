@@ -50,7 +50,7 @@ describe('MealMenu', () => {
     expect(screen.getByText('654 kcal · 33 g de proteína')).toBeVisible();
     expect(screen.getByText('3 ovos')).toBeVisible();
     expect(screen.getByText('100 g')).toBeVisible();
-    expect(screen.getByText(/Ou troque por: 140 g de Frango, grelhado/)).toBeVisible();
+    expect(screen.getByText(/Ou troque por: 140 g de Frango grelhado/)).toBeVisible();
     expect(screen.getByText(/Custo estimado da opção/)).toHaveTextContent('R$');
   });
 

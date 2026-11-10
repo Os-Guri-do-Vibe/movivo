@@ -32,6 +32,7 @@ import {
   trainingVenueSchema,
   VENUES_BY_MODALITY,
 } from '../student/student-state.schema';
+import { isUnnamedOtherSport } from '../training/modality.schema';
 
 const freeText = (max: number) => z.string().trim().max(max).optional();
 
@@ -54,7 +55,21 @@ export type OnboardingGoalsStep = z.infer<typeof onboardingGoalsStepSchema>;
 
 // --- 3. Seu treino com a MOVIVO -----------------------------------------------------------
 
-const externalSportsSchema = z.array(externalSportPracticeSchema).max(3);
+/**
+ * Em "Outro" o aluno digita qual é o esporte (vai em `label`): sem o nome, a MOVIVO não sabe o
+ * que planejar em volta. Texto de uma linha, sem caracteres de controle.
+ */
+const externalSportInputSchema = externalSportPracticeSchema
+  .refine((s) => !isUnnamedOtherSport(s.sport, s.label), {
+    message: 'Informe qual é o esporte.',
+    path: ['label'],
+  })
+  .refine((s) => !/\p{Cc}/u.test(s.label), {
+    message: 'O nome do esporte não pode ter quebra de linha ou caracteres especiais de controle.',
+    path: ['label'],
+  });
+
+const externalSportsSchema = z.array(externalSportInputSchema).max(3);
 
 export const onboardingModalitiesStepSchema = z
   .object({

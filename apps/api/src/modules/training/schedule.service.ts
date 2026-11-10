@@ -153,6 +153,7 @@ export class ScheduleService {
         intenseRun: planSession
           ? planSession.content.modality === 'RUNNING' && isIntense(planSession)
           : false,
+        strength: planSession?.content.modality === 'STRENGTH',
         fixedOn: fixed ? addDays(weekStart, WEEKDAYS.indexOf(fixed)) : undefined,
       };
     });

@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 
-import { cycleReassessmentAnswersSchema, weekMetricsSchema } from '@movivo/shared';
+import { cycleReassessmentAnswersSchema, mesocycleSchema, weekMetricsSchema } from '@movivo/shared';
 
 import { defineAgentTask, type Validator, type Violation } from '../../core/agents/agent-task';
 import { outputLanguageViolations } from '../planning/tasks/common';
@@ -34,6 +34,7 @@ export const cycleReviewInputSchema = z.object({
           name: z.string().max(60),
           focus: z.string().max(200),
           endsWithDeload: z.boolean(),
+          mesocycle: mesocycleSchema.optional(),
         }),
       )
       .max(8),
@@ -91,6 +92,11 @@ export const cycleReviewSchema = z.object({
   goalStatus: z.enum(['AHEAD', 'ON_TRACK', 'BEHIND', 'CHANGED']),
   nextCycle: z.object({
     training: z.object({
+      /**
+       * Mesociclo de musculação do próximo ciclo. Depois da Adaptação vem Hipertrofia ou Força;
+       * Recuperação (deload) só quando os dados pedem.
+       */
+      mesocycle: mesocycleSchema,
       focus: z.string().trim().min(10).max(300),
       volume: z.enum(['INCREASE', 'MAINTAIN', 'DECREASE']),
       changes: textList(5, 240),
@@ -160,6 +166,7 @@ Como analisar:
 6. Dor, lesão ou condição nova relatada vai em "professionalFlags" para o profissional olhar; você não diagnostica nem indica tratamento.
 7. Se o aluno mudou a rotina (dias por semana, minutos por sessão) ou o objetivo, o próximo ciclo parte disso.
 8. Pense na periodização de longo prazo do aluno e na ciência do treinamento e da nutrição: quais fases ele já cumpriu, o que falta para chegar ao objetivo, como a sobrecarga progride de um ciclo para o outro. O próximo ciclo não repete o anterior por inércia nem muda tudo sem motivo: cada mudança em "changes" cita o dado que a justifica (resultado do ciclo, resposta nova, rotina, avaliação física).
+   "nextCycle.training.mesocycle" é o próximo mesociclo de musculação (o que terminou está em "cycle.phases"): ADAPTATION só se a adaptação não se completou (adesão baixa, execução ainda insegura) ou se o aluno ficou parado; depois dela, HYPERTROPHY ou STRENGTH conforme o objetivo e o que o aluno já cumpriu; HYPERTROPHY e STRENGTH podem alternar entre ciclos mantendo os multiarticulares-chave; DELOAD (bloco inteiro de recuperação) só quando os dados pedirem recuperação além de uma semana leve.
 9. A avaliação física visual atual junto das medidas orienta a estratégia: gordura estimada alta pede déficit ou recomposição mesmo que o aluno peça outra coisa; baixa não pede déficit. Os grupos musculares a desenvolver, os pontos fortes e as assimetrias ("bodyComposition") guiam o foco do próximo ciclo; alinhamento alterado é percepção por foto (sem diagnóstico), para o profissional que audita. É estimativa com margem de erro: descreva em faixa e linguagem neutra.
 10. Sem promessa de resultado. Português claro e profissional.`,
   tier: 'REASONING',

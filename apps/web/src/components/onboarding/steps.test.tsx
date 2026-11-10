@@ -9,6 +9,7 @@ import {
   EMPTY_PAIN,
   EMPTY_PREFERENCES,
   EMPTY_ROUTINE,
+  newExternalSport,
 } from './onboarding-drafts';
 import { StepBody } from './step-body';
 import { StepGoals } from './step-goals';
@@ -240,7 +241,7 @@ describe('Continuar só habilita com o essencial', () => {
     const user = userEvent.setup();
     const data = structuredClone(EMPTY_ROUTINE);
     data.practicesOtherSport = true;
-    data.externalSports = [{ sport: null, sessions: '', duration: '', rpe: null, fixedDays: [] }];
+    data.externalSports = [newExternalSport()];
     render(<StepRoutine {...routineProps} data={data} />);
     expect(screen.queryByText('Como você chama essa prática?')).not.toBeInTheDocument();
     await user.click(screen.getByRole('combobox', { name: 'Qual esporte?' }));
@@ -260,6 +261,49 @@ describe('Continuar só habilita com o essencial', () => {
     expect(
       screen.getByRole('combobox', { name: 'Quanto esse esporte costuma te cansar?' }),
     ).toBeInTheDocument();
+  });
+
+  it('semana: ao escolher "Outro" abre o campo para dizer qual é o esporte, e só então libera', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const data = structuredClone(EMPTY_ROUTINE);
+    data.practicesOtherSport = true;
+    data.externalSports = [newExternalSport()];
+    const { rerender } = render(<StepRoutine {...routineProps} data={data} onChange={onChange} />);
+    expect(screen.queryByLabelText('Qual esporte você pratica?')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('combobox', { name: 'Qual esporte?' }));
+    await user.click(screen.getByRole('option', { name: 'Outro' }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        externalSports: [expect.objectContaining({ sport: 'OTHER', sportOther: '' })],
+      }),
+    );
+    rerender(
+      <StepRoutine
+        {...routineProps}
+        onChange={onChange}
+        data={{
+          ...data,
+          externalSports: [{ ...newExternalSport(), sport: 'OTHER', sportOther: '' }],
+        }}
+      />,
+    );
+    expect(screen.getByLabelText('Qual esporte você pratica?')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Qual esporte você pratica?'));
+    await user.tab(); // o erro só aparece depois de sair do campo
+    expect(screen.getByText('Informe qual é o esporte.')).toBeInTheDocument();
+    rerender(
+      <StepRoutine
+        {...routineProps}
+        onChange={onChange}
+        data={{
+          ...data,
+          externalSports: [{ ...newExternalSport(), sport: 'OTHER', sportOther: 'Vôlei' }],
+        }}
+      />,
+    );
+    expect(screen.getByLabelText('Qual esporte você pratica?')).toHaveValue('Vôlei');
+    expect(screen.queryByText('Informe qual é o esporte.')).not.toBeInTheDocument();
   });
 
   it('rotina: sem dia marcado não continua; completa, continua', () => {

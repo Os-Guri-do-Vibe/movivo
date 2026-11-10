@@ -9,7 +9,7 @@ import { releaseCountdown } from '@/lib/exception-copy';
 import { StatusBadge } from './control-center-table';
 
 /** Relógio que se atualiza sozinho, para a contagem regressiva não ficar parada na tela. */
-function useNow(intervalMs = 30_000): Date {
+export function useNow(intervalMs = 30_000): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), intervalMs);

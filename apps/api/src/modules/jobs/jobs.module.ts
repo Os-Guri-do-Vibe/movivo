@@ -18,6 +18,7 @@
 import { Module, type OnApplicationShutdown } from '@nestjs/common';
 
 import { DEAD_LETTER_HANDLER, LoggingDeadLetterHandler } from './dlq.handler';
+import { PlanDocumentRegistry } from './plan-document.registry';
 import { QueueManager } from './queue-manager.service';
 import { SanityWorker } from './sanity.worker';
 import { WorkerFactory } from './worker.factory';
@@ -27,9 +28,10 @@ import { WorkerFactory } from './worker.factory';
     QueueManager,
     WorkerFactory,
     SanityWorker,
+    PlanDocumentRegistry,
     { provide: DEAD_LETTER_HANDLER, useClass: LoggingDeadLetterHandler },
   ],
-  exports: [QueueManager, WorkerFactory],
+  exports: [QueueManager, WorkerFactory, PlanDocumentRegistry],
 })
 export class JobsModule implements OnApplicationShutdown {
   constructor(

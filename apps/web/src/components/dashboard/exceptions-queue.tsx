@@ -4,13 +4,11 @@
  * Dois painéis sobre os mesmos casos, só do domínio do conselho do profissional (CREF treino,
  * CRN nutrição, CRM médico):
  * - Fila do Profissional (`QUEUE`): o que a IA gerou ou mudou no protocolo do aluno, e a geração
- *   que falhou. Duas seções: revisão obrigatória (o aluno só recebe depois que um profissional
- *   liberar) e opcional (o profissional pode revisar antes; sem ação, é liberado sozinho ao fim
- *   da janela: 2 h para protocolo, 5 min para troca de exercício);
+ *   que falhou, um item por aluno — desenhada em `professional-queue.tsx`;
  * - Alertas (`ALERTS`): todo o resto que pede um profissional (segurança, pedido de revisão do
  *   aluno, exame, conversa assumida, sem política aplicável).
  */
-import { Bell, ClipboardCheck } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 import type { ExceptionListItem, ExceptionScope } from '@movivo/shared';
@@ -22,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { StatusBadge } from './control-center-table';
 import type { StatusTone } from './control-center-table';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
+import { ProfessionalQueue } from './professional-queue';
 import { ReviewUrgencyBadge } from './review-urgency';
 
 type Status = 'OPEN' | 'IN_REVIEW' | 'RESOLVED';
@@ -39,33 +38,25 @@ const TONE: Record<ExceptionListItem['priority'], StatusTone> = {
   LOW: 'quiet',
 };
 
-const COPY: Record<
-  ExceptionScope,
-  { title: string; basePath: string; intro: string; empty: string }
-> = {
-  QUEUE: {
-    title: 'Fila do Profissional',
-    basePath: '/dashboard/fila',
-    intro:
-      'Auditoria do que os agentes criaram e alteraram nos protocolos: montagem, trocas, ajustes semanais e o próximo ciclo. Os agentes especialistas acompanham o aluno e a qualidade chega ao aluno por eles; aqui você confere e pode ajustar. Se a revisão for opcional e ninguém agir, o sistema libera sozinho ao fim da janela; a revisão só é obrigatória para alunos com PAR-Q de risco ou quando a geração falha. Cada profissional vê o domínio do seu conselho.',
-    empty: 'Nenhum item na fila no seu domínio.',
-  },
-  ALERTS: {
-    title: 'Alertas',
-    basePath: '/dashboard/alertas',
-    intro:
-      'Monitoramento dos casos extremos e de proteção: sinais de segurança, encaminhamentos feitos pelos agentes (dor, condição nova, queda forte de constância), pedidos de revisão do aluno, exames e conversas assumidas. Os agentes seguem acompanhando o aluno; o profissional entra quando o caso pede. Cada profissional vê o domínio do seu conselho.',
-    empty: 'Nenhum alerta no seu domínio.',
-  },
-};
+const ALERTS_COPY = {
+  title: 'Alertas',
+  basePath: '/dashboard/alertas',
+  intro:
+    'Monitoramento dos casos extremos e de proteção: sinais de segurança, encaminhamentos feitos pelos agentes (dor, condição nova, queda forte de constância), pedidos de revisão do aluno, exames e conversas assumidas. Os agentes seguem acompanhando o aluno; o profissional entra quando o caso pede. Cada profissional vê o domínio do seu conselho.',
+  empty: 'Nenhum alerta no seu domínio.',
+} as const;
 
+/** `QUEUE` → Fila do Profissional (um item por aluno); `ALERTS` → lista de casos com abas. */
 export function ExceptionsQueue({ scope }: { scope: ExceptionScope }) {
-  const copy = COPY[scope];
+  return scope === 'QUEUE' ? <ProfessionalQueue /> : <AlertsQueue />;
+}
+
+function AlertsQueue() {
+  const copy = ALERTS_COPY;
   const [status, setStatus] = useState<Status>('OPEN');
-  // A Fila mostra só o que está em aberto (sem abas); o histórico fica nos Alertas.
   const load = useCallback(
-    (signal?: AbortSignal) => getExceptions(scope === 'QUEUE' ? undefined : status, scope, signal),
-    [status, scope],
+    (signal?: AbortSignal) => getExceptions(status, 'ALERTS', signal),
+    [status],
   );
   const { data, error, forbidden, loading, refresh, updatedAt } = useControlCenterResource(load);
 
@@ -73,7 +64,7 @@ export function ExceptionsQueue({ scope }: { scope: ExceptionScope }) {
     <section className="space-y-5" aria-labelledby="fila-titulo">
       <SectorHeader
         title={copy.title}
-        icon={scope === 'QUEUE' ? ClipboardCheck : Bell}
+        icon={Bell}
         updatedAt={updatedAt}
         refreshing={loading}
         onRefresh={() => void refresh()}
@@ -81,27 +72,25 @@ export function ExceptionsQueue({ scope }: { scope: ExceptionScope }) {
       <p id="fila-titulo" className="max-w-prose text-label text-muted-foreground">
         {copy.intro}
       </p>
-      {scope === 'ALERTS' ? (
-        <div role="tablist" aria-label="Situação do caso" className="flex gap-2">
-          {TABS.map((tab) => (
-            <button
-              key={tab.status}
-              role="tab"
-              type="button"
-              aria-selected={status === tab.status}
-              onClick={() => setStatus(tab.status)}
-              className={cn(
-                'rounded-full border px-4 py-1.5 text-label',
-                status === tab.status
-                  ? 'border-transparent bg-accent text-accent-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <div role="tablist" aria-label="Situação do caso" className="flex gap-2">
+        {TABS.map((tab) => (
+          <button
+            key={tab.status}
+            role="tab"
+            type="button"
+            aria-selected={status === tab.status}
+            onClick={() => setStatus(tab.status)}
+            className={cn(
+              'rounded-full border px-4 py-1.5 text-label',
+              status === tab.status
+                ? 'border-transparent bg-accent text-accent-foreground'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
       <ResourceState
         loading={loading && !data}
         error={error}
@@ -116,66 +105,7 @@ export function ExceptionsQueue({ scope }: { scope: ExceptionScope }) {
           {status === 'RESOLVED' ? 'Nenhum caso resolvido no seu domínio.' : copy.empty}
         </p>
       ) : null}
-      {data && data.length > 0 && scope === 'ALERTS' ? (
-        <CaseList items={data} basePath={copy.basePath} />
-      ) : null}
-      {data && data.length > 0 && scope === 'QUEUE' ? (
-        <>
-          <QueueSection
-            title="Revisão humana obrigatória"
-            description="O aluno só recebe depois que um profissional revisar e liberar."
-            items={data.filter((item) => item.reviewUrgency !== 'OPTIONAL')}
-            emptyText="Nenhum caso obrigatório em aberto."
-            basePath={copy.basePath}
-          />
-          <QueueSection
-            title="Revisão humana opcional"
-            description="Você pode revisar e ajustar antes. Sem ação, é liberado automaticamente ao fim da janela (2 h para protocolo, 5 min para troca de exercício)."
-            items={data
-              .filter((item) => item.reviewUrgency === 'OPTIONAL')
-              .sort(
-                (a, b) =>
-                  new Date(a.autoReleaseAt ?? a.createdAt).getTime() -
-                  new Date(b.autoReleaseAt ?? b.createdAt).getTime(),
-              )}
-            emptyText="Nada aguardando a janela de revisão."
-            basePath={copy.basePath}
-          />
-        </>
-      ) : null}
-    </section>
-  );
-}
-
-function QueueSection({
-  title,
-  description,
-  items,
-  emptyText,
-  basePath,
-}: {
-  title: string;
-  description: string;
-  items: ExceptionListItem[];
-  emptyText: string;
-  basePath: string;
-}) {
-  return (
-    <section className="space-y-3" aria-label={title}>
-      <div>
-        <h2 className="text-h3 font-semibold">
-          {title}{' '}
-          <span className="text-label font-normal text-muted-foreground">({items.length})</span>
-        </h2>
-        <p className="max-w-prose text-xs text-muted-foreground">{description}</p>
-      </div>
-      {items.length > 0 ? (
-        <CaseList items={items} basePath={basePath} />
-      ) : (
-        <p className="rounded-xl border border-border bg-card p-4 text-label text-muted-foreground">
-          {emptyText}
-        </p>
-      )}
+      {data && data.length > 0 ? <CaseList items={data} basePath={copy.basePath} /> : null}
     </section>
   );
 }

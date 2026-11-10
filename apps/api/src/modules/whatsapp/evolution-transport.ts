@@ -504,6 +504,37 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
     await this.registerSent(res);
   }
 
+  /** PDF como base64 (`fileName` é obrigatório nesse modo, senão a EvolutionAPI recusa). */
+  async sendDocumentFile(
+    to: string,
+    base64: string,
+    caption: string,
+    fileName: string,
+  ): Promise<void> {
+    if (!this.apiKey) {
+      this.logger.info('envio de WhatsApp simulado (sem credencial EvolutionAPI)');
+      return;
+    }
+    const instanceName = await this.currentInstanceName();
+    if (!instanceName) {
+      this.logger.info('envio de WhatsApp simulado (nenhuma instância EvolutionAPI conectada)');
+      return;
+    }
+    await this.humanizeBeforeSend(to, instanceName);
+    const res = await this.request(`/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        number: toEvolutionNumber(to),
+        mediatype: 'document',
+        mimetype: 'application/pdf',
+        media: base64,
+        fileName,
+        caption,
+      }),
+    });
+    await this.registerSent(res);
+  }
+
   /**
    * Ver a nota de confirmação contra o container real na assinatura da interface.
    * `{ message: { key } }`, sem `convertToMp4` — deixamos o formato original (Opus/OGG),

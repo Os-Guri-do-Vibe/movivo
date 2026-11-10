@@ -2,6 +2,7 @@
 
 import { SESSION_MODALITY_LABELS, VENUES_BY_MODALITY, type TrainingVenue } from '@movivo/shared';
 
+import { LEVEL_ITEMS, VENUE_LABELS } from './anamnesis-options';
 import {
   ChoiceGroup,
   ClockInput,
@@ -39,87 +40,6 @@ export const MODALITY_NAME: Record<CoachedModalityKey, string> = {
   STRENGTH: 'musculação',
   RUNNING: 'corrida',
   HYROX: 'HYROX',
-};
-
-type LevelItem = { value: NonNullable<ModalityDraft['level']>; label: string; description: string };
-
-/** Descrições curtas de cada nível, por modalidade, para o aluno se autoavaliar com mais precisão. */
-const LEVEL_ITEMS: Record<CoachedModalityKey, LevelItem[]> = {
-  STRENGTH: [
-    {
-      value: 'BEGINNER',
-      label: 'Iniciante',
-      description:
-        'Treino há menos de 6 meses ou ainda preciso de ajuda para executar os exercícios.',
-    },
-    {
-      value: 'INTERMEDIATE',
-      label: 'Intermediário',
-      description: 'Treino com regularidade há mais de 6 meses e conheço os principais exercícios.',
-    },
-    {
-      value: 'ADVANCED',
-      label: 'Avançado',
-      description:
-        'Treino com constância há mais de 2 anos e sei ajustar carga e progressão por conta própria.',
-    },
-  ],
-  RUNNING: [
-    {
-      value: 'BEGINNER',
-      label: 'Iniciante',
-      description: 'Corro há pouco tempo ou ainda alterno corrida e caminhada.',
-    },
-    {
-      value: 'INTERMEDIATE',
-      label: 'Intermediário',
-      description: 'Treino toda semana e corro 5 km em menos de 25 minutos.',
-    },
-    {
-      value: 'ADVANCED',
-      label: 'Avançado',
-      description: 'Sigo planilha, controlo ritmo e distância e corro provas com frequência.',
-    },
-  ],
-  HYROX: [
-    {
-      value: 'BEGINNER',
-      label: 'Iniciante',
-      description: 'Nunca fiz HYROX ou conheço pouco as estações e a prova.',
-    },
-    {
-      value: 'INTERMEDIATE',
-      label: 'Intermediário',
-      description: 'Conheço as 8 estações e já treinei o formato ou fiz alguma prova.',
-    },
-    {
-      value: 'ADVANCED',
-      label: 'Avançado',
-      description: 'Treino o formato com frequência e busco melhorar meu tempo em prova.',
-    },
-  ],
-};
-
-/** Como cada local se chama em cada modalidade (na corrida, academia é esteira). */
-const VENUE_LABELS: Record<CoachedModalityKey, Partial<Record<TrainingVenue, string>>> = {
-  STRENGTH: {
-    FULL_GYM: 'Academia completa',
-    CONDO_GYM: 'Academia de condomínio',
-    HOME: 'Em casa',
-    OUTDOOR: 'Ao ar livre (praça, parque)',
-  },
-  RUNNING: {
-    OUTDOOR: 'Na rua, parque ou trilha',
-    TRACK: 'Na pista de atletismo',
-    FULL_GYM: 'Na esteira da academia',
-    CONDO_GYM: 'Na esteira do condomínio',
-  },
-  HYROX: {
-    HYROX_GYM: 'Box com equipamento de HYROX',
-    FULL_GYM: 'Academia completa',
-    CONDO_GYM: 'Academia de condomínio',
-    HOME: 'Em casa',
-  },
 };
 
 /** O que cada local oferece: é o que define os exercícios possíveis. */

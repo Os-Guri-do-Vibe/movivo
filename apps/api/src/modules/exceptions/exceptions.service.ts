@@ -9,6 +9,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, ne, notInArray } from 'drizzle-orm';
 
@@ -22,6 +23,8 @@ import {
   type EditProtocolRequest,
   type ExceptionDomain,
   type ExceptionScope,
+  type ExceptionsSummary,
+  type ProtocolRegenerationResponse,
   QUEUE_EXCEPTION_KINDS,
   type SafetyScope,
   type SafetySignalKind,
@@ -60,13 +63,26 @@ import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { examFileOf, examViewOf } from '../medical/medical-exam.service';
 import { signatureHashOf } from '../planning/plan-signature';
 import { todayIn } from '../planning/plan-generation.service';
-import { isPublishPlanAction, ProtocolReviewService } from '../planning/protocol-review.service';
+import {
+  isPublishPlanAction,
+  protocolKindOf,
+  ProtocolReviewService,
+} from '../planning/protocol-review.service';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { TrainingLinkService } from '../training/training-link.service';
+import { proposalIdsOf, withListContext } from './exception-list';
+import { openCaseCounts, summaryOf } from './exception-summary';
 import { ProposalRunner } from './proposal-runner.service';
 import { ReviewHoldService } from './review-hold.service';
 
 const PRIORITY_RANK = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 } as const;
+/** Motivo gravado no caso quando o profissional pede o protocolo refeito do zero. */
+export const REGENERATION_NOTE = 'Regeneração completa do protocolo pedida pelo profissional.';
+
+/** O caso já foi encerrado por um pedido de regeneração (clique repetido recebe a mesma resposta). */
+function wasRegenerated(row: { status: string; resolution: Record<string, unknown> | null }) {
+  return row.status === 'RESOLVED' && row.resolution?.outcome === 'REGENERATION_REQUESTED';
+}
 const STATE_SLICES: readonly StateSlice[] = [
   'identity',
   'goals',
@@ -149,8 +165,8 @@ export class ExceptionsService {
   ) {
     const actor = await this.actorOf(user);
     const domains = this.domainsOf(actor);
-    const rows = await this.db.runAsSystem((tx) =>
-      tx
+    const rows = await this.db.runAsSystem(async (tx) => {
+      const cases = await tx
         .select({
           id: exceptionCases.id,
           kind: exceptionCases.kind,
@@ -164,6 +180,7 @@ export class ExceptionsService {
           autoReleaseAt: exceptionCases.autoReleaseAt,
           studentId: exceptionCases.userId,
           studentName: users.name,
+          subject: exceptionCases.subject,
         })
         .from(exceptionCases)
         .innerJoin(users, eq(users.id, exceptionCases.userId))
@@ -181,8 +198,17 @@ export class ExceptionsService {
           ),
         )
         .orderBy(asc(exceptionCases.createdAt))
-        .limit(200),
-    );
+        .limit(200);
+      // O tipo da ação proposta (uma leitura só) diz à Fila o que está pendente em poucas palavras.
+      const proposalIds = proposalIdsOf(cases);
+      const proposals = proposalIds.length
+        ? await tx
+            .select({ id: coachingProposals.id, actionType: coachingProposals.actionType })
+            .from(coachingProposals)
+            .where(inArray(coachingProposals.id, proposalIds))
+        : [];
+      return withListContext(cases, new Map(proposals.map((p) => [p.id, p.actionType])));
+    });
     return rows
       .map((row) => ({ ...row, canResolve: this.canAct(actor, row.domain as ExceptionDomain) }))
       .sort(
@@ -193,19 +219,14 @@ export class ExceptionsService {
       );
   }
 
-  /** Contagem de casos abertos (e urgentes), no total e em cada painel: Fila e Alertas. */
-  async summary(user: AuthenticatedUser) {
-    const cases = await this.list(user, {});
-    const count = (rows: typeof cases) => ({
-      open: rows.length,
-      urgent: rows.filter((c) => c.priority === 'URGENT' || c.priority === 'HIGH').length,
-    });
-    const inQueue = (kind: string) => (QUEUE_EXCEPTION_KINDS as readonly string[]).includes(kind);
-    return {
-      ...count(cases),
-      queue: count(cases.filter((c) => inQueue(c.kind))),
-      alerts: count(cases.filter((c) => !inQueue(c.kind))),
-    };
+  /**
+   * Abertos (e urgentes) em cada painel e no total. A Fila conta alunos distintos (um cartão por
+   * aluno); Alertas contam casos (um item por caso). Uma consulta agregada, sem ler os casos.
+   */
+  async summary(user: AuthenticatedUser): Promise<ExceptionsSummary> {
+    const actor = await this.actorOf(user);
+    const counts = await this.db.runAsSystem((tx) => openCaseCounts(tx, this.domainsOf(actor)));
+    return summaryOf(counts);
   }
 
   private async load(user: AuthenticatedUser, id: string) {
@@ -819,6 +840,99 @@ export class ExceptionsService {
     return { id, status: 'RESOLVED' as const, outcome: 'ADJUSTMENT_REQUESTED' as const };
   }
 
+  /**
+   * Regera do zero o protocolo do caso (treino OU alimentar), sem orientação do profissional: a
+   * proposta atual é recusada sem chegar ao aluno, o caso fecha e o planejamento refaz aquele
+   * protocolo a partir do Estado do Aluno e da estratégia salva (o rascunho antigo não serve de
+   * base). O novo entra na Fila pela política de sempre, como um caso novo.
+   *
+   * Clique duplo e chamadas concorrentes: o caso é travado (`FOR UPDATE`); quem chega depois de
+   * uma regeneração já pedida recebe a mesma resposta, sem novo evento — uma geração só.
+   */
+  async regenerateProtocol(
+    user: AuthenticatedUser,
+    id: string,
+    now: Date = new Date(),
+  ): Promise<ProtocolRegenerationResponse> {
+    const { actor, row } = await this.load(user, id);
+    this.assertCanAct(actor, row.domain as ExceptionDomain);
+    const done: ProtocolRegenerationResponse = {
+      id,
+      status: 'RESOLVED',
+      outcome: 'REGENERATION_REQUESTED',
+    };
+    if (wasRegenerated(row)) return done;
+    const { action, proposalId } = await this.regenerableProposalOf(row);
+    if (row.status === 'RESOLVED') throw new ConflictException('Caso já resolvido.');
+    const kind = protocolKindOf(action);
+    const replayed = await this.db.runAsSystem(async (tx) => {
+      const [locked] = await tx
+        .select({ status: exceptionCases.status, resolution: exceptionCases.resolution })
+        .from(exceptionCases)
+        .where(eq(exceptionCases.id, id))
+        .for('update');
+      if (locked && wasRegenerated(locked)) return true;
+      if (!locked || locked.status === 'RESOLVED')
+        throw new ConflictException('Caso já resolvido.');
+      const rejected = await tx
+        .update(coachingProposals)
+        .set({ status: 'REJECTED' })
+        .where(and(eq(coachingProposals.id, proposalId), eq(coachingProposals.status, 'PENDING')))
+        .returning({ id: coachingProposals.id });
+      if (rejected.length === 0) throw new ConflictException('A proposta não está mais pendente.');
+      await tx
+        .update(exceptionCases)
+        .set({
+          status: 'RESOLVED',
+          resolvedAt: now,
+          assignedStaffId: actor.staffId,
+          resolution: { outcome: 'REGENERATION_REQUESTED', note: REGENERATION_NOTE },
+        })
+        .where(eq(exceptionCases.id, id));
+      // O evento leva o planejamento a refazer o protocolo (job idempotente pelo id do evento).
+      await this.recordResolved(tx, row.userId, id, row.kind, 'REGENERATION_REQUESTED');
+      await this.audit.append(tx, {
+        actorId: actor.staffId,
+        userId: row.userId,
+        action: 'exception.protocol_regenerate',
+        entityType: 'exception_case',
+        entityId: id,
+        changes: { planId: action.planId, proposalId, kind, reason: 'FULL_REGENERATION' },
+      });
+      return false;
+    });
+    if (!replayed) await this.outbox.flushSoon();
+    return done;
+  }
+
+  /**
+   * Só a publicação de protocolo (treino ou alimentar) regera do zero. Troca de exercício e
+   * ajuste têm a própria revisão; a geração que falhou é refeita pelo `resolve`.
+   */
+  private async regenerableProposalOf(row: { kind: string; subject: Record<string, string> }) {
+    if (row.kind === 'DECISION_FAILURE') {
+      throw new UnprocessableEntityException(
+        'Geração que falhou não tem protocolo para regerar: encerre o caso (resolve) e os agentes refazem.',
+      );
+    }
+    const proposalId = row.subject.proposalId;
+    const [proposal] =
+      row.kind === 'PROTOCOL_REVIEW' && proposalId
+        ? await this.db.runAsSystem((tx) =>
+            tx
+              .select({ action: coachingProposals.action })
+              .from(coachingProposals)
+              .where(eq(coachingProposals.id, proposalId)),
+          )
+        : [];
+    if (!proposalId || !proposal || !isPublishPlanAction(proposal.action)) {
+      throw new UnprocessableEntityException(
+        'Só o protocolo de treino ou alimentar em revisão pode ser regerado do zero.',
+      );
+    }
+    return { action: proposal.action, proposalId };
+  }
+
   /** Carrega o caso de troca sem equivalente seguro (a equipe escolhe o exercício). */
   private async swapGapCase(user: AuthenticatedUser, id: string) {
     const { actor, row } = await this.load(user, id);
@@ -1106,7 +1220,13 @@ export class ExceptionsService {
     userId: string,
     exceptionCaseId: string,
     kind: string,
-    outcome: 'APPROVED' | 'AUTO_RELEASED' | 'REJECTED' | 'RESOLVED' | 'ADJUSTMENT_REQUESTED',
+    outcome:
+      | 'APPROVED'
+      | 'AUTO_RELEASED'
+      | 'REJECTED'
+      | 'RESOLVED'
+      | 'ADJUSTMENT_REQUESTED'
+      | 'REGENERATION_REQUESTED',
   ) {
     return this.events.record(tx, {
       userId,

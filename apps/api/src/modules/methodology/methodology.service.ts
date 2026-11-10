@@ -328,9 +328,7 @@ export class MethodologyService {
     // Antes de gastar chamadas de modelo: tarefa sem casos não tem como ser testada.
     const withoutCases = taskIds.filter((taskId) => this.registry.get(taskId).cases.length === 0);
     if (withoutCases.length > 0) {
-      throw new UnprocessableEntityException(
-        `Não dá para testar esta metodologia: ${withoutCases.length === 1 ? 'a tarefa' : 'as tarefas'} ${withoutCases.map(agentTaskLabel).join(', ')} ainda ${withoutCases.length === 1 ? 'não tem' : 'não têm'} casos de avaliação cadastrados. Avise a equipe técnica.`,
-      );
+      throw new UnprocessableEntityException(this.missingCasesMessage(spec.title, withoutCases));
     }
     const progress: TestProgress = {
       ...IDLE_PROGRESS,
@@ -343,6 +341,25 @@ export class MethodologyService {
     this.cancelRequests.delete(id);
     void this.runTest(doc, taskIds, staffId, progress, budgetBrl);
     return { ...progress };
+  }
+
+  /**
+   * Mensagem para quando o teste não pode rodar por falta de casos de avaliação. A falha é de
+   * cadastro (não do rascunho): o texto diz isso, lista cada tarefa uma vez, e deixa claro que as
+   * alterações estão salvas e o que a equipe técnica precisa fazer.
+   */
+  private missingCasesMessage(domainTitle: string, taskIds: readonly string[]): string {
+    const labels = [...new Set(taskIds.map(agentTaskLabel))];
+    const several = labels.length > 1;
+    const list = labels.map((label) => `«${label}»`).join(', ');
+    return (
+      `Ainda não é possível testar a metodologia de ${domainTitle} com os agentes. ` +
+      `${several ? 'Estas tarefas dos agentes usam' : 'Esta tarefa dos agentes usa'} essa metodologia ` +
+      `e ${several ? 'ainda não têm' : 'ainda não tem'} situações de teste cadastradas: ${list}. ` +
+      'Sem elas não há como comprovar que os agentes seguem as suas alterações. ' +
+      'O problema não está no seu rascunho, que continua salvo. ' +
+      'Peça à equipe técnica para cadastrar essas situações de teste e tente de novo.'
+    );
   }
 
   /** Por que a tarefa reprovou, em português: "Situação: o que se esperava". */
@@ -541,9 +558,35 @@ export class MethodologyService {
         .where(eq(methodologyDocuments.id, id));
       if (!doc) throw new NotFoundException('Esta versão da metodologia não foi encontrada.');
       if (doc.status !== 'TESTING') {
-        throw new ConflictException(
-          'Esta versão ainda não passou nos testes. Rode o teste com os agentes antes de publicar.',
-        );
+        // Exceção deliberada: a PRIMEIRA versão de um domínio pode ser publicada sem o teste com
+        // os agentes (decisão do fundador). Daí em diante, toda mudança passa pelo teste.
+        const [inForce] =
+          doc.status === 'DRAFT'
+            ? await tx
+                .select({ id: methodologyDocuments.id })
+                .from(methodologyDocuments)
+                .where(
+                  and(
+                    eq(methodologyDocuments.domain, doc.domain),
+                    eq(methodologyDocuments.status, 'PUBLISHED'),
+                  ),
+                )
+                .limit(1)
+            : [undefined];
+        if (doc.status !== 'DRAFT' || inForce) {
+          throw new ConflictException(
+            'Esta versão ainda não passou nos testes. Rode o teste com os agentes antes de publicar.',
+          );
+        }
+        const unjustified = plausibilityIssues(
+          methodologyDomainSpec(doc.domain),
+          doc.parameters,
+        ).filter((issue) => !doc.justifications[issue.path]?.trim());
+        if (unjustified.length > 0) {
+          throw new UnprocessableEntityException(
+            'Há valores fora da faixa usual sem justificativa. Explique cada um antes de publicar.',
+          );
+        }
       }
       await tx
         .update(methodologyDocuments)

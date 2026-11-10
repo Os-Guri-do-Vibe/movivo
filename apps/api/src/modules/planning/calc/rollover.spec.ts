@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PlanPhase } from '@movivo/shared';
+import type { PlanPhase, PlanSession } from '@movivo/shared';
 
-import { deloadAdjustment, horizonWeeks, isDeloadWeek, weekIndexOf } from './rollover';
+import {
+  deloadAdjustment,
+  horizonWeeks,
+  isDeloadWeek,
+  runningProgressionAdjustment,
+  weekIndexOf,
+} from './rollover';
 
 const phases: PlanPhase[] = [
   { name: 'Base', focus: 'Técnica', weeks: 4, endsWithDeload: true },
@@ -44,5 +50,50 @@ describe('continuidade da agenda', () => {
 
   it('o horizonte cobre a semana corrente e a seguinte', () => {
     expect(horizonWeeks('2026-11-04')).toEqual(['2026-11-02', '2026-11-09']);
+  });
+});
+
+describe('periodização da corrida na agenda', () => {
+  const run = (
+    kind: 'EASY' | 'LONG' | 'INTERVALS',
+    workoutType?: string,
+  ): Pick<PlanSession, 'content'> =>
+    ({
+      content: {
+        modality: 'RUNNING',
+        kind,
+        ...(workoutType ? { workoutType } : {}),
+        segments: [],
+        terrain: 'ANY',
+      },
+    }) as never;
+
+  it('a primeira semana é a do plano; as seguintes crescem 5% por semana', () => {
+    const factors = [0, 1, 2, 3].map(
+      (week) =>
+        runningProgressionAdjustment(run('INTERVALS', 'FARTLEK'), week, false)?.progress?.factor,
+    );
+    expect(factors).toEqual([undefined, 1.05, 1.1, 1.15]);
+  });
+
+  it('o acúmulo tem teto, e o longão cresce menos', () => {
+    expect(runningProgressionAdjustment(run('EASY', 'EASY_RUN'), 12, false)?.progress?.factor).toBe(
+      1.2,
+    );
+    expect(runningProgressionAdjustment(run('LONG', 'LONG_RUN'), 12, false)?.progress?.factor).toBe(
+      1.1,
+    );
+  });
+
+  it('semana leve não cresce, e plano sem treino do catálogo ou outra modalidade fica como está', () => {
+    expect(runningProgressionAdjustment(run('EASY', 'EASY_RUN'), 3, true)).toBeUndefined();
+    expect(runningProgressionAdjustment(run('EASY'), 3, false)).toBeUndefined();
+    expect(
+      runningProgressionAdjustment(
+        { content: { modality: 'STRENGTH', focus: 'x', exercises: [] } } as never,
+        3,
+        false,
+      ),
+    ).toBeUndefined();
   });
 });

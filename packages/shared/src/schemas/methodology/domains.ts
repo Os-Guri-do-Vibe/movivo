@@ -202,7 +202,12 @@ const STRENGTH: DomainSpec = {
             { key: 'ADAPTATION', label: 'Adaptação' },
             { key: 'HYPERTROPHY', label: 'Hipertrofia' },
             { key: 'STRENGTH', label: 'Força' },
-            { key: 'DELOAD', label: 'Recuperação' },
+            {
+              key: 'DELOAD',
+              label: 'Recuperação',
+              plausible: [1, 4],
+              example: { weeks: { min: 1, max: 2 } },
+            },
           ],
           columns: {
             weeks: {

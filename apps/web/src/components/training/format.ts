@@ -1,6 +1,6 @@
 import {
   HYROX_STATION_LABELS,
-  RUNNING_SESSION_KIND_LABELS,
+  runningSessionLabel,
   type EnduranceTarget,
   type HyroxBlock,
   type RunningSegment,
@@ -67,7 +67,7 @@ export function hyroxBlockLine(block: HyroxBlock): string {
 /** Linhas de prescrição para modalidades de resistência (corrida, HYROX). */
 export function enduranceLines(content: SessionContent): string[] {
   if (content.modality === 'RUNNING') {
-    return [RUNNING_SESSION_KIND_LABELS[content.kind], ...content.segments.map(segmentLine)];
+    return [runningSessionLabel(content), ...content.segments.map(segmentLine)];
   }
   if (content.modality === 'HYROX') {
     const rounds = content.rounds > 1 ? [`${content.rounds} voltas do circuito`] : [];

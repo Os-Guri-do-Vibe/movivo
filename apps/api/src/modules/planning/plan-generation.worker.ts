@@ -1,7 +1,7 @@
 /**
  * Dispara a geração do plano quando a anamnese é concluída e quando a equipe encerra um caso que
  * pode tê-la travado (sinal de segurança, como o PAR-Q positivo, ou falha da geração), e refaz um
- * protocolo quando o profissional pede ajuste na fila. O consumidor
+ * protocolo quando o profissional pede ajuste (com orientação) ou regera do zero na fila. O consumidor
  * do outbox enfileira o job (idempotente pelo evento) e o worker executa o `PlanGenerationService`,
  * que pula quem ainda tem sinal ativo ou já tem plano.
  */
@@ -14,12 +14,16 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { PlanGenerationService } from './plan-generation.service';
 
-const RETRY_ON_RESOLVED_KINDS = new Set(['SAFETY', 'DECISION_FAILURE']);
+// Sinal de segurança encerrado: a geração inicial volta a valer (a falha tem caminho próprio, `retry`).
+const RETRY_ON_RESOLVED_KINDS = new Set(['SAFETY']);
 
 export interface PlanGenerationJob {
   userId: string;
   triggerEventId: string | null;
-  /** Job `adjust`: o caso em que o profissional pediu o ajuste (a orientação fica no banco). */
+  /**
+   * Jobs `adjust` e `regenerate`: o caso em que o profissional pediu o ajuste (a orientação fica
+   * no banco) ou a regeneração do zero.
+   */
   exceptionCaseId?: string;
 }
 
@@ -45,8 +49,17 @@ export class PlanGenerationWorker implements OnModuleInit {
       name: 'planning.generate-on-case-resolved',
       eventTypes: ['ExceptionResolved'],
       handle: async (event) => {
-        if (event.payload.outcome === 'ADJUSTMENT_REQUESTED') await this.enqueueAdjust(event);
-        else if (RETRY_ON_RESOLVED_KINDS.has(String(event.payload.kind))) await this.enqueue(event);
+        const outcome = event.payload.outcome;
+        if (outcome === 'ADJUSTMENT_REQUESTED') await this.enqueueFromCase(event, 'adjust');
+        else if (outcome === 'REGENERATION_REQUESTED') {
+          await this.enqueueFromCase(event, 'regenerate');
+        } else if (String(event.payload.kind) === 'DECISION_FAILURE') {
+          if (typeof event.payload.exceptionCaseId === 'string') {
+            await this.enqueueFromCase(event, 'retry');
+          } else await this.enqueue(event);
+        } else if (RETRY_ON_RESOLVED_KINDS.has(String(event.payload.kind))) {
+          await this.enqueue(event);
+        }
       },
     });
     this.workers.create<PlanGenerationJob>(QUEUE.planGeneration, async (job) => {
@@ -54,21 +67,31 @@ export class PlanGenerationWorker implements OnModuleInit {
       const result =
         job.name === 'adjust' && exceptionCaseId
           ? await this.service.adjustFromCase(userId, exceptionCaseId, { triggerEventId })
-          : await this.service.generate(userId, { triggerEventId });
+          : job.name === 'regenerate' && exceptionCaseId
+            ? await this.service.regenerateFromCase(userId, exceptionCaseId, { triggerEventId })
+            : job.name === 'retry' && exceptionCaseId
+              ? await this.service.retryFromFailureCase(userId, exceptionCaseId, {
+                  triggerEventId,
+                })
+              : await this.service.generate(userId, { triggerEventId });
       this.logger.info({ userId, job: job.name, status: result.status }, 'plano gerado');
       return result;
     });
   }
 
-  private async enqueueAdjust(event: DomainEvent): Promise<void> {
+  /** Refaz a partir do caso encerrado na fila: com a orientação (`adjust`), do zero ou repetindo o que falhou. */
+  private async enqueueFromCase(
+    event: DomainEvent,
+    name: 'adjust' | 'regenerate' | 'retry',
+  ): Promise<void> {
     if (!event.userId) return;
     const data: PlanGenerationJob = {
       userId: event.userId,
       triggerEventId: event.id,
       exceptionCaseId: String(event.payload.exceptionCaseId),
     };
-    await this.queues.enqueue(QUEUE.planGeneration, 'adjust', data, {
-      jobId: `plan-adjust_${event.id}`,
+    await this.queues.enqueue(QUEUE.planGeneration, name, data, {
+      jobId: `plan-${name}_${event.id}`,
     });
   }
 

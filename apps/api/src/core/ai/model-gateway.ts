@@ -129,6 +129,11 @@ export class ModelGateway {
     this.logger.setContext(ModelGateway.name);
   }
 
+  /** Rotas configuradas do tier, na ordem (a 1ª é a principal). */
+  async routesFor(tier: GatewayRequest['tier']): Promise<TierRoute[]> {
+    return this.tiers.routesFor(tier);
+  }
+
   async complete(request: GatewayRequest): Promise<GatewayResult> {
     const dataClass: DataClass = request.dataClass ?? 'HEALTH';
     const needsVision = hasMedia(request.messages);

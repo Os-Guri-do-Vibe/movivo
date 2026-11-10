@@ -1,7 +1,13 @@
 'use client';
 
-import type { DaySlot, Weekday } from '@movivo/shared';
+import type { Weekday } from '@movivo/shared';
 
+import {
+  AVAILABLE_LABELS,
+  AVAILABLE_MINUTES_OPTIONS,
+  SLOT_ITEMS,
+  STRESS_ITEMS,
+} from './anamnesis-options';
 import { ExternalSports } from './external-sports';
 import {
   ChoiceGroup,
@@ -15,7 +21,6 @@ import {
   YesNo,
 } from './fields';
 import {
-  AVAILABLE_MINUTES_OPTIONS,
   dayWindow,
   routineComplete,
   sleepError,
@@ -29,37 +34,10 @@ import { WEEKDAY_ITEMS } from './weekday-items';
 
 const LIST = new Intl.ListFormat('pt-BR', { type: 'conjunction' });
 
-const SLOT_ITEMS: { value: DaySlot; label: string }[] = [
-  { value: 'MORNING', label: 'Manhã' },
-  { value: 'AFTERNOON', label: 'Tarde' },
-  { value: 'EVENING', label: 'Noite' },
-  { value: 'ANY', label: 'Varia conforme o dia' },
-];
-
-const AVAILABLE_LABELS: Record<(typeof AVAILABLE_MINUTES_OPTIONS)[number], string> = {
-  '30': 'Até 30 minutos',
-  '45': 'Cerca de 45 minutos',
-  '60': 'Cerca de 1 hora',
-  '90': 'Mais de 1 hora',
-};
 const AVAILABLE_ITEMS = AVAILABLE_MINUTES_OPTIONS.map((value) => ({
   value,
   label: AVAILABLE_LABELS[value],
 }));
-
-const STRESS_ITEMS = [
-  { value: 'LOW', label: 'Baixo', description: 'Dias tranquilos, consigo relaxar com facilidade.' },
-  {
-    value: 'MODERATE',
-    label: 'Moderado',
-    description: 'Tenho momentos de tensão, mas dou conta da rotina.',
-  },
-  {
-    value: 'HIGH',
-    label: 'Alto',
-    description: 'Me sinto sobrecarregado(a) com frequência.',
-  },
-] as const;
 
 /**
  * Etapa 4, "Sua semana". A ordem vai do que já está decidido ao que é preferência: o esporte

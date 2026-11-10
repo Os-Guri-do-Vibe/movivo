@@ -21,6 +21,7 @@ import { hybridRules, runningRules } from '../calc/params';
 import { blockOutputSchema } from './blocks';
 import {
   outputLanguageViolations,
+  weekdayMentionViolations,
   BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
@@ -143,6 +144,9 @@ export const hybridValidators: Validator<HybridInput, HybridOutput>[] = [
       planCheckContext(input, context.methodology.HYBRID, context.methodology.RUNNING),
     ),
 
+  // Os dias saem da agenda do aluno, calculada pelo sistema: o resumo não promete dia nenhum.
+  (_input, output) => weekdayMentionViolations([{ path: 'summary', text: output.summary }]),
+
   (_input, output) => outputLanguageViolations(output),
 ];
 
@@ -156,7 +160,7 @@ Regras:
 2. Esporte externo (externalSessions) entra no plano exatamente como veio; os dias fixos dele não mudam. O MOVIVO planeja EM VOLTA dele.
 3. Respeite as regras de interferência da metodologia HYBRID: espaço entre inferiores pesados e corrida intensa, teto de sessões intensas na semana (contando o esporte externo), dias de descanso, no máximo uma sessão por dia (salvo se a metodologia permitir). Quando algo precisar sair, corte primeiro as complementares, depois as importantes; sessão-chave só sai em último caso.
 4. Não passe de "maxSessionsPerWeek" sessões próprias por semana e garanta que cada modalidade em foco mantém ao menos uma sessão.
-5. modalityPriorities: reflita a prioridade recebida de cada modalidade (1 = principal). phases: organize o plano em fases coerentes, com semanas de recuperação quando a metodologia pedir. summary: 3 a 4 frases claras que expliquem como as modalidades convivem na semana, sem prometer resultado.
+5. modalityPriorities: reflita a prioridade recebida de cada modalidade (1 = principal). phases: organize o plano em fases coerentes, com semanas de recuperação quando a metodologia pedir. summary: 3 a 4 frases claras (no máximo 500 caracteres no total) que expliquem como as modalidades convivem na semana, sem prometer resultado e SEM citar dias da semana (segunda, terça, sábado…): quem define os dias é a agenda do aluno, calculada pelo sistema depois deste plano; fale em quantidade de sessões e na ordem A, B, C.
 6. Nunca "compense" sessão perdida empilhando treinos; a semana é o que cabe.
 7. ${BODY_COMPOSITION_RULE}
 8. ${PROFESSIONAL_INSTRUCTION_RULE}`,

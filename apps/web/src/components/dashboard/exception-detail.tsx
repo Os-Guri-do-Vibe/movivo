@@ -20,19 +20,19 @@ import {
   describeAction,
   DOMAIN_LABEL,
   goalLabel,
-  isProtocolAction,
   KIND_LABEL,
   OUTCOME_LABEL,
   PRIORITY_LABEL,
   UNCERTAINTY_LABEL,
 } from '@/lib/exception-copy';
+import { protocolKindOf } from '@/lib/protocol-case';
 
 import { AnamnesisAnswersButton } from './anamnesis-answers';
 import { ConfirmAction } from './confirm-action';
 import { StatusBadge } from './control-center-table';
 import { ResourceState, UpdatedAt, useControlCenterResource } from './control-center-ui';
 import { ExamReview } from './exam-review';
-import { ProtocolReview } from './protocol-review';
+import { ProtocolCase } from './protocol-case';
 import { SwapGapResolution } from './swap-gap-resolution';
 import { ReviewUrgencyBadge, ReviewUrgencyNotice } from './review-urgency';
 import { useReviewHold } from './use-review-hold';
@@ -96,6 +96,21 @@ export function ExceptionDetail({ id }: { id: string }) {
         error={error}
         forbidden={forbidden}
         onRetry={() => void refresh()}
+      />
+    );
+  }
+
+  // Publicação de protocolo (treino ou alimentar): tela própria, com o plano como protagonista.
+  const protocolKind = protocolKindOf(data);
+  if (protocolKind) {
+    return (
+      <ProtocolCase
+        detail={data}
+        kind={protocolKind}
+        decisions={decisions.data ?? null}
+        onChanged={async () => {
+          await Promise.all([refresh(), decisions.refresh()]);
+        }}
       />
     );
   }
@@ -221,16 +236,6 @@ export function ExceptionDetail({ id }: { id: string }) {
         <SwapGapResolution
           caseId={item.id}
           canAct={canAct}
-          onChanged={async () => {
-            await Promise.all([refresh(), decisions.refresh()]);
-          }}
-        />
-      ) : null}
-
-      {proposal && isProtocolAction(proposal.action) ? (
-        <ProtocolReview
-          caseId={item.id}
-          canAct={canAct && proposal.status === 'PENDING'}
           onChanged={async () => {
             await Promise.all([refresh(), decisions.refresh()]);
           }}

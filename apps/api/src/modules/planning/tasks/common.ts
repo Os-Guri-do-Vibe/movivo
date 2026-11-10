@@ -48,6 +48,34 @@ export function languageViolations(text: string, path: string): Violation[] {
   }));
 }
 
+/**
+ * Dia da semana citado por extenso (texto sem acento). “Quarta semana”, “segunda sessão” e afins
+ * são ordinais, não dias: ficam de fora.
+ */
+const WEEKDAY_MENTION =
+  /\b(?:(?:segunda|terca|quarta|quinta|sexta)(?:-feira)?s?(?!\s+(?:semana|etapa|fase|sessao|parte|serie|vez|rodada|metade|dose|opcao))|sabados?|domingos?)\b/;
+
+/**
+ * Quem decide em que dia cada sessão cai é a agenda do aluno, calculada pelo sistema depois do
+ * plano. Texto do modelo que cita dia da semana ("corrida terça e sábado") contradiz a agenda
+ * real; o validador manda reescrever sem dias.
+ */
+export function weekdayMentionViolations(
+  entries: readonly { path: string; text: string | undefined }[],
+): Violation[] {
+  return entries.flatMap(({ path, text }) =>
+    text !== undefined && WEEKDAY_MENTION.test(fold(text))
+      ? [
+          {
+            path,
+            message:
+              'não cite dias da semana: os dias saem da agenda do aluno, calculada pelo sistema (fale em "sessões por semana" e na ordem A, B, C)',
+          },
+        ]
+      : [],
+  );
+}
+
 /** Todas as strings de um valor JSON, com o caminho em que estão. */
 export function stringsOf(value: unknown, path = ''): { path: string; text: string }[] {
   if (typeof value === 'string') return [{ path, text: value }];

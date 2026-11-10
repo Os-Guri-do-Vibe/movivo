@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MethodologyParameters, PlanSession } from '@movivo/shared';
+import {
+  RUNNING_WORKOUTS,
+  RUNNING_WORKOUT_TYPES,
+  type MethodologyParameters,
+  type PlanSession,
+  type RunningWorkoutType,
+} from '@movivo/shared';
 
 import type { ValidationContext, Violation } from '../../../core/agents/agent-task';
 import { devMethodologyParameters } from '../../../core/database/seed-methodology';
@@ -13,15 +19,22 @@ import {
   type NutritionInput,
   type NutritionOutput,
 } from './nutrition';
-import { runningValidators, type RunningInput } from './running';
-import { strategyValidators, type StrategyInput, type StrategyOutput } from './strategy';
+import { runningTask, runningValidators, type RunningInput } from './running';
+import {
+  minRunningSessions,
+  strategyValidators,
+  type StrategyInput,
+  type StrategyOutput,
+} from './strategy';
 import {
   strengthTask,
   strengthValidators,
   type StrengthCandidate,
   type StrengthInput,
+  strengthTimeBudget,
 } from './strength';
-import type { BlockOutput } from './blocks';
+import { blockOutputSchema, type BlockOutput } from './blocks';
+import { strengthRules } from '../calc/params';
 import { at } from '../calc/util';
 
 const params = (domain: string): MethodologyParameters => devMethodologyParameters(domain);
@@ -58,6 +71,7 @@ const strategyInput = (
     ...declared,
   },
   modalities: [{ modality: 'STRENGTH', level: 'INTERMEDIATE', wantsToStart: false }],
+  externalSports: [],
   derived: {
     adiposity: 'MODERATE',
     bmi: 24,
@@ -122,6 +136,80 @@ describe('goals.define_strategy', () => {
     expect(
       await run(strategyValidators, input, strategyOutput('RECOMPOSITION'), context()),
     ).toEqual([]);
+  });
+
+  describe('quem quer correr melhor (objetivo principal ou secundário)', () => {
+    const corredor = () =>
+      strategyInput({}, { primary: 'FAT_LOSS', secondary: ['HYPERTROPHY', 'RUNNING_PERFORMANCE'] });
+    const comCorrida = (running: number, strength: number): StrategyOutput => {
+      const output = strategyOutput('DEFICIT');
+      output.strategy.modalityFocus = ['STRENGTH', 'RUNNING'];
+      output.strategy.sessionPlan = {
+        weekly: running + strength,
+        byModality: [
+          { modality: 'STRENGTH', sessions: strength },
+          { modality: 'RUNNING', sessions: running },
+        ],
+        reason: 'Divisão da semana.',
+      };
+      output.tasks = [
+        {
+          kind: 'COMPLETE_SESSIONS',
+          title: 'Treinar',
+          cadence: 'WEEKLY',
+          target: running + strength,
+        },
+      ];
+      return output;
+    };
+    const withModalities = (input: StrategyInput): StrategyInput => ({
+      ...input,
+      modalities: [
+        { modality: 'STRENGTH', level: 'ADVANCED', wantsToStart: false },
+        { modality: 'RUNNING', level: 'BEGINNER', wantsToStart: false },
+      ],
+    });
+
+    it('duas corridas em cinco sessões é pouco: pede ao menos três', async () => {
+      const found = (
+        await run(strategyValidators, withModalities(corredor()), comCorrida(2, 3), context())
+      ).join(' | ');
+      expect(found).toContain('a corrida precisa de pelo menos 3');
+    });
+
+    it('três corridas e duas musculações em cinco sessões passa', async () => {
+      const found = await run(
+        strategyValidators,
+        withModalities(corredor()),
+        comCorrida(3, 2),
+        context(),
+      );
+      expect(found.filter((f) => f.includes('corrida'))).toEqual([]);
+    });
+
+    it('o foco precisa incluir corrida mesmo com o objetivo só secundário', async () => {
+      const output = strategyOutput('DEFICIT');
+      const found = (
+        await run(strategyValidators, withModalities(corredor()), output, context())
+      ).join(' | ');
+      expect(found).toContain('RUNNING precisa estar no foco');
+    });
+
+    it('o mínimo cresce com o papel da corrida na semana', () => {
+      expect(minRunningSessions(5, false, true)).toBe(3);
+      expect(minRunningSessions(4, false, true)).toBe(2);
+      expect(minRunningSessions(3, false, true)).toBe(1);
+      expect(minRunningSessions(5, true, true)).toBe(3);
+      expect(minRunningSessions(4, true, true)).toBe(2);
+      expect(minRunningSessions(3, false, false)).toBe(3);
+    });
+  });
+
+  it('a mensagem não cita dias da semana', async () => {
+    const output = strategyOutput('SURPLUS');
+    output.studentMessage = 'Treinos na segunda, quarta e sexta.';
+    const found = (await run(strategyValidators, strategyInput(), output, context())).join(' | ');
+    expect(found).toContain('não cite dias da semana');
   });
 
   it('transtorno alimentar bloqueia qualquer restrição de energia', async () => {
@@ -462,6 +550,222 @@ describe('strength.build_block', () => {
     ]);
     const found = (await run(strengthValidators, strengthInput(), output, ctx)).join(' | ');
     expect(found).toContain('quadríceps');
+    // A correção pede o mínimo real e diz de onde tirar, não o piso cheio (que estoura o tempo).
+    expect(found).toMatch(/quadríceps com 0 séries\/semana; o mínimo exigido é \d+/);
+    expect(found).toContain('tire séries dos grupos acima');
+  });
+});
+
+describe('strength.build_block — orçamento de tempo', () => {
+  const ctx = context({}, ['STRENGTH']);
+  const rules = strengthRules(devMethodologyParameters('STRENGTH'), 'ADVANCED');
+  // Os 6 grupos principais com 3 opções cada, como numa academia completa.
+  const sixGroups = [
+    'peito',
+    'costas',
+    'ombro',
+    'quadríceps',
+    'posterior de coxa',
+    'glúteo',
+  ].flatMap((group) =>
+    [1, 2, 3].map((n) => ({
+      id: `${group}-${n}`,
+      name: `${group} ${n}`,
+      pattern: 'HORIZONTAL_PUSH',
+      muscleGroups: [group],
+      equipment: [],
+      measurement: 'REPS' as const,
+    })),
+  );
+
+  it('2 sessões de 45 min (o caso do Rodrigo): cabem 19 séries com o descanso mínimo; o mínimo por grupo cabe', () => {
+    const budget = strengthTimeBudget(
+      strengthInput({
+        level: 'ADVANCED',
+        sessionsPerWeek: 2,
+        minutesPerSession: 45,
+        candidates: sixGroups,
+      }),
+      rules,
+    );
+    expect(budget.restSeconds).toEqual({ compound: 90, isolation: 60 });
+    expect(budget.maxSetsPerSession).toBe(19);
+    // 6 grupos principais × mínimo cabe em 2 sessões de 19 séries.
+    expect(budget.minWeeklySetsPerMajorGroup * 6).toBeLessThanOrEqual(19 * 2);
+  });
+
+  it('sessão curta: o piso de volume desce para o que cabe, em vez de exigir o impossível', () => {
+    const full = strengthTimeBudget(
+      strengthInput({
+        level: 'ADVANCED',
+        sessionsPerWeek: 2,
+        minutesPerSession: 60,
+        candidates: sixGroups,
+      }),
+      rules,
+    );
+    const short = strengthTimeBudget(
+      strengthInput({
+        level: 'ADVANCED',
+        sessionsPerWeek: 2,
+        minutesPerSession: 25,
+        candidates: sixGroups,
+      }),
+      rules,
+    );
+    expect(short.minWeeklySetsPerMajorGroup).toBeLessThan(full.minWeeklySetsPerMajorGroup);
+    expect(short.minWeeklySetsPerMajorGroup * 6).toBeLessThanOrEqual(short.maxSetsPerSession * 2);
+  });
+
+  it('18 séries em 45 min passam com o descanso mínimo; a correção manda descansar menos antes de cortar', async () => {
+    const minRest = FULL_BODY.map((e) => ({ ...e, sets: 3, rest: 90 }));
+    const fits = block([
+      strengthSession('A', minRest, { estimatedMinutes: 45 }),
+      strengthSession('B', minRest, { estimatedMinutes: 45 }),
+    ]);
+    const input = strengthInput({ level: 'ADVANCED', sessionsPerWeek: 2, minutesPerSession: 45 });
+    let found = (await run(strengthValidators, input, fits, ctx)).join(' | ');
+    expect(found).not.toContain('somam');
+
+    const longRest = FULL_BODY.map((e) => ({ ...e, sets: 3, rest: 150 }));
+    found = (
+      await run(
+        strengthValidators,
+        input,
+        block([
+          strengthSession('A', longRest, { estimatedMinutes: 45 }),
+          strengthSession('B', longRest, { estimatedMinutes: 45 }),
+        ]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('Antes de cortar séries, use o descanso mínimo da metodologia (90 s');
+    expect(found).toContain('cabem até 19 séries');
+  });
+});
+
+describe('strength.build_block — cardio da OMS', () => {
+  const ctx = context({}, ['STRENGTH']);
+  const cardio = {
+    targetMinutes: 150,
+    coveredMinutes: 0,
+    weeklyMinutes: 40,
+    perSessionMinutes: { min: 10, max: 20 },
+    leftoverMinutes: 110,
+    candidates: [
+      { id: 'esteira', name: 'Esteira', intensity: 'MODERATE' as const },
+      { id: 'hiit', name: 'HIIT', intensity: 'VIGOROUS' as const },
+    ],
+  };
+  const withCardio = (
+    key: string,
+    cardioExercises: { id: string; minutes: number }[],
+    over: Partial<PlanSession> = {},
+  ): PlanSession => {
+    const session = strengthSession(key, FULL_BODY, { estimatedMinutes: 70, ...over });
+    (session.content as { exercises: object[] }).exercises.push(
+      ...cardioExercises.map((c) => ({
+        exerciseId: c.id,
+        name: c.id,
+        sets: 1,
+        durationSeconds: c.minutes * 60,
+        loadStrategy: 'BODYWEIGHT',
+        restSeconds: 0,
+      })),
+    );
+    return session;
+  };
+  const input = () => strengthInput({ cardio, sessionsPerWeek: 2, minutesPerSession: 90 });
+
+  it('aceita o cardio no fim de cada sessão, somando a meta da semana', async () => {
+    const output = block([
+      withCardio('A', [{ id: 'esteira', minutes: 20 }]),
+      withCardio('B', [{ id: 'esteira', minutes: 20 }]),
+    ]);
+    const found = (await run(strengthValidators, input(), output, ctx)).join(' | ');
+    expect(found).not.toContain('cardio');
+  });
+
+  it('recusa cardio abaixo da meta, concentrado numa sessão ou fora do fim', async () => {
+    const pouco = block([
+      withCardio('A', [{ id: 'esteira', minutes: 10 }]),
+      strengthSession('B', FULL_BODY, { estimatedMinutes: 70 }),
+    ]);
+    let found = (await run(strengthValidators, input(), pouco, ctx)).join(' | ');
+    expect(found).toContain('de cardio na semana; a meta para as sessões é 40 min');
+    expect(found).toContain('distribua em pelo menos 2');
+
+    const noMeio = withCardio('A', [{ id: 'esteira', minutes: 20 }]);
+    const exercises = (noMeio.content as { exercises: object[] }).exercises;
+    exercises.unshift(exercises.pop() as object);
+    found = (
+      await run(
+        strengthValidators,
+        input(),
+        block([noMeio, withCardio('B', [{ id: 'esteira', minutes: 20 }])]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('o cardio vai no fim da sessão');
+  });
+
+  it('recusa cardio acima da faixa por sessão e vigoroso demais', async () => {
+    let found = (
+      await run(
+        strengthValidators,
+        input(),
+        block([
+          withCardio('A', [{ id: 'esteira', minutes: 30 }]),
+          withCardio('B', [{ id: 'esteira', minutes: 10 }]),
+        ]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('cardio de 30 min na sessão; a faixa é 10–20 min');
+
+    found = (
+      await run(
+        strengthValidators,
+        input(),
+        block([
+          withCardio('A', [{ id: 'hiit', minutes: 20 }]),
+          withCardio('B', [{ id: 'esteira', minutes: 10 }]),
+        ]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('metade do cardio da semana pode ser vigoroso');
+  });
+
+  it('cardio por repetições é recusado e sem meta o exercício de cardio não existe', async () => {
+    const porReps = withCardio('A', [{ id: 'esteira', minutes: 20 }]);
+    const last = (porReps.content as { exercises: Record<string, unknown>[] }).exercises.at(-1);
+    if (last) {
+      delete last.durationSeconds;
+      last.reps = { min: 10, max: 12 };
+    }
+    let found = (
+      await run(
+        strengthValidators,
+        input(),
+        block([porReps, withCardio('B', [{ id: 'esteira', minutes: 20 }])]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('cardio é prescrito por tempo');
+
+    found = (
+      await run(
+        strengthValidators,
+        strengthInput({ sessionsPerWeek: 2, minutesPerSession: 90 }),
+        block([
+          withCardio('A', [{ id: 'esteira', minutes: 20 }]),
+          strengthSession('B', FULL_BODY, { estimatedMinutes: 70 }),
+        ]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('"esteira" não está entre os exercícios permitidos');
   });
 });
 
@@ -478,8 +782,36 @@ const runningInput = (over: Partial<RunningInput> = {}): RunningInput => ({
   recent5kSeconds: 1_800,
   race: null,
   modalityPriority: 1,
+  venue: 'OUTDOOR',
+  starter: false,
+  weekRoles: ['EASY', 'EASY', 'LONG'],
+  workouts: RUNNING_WORKOUT_TYPES.filter((type) => RUNNING_WORKOUTS[type].scope === 'RUNNING').map(
+    (type) => {
+      const spec = RUNNING_WORKOUTS[type];
+      return {
+        type,
+        label: spec.label,
+        kind: spec.kind,
+        intensity: spec.intensity,
+        stimulus: spec.stimulus,
+        objective: spec.objective,
+        adaptation: spec.adaptation,
+        needsPaceAnchor: spec.needsPaceAnchor,
+        ...(spec.terrain ? { terrain: spec.terrain } : {}),
+      };
+    },
+  ),
   ...over,
 });
+
+/** Treino do catálogo de cada sessão de teste (a chave identifica o papel na semana). */
+const WORKOUT_BY_KEY: Record<string, RunningWorkoutType> = {
+  FACIL1: 'EASY_RUN',
+  FACIL2: 'RUNNING_ECONOMY',
+  LONGAO: 'LONG_RUN',
+  Q1: 'AEROBIC_INTERVALS',
+  Q2: 'TEMPO_RUN',
+};
 
 function runSession(
   key: string,
@@ -495,7 +827,13 @@ function runSession(
     weeklyFrequency: 1,
     estimatedMinutes: 40,
     estimatedRpe: 4,
-    content: { modality: 'RUNNING', kind, segments, terrain: 'ANY' },
+    content: {
+      modality: 'RUNNING',
+      kind,
+      workoutType: WORKOUT_BY_KEY[key],
+      segments,
+      terrain: 'ANY',
+    },
     ...over,
   } as PlanSession;
 }
@@ -580,6 +918,134 @@ describe('running.build_block', () => {
       )
     ).join(' | ');
     expect(found).toContain('polimento');
+  });
+
+  const warmupWorkCooldown = [
+    { type: 'WARMUP', durationSeconds: 600, target: { by: 'ZONE', zone: 'Z1' } },
+    {
+      type: 'WORK',
+      repeat: 6,
+      durationSeconds: 60,
+      target: { by: 'RPE', rpe: { min: 6, max: 7 } },
+    },
+    { type: 'RECOVERY', repeat: 6, durationSeconds: 120, target: { by: 'ZONE', zone: 'Z1' } },
+    { type: 'COOLDOWN', durationSeconds: 600, target: { by: 'ZONE', zone: 'Z1' } },
+  ];
+
+  it('cada sessão precisa ser um treino do catálogo, na classe e no terreno certos', async () => {
+    const semTipo = runSession('FACIL1', 'EASY', easy(4_000));
+    (semTipo.content as { workoutType?: string }).workoutType = undefined;
+    let found = (
+      await run(
+        runningValidators,
+        runningInput(),
+        block([semTipo, runSession('LONGAO', 'LONG', easy(5_000))]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('informe o treino do catálogo');
+
+    const input = runningInput({
+      workouts: runningInput().workouts.filter((w) => w.type !== 'RUNNING_ECONOMY'),
+    });
+    found = (
+      await run(
+        runningValidators,
+        input,
+        block([
+          runSession('FACIL2', 'EASY', easy(4_000)),
+          runSession('LONGAO', 'LONG', easy(5_000)),
+        ]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('não está disponível para este aluno');
+
+    const classeErrada = runSession('FACIL1', 'LONG', easy(4_000));
+    found = (
+      await run(
+        runningValidators,
+        runningInput(),
+        block([classeErrada, runSession('LONGAO', 'LONG', easy(5_000))]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('é da classe EASY, não LONG');
+
+    const subida = runSession('Q1', 'INTERVALS', warmupWorkCooldown, { estimatedRpe: 7 });
+    (subida.content as { workoutType?: string }).workoutType = 'HILL_REPEATS';
+    (subida.content as { kind: string }).kind = 'HILLS';
+    found = (
+      await run(
+        runningValidators,
+        runningInput(),
+        block([subida, runSession('LONGAO', 'LONG', easy(5_000))]),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('pede terreno HILLS');
+  });
+
+  it('a semana pede qualidade e longão: só corrida leve é recusada, e com qualidade passa', async () => {
+    const roles = runningInput({ weekRoles: ['QUALITY', 'LONG', 'EASY'] });
+    const soLeve = block([
+      runSession('FACIL1', 'EASY', easy(3_000)),
+      runSession('FACIL2', 'EASY', easy(3_000)),
+    ]);
+    const found = (await run(runningValidators, roles, soLeve, ctx)).join(' | ');
+    expect(found).toContain('a semana pede 1 sessão(ões) de qualidade');
+    expect(found).toContain('um longão');
+
+    const estruturada = block([
+      runSession('Q1', 'INTERVALS', warmupWorkCooldown, { estimatedRpe: 7 }),
+      runSession('FACIL1', 'EASY', easy(3_000)),
+      runSession('LONGAO', 'LONG', easy(4_000), { estimatedMinutes: 50 }),
+    ]);
+    expect(await run(runningValidators, roles, estruturada, ctx)).toEqual([]);
+  });
+
+  it('recusa a semana com o mesmo treino repetido', async () => {
+    const mesmoTreino = (key: string) => {
+      const session = runSession(key, 'EASY', easy(3_000));
+      (session.content as { workoutType?: string }).workoutType = 'EASY_RUN';
+      return session;
+    };
+    const found = (
+      await run(
+        runningValidators,
+        runningInput({ weekRoles: ['EASY', 'EASY', 'EASY'] }),
+        block(
+          [mesmoTreino('FACIL1'), mesmoTreino('FACIL2'), mesmoTreino('FACIL3')].map((s) => ({
+            ...s,
+            weeklyFrequency: 1,
+          })),
+        ),
+        ctx,
+      )
+    ).join(' | ');
+    expect(found).toContain('varie os estímulos');
+  });
+
+  it('o contrato de texto do bloco está nas instruções: poucas notas, curtas', () => {
+    // O contrato recusa nota com mais de 300 caracteres; a instrução pede até 250, no máximo 5.
+    expect(runningTask.instructions).toContain('MÁXIMO 5 notas');
+    expect(runningTask.instructions).toContain('MÁXIMO 250 caracteres');
+    const notes = blockOutputSchema.shape.notes;
+    expect(notes.safeParse(Array.from({ length: 5 }, () => 'x'.repeat(250))).success).toBe(true);
+    expect(notes.safeParse(['x'.repeat(301)]).success).toBe(false);
+  });
+
+  it('o texto não cita dia da semana (a agenda é do sistema), mas ordinais passam', async () => {
+    const output = block([
+      runSession('FACIL1', 'EASY', easy(3_000)),
+      runSession('FACIL2', 'EASY', easy(3_000)),
+      runSession('LONGAO', 'LONG', easy(4_000), { estimatedMinutes: 50 }),
+    ]);
+    output.summary = 'Corrida leve terça e sábado, com revisão na quarta semana.';
+    const found = (await run(runningValidators, runningInput(), output, ctx)).join(' | ');
+    expect(found).toContain('não cite dias da semana');
+    output.summary = 'Três corridas por semana, com revisão na quarta semana e na segunda sessão.';
+    expect(await run(runningValidators, runningInput(), output, ctx)).toEqual([]);
   });
 });
 

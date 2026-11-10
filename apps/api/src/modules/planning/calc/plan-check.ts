@@ -53,7 +53,11 @@ export function occurrencesOf(
 ): WeekOccurrence[] {
   const out: WeekOccurrence[] = [];
   for (const session of sessions) {
-    const fixedDays = externalFixedDays[session.key] ?? [];
+    // Esporte externo: dias do perfil do aluno. Demais: dias que o profissional definiu na revisão.
+    const fixedDays =
+      externalFixedDays[session.key] ??
+      (session.content.modality === 'EXTERNAL_SPORT' ? [] : session.weekdays) ??
+      [];
     for (let i = 0; i < session.weeklyFrequency; i += 1) {
       const weekday = fixedDays[i];
       out.push({
@@ -64,6 +68,7 @@ export function occurrencesOf(
         intense: isIntense(session),
         heavyLower: isHeavyLower(session),
         intenseRun: session.content.modality === 'RUNNING' && isIntense(session),
+        strength: session.content.modality === 'STRENGTH',
         fixedOn: weekday ? addDays(weekStart, WEEKDAYS.indexOf(weekday)) : undefined,
       });
     }
@@ -124,7 +129,10 @@ export function checkTrainingPlan(
     }
   }
 
-  // A semana precisa caber: nenhuma sessão-chave ou importante descartada.
+  violations.push(...pinnedDaysViolations(plan.sessions, context));
+
+  // A semana precisa caber: nenhuma sessão do protocolo pode ficar sem dia toda semana. Se não
+  // cabe, ela sai do plano (ou a frequência cai) — nunca fica prescrita sem acontecer.
   const weekStart = mondayOf(context.startsOn);
   const week = planWeek({
     weekStart,
@@ -142,7 +150,58 @@ export function checkTrainingPlan(
         path: 'sessions',
         message: `a sessão ${dropped.planSessionKey} (${priority}) não cabe na semana do aluno: ${dropped.reason}`,
       });
+    } else if (priority === 'COMPLEMENTARY') {
+      violations.push({
+        path: 'sessions',
+        message: `a sessão complementar ${dropped.planSessionKey} nunca entraria na agenda (${dropped.reason}): tire-a do plano ou reduza a frequência dela`,
+      });
     }
   }
   return violations;
 }
+
+/**
+ * Dias definidos pelo profissional (`weekdays`): o aluno precisa ter horário no dia, para o tempo
+ * da sessão, e dois treinos só dividem o dia se a metodologia permite.
+ */
+function pinnedDaysViolations(
+  sessions: readonly PlanSession[],
+  context: PlanCheckContext,
+): Violation[] {
+  const violations: Violation[] = [];
+  const windows = windowsByWeekday(context.windows);
+  const perDay = new Map<Weekday, number>();
+  for (const session of sessions) {
+    if (session.content.modality === 'EXTERNAL_SPORT' || !session.weekdays) continue;
+    for (const weekday of session.weekdays) {
+      const fits = (windows[weekday] ?? []).some((w) => w.maxMinutes >= session.estimatedMinutes);
+      if (!fits) {
+        violations.push({
+          path: 'sessions',
+          message: `${session.title}: o aluno não tem horário livre de ${session.estimatedMinutes} min na ${WEEKDAY_NAME[weekday]}`,
+        });
+      }
+      perDay.set(weekday, (perDay.get(weekday) ?? 0) + 1);
+    }
+  }
+  const limit = context.rules.allowTwoSessionsSameDay ? 2 : 1;
+  for (const [weekday, count] of perDay) {
+    if (count > limit) {
+      violations.push({
+        path: 'sessions',
+        message: `${count} treinos na ${WEEKDAY_NAME[weekday]}; a metodologia permite no máximo ${limit} por dia`,
+      });
+    }
+  }
+  return violations;
+}
+
+const WEEKDAY_NAME: Readonly<Record<Weekday, string>> = {
+  MON: 'segunda-feira',
+  TUE: 'terça-feira',
+  WED: 'quarta-feira',
+  THU: 'quinta-feira',
+  FRI: 'sexta-feira',
+  SAT: 'sábado',
+  SUN: 'domingo',
+};

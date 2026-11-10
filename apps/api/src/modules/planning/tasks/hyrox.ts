@@ -12,6 +12,7 @@ import { hyroxRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
 import {
   outputLanguageViolations,
+  weekdayMentionViolations,
   BODY_COMPOSITION_RULE,
   PROFESSIONAL_INSTRUCTION_RULE,
   professionalInstructionSchema,
@@ -141,7 +142,14 @@ export const hyroxValidators: Validator<HyroxInput, BlockOutput>[] = [
     if (!output.sessions.some((s) => s.priority === 'KEY')) {
       violations.push({ path: 'sessions', message: 'marque ao menos uma sessão-chave' });
     }
-    return [...violations, ...outputLanguageViolations(output)];
+    return [
+      ...violations,
+      ...weekdayMentionViolations([
+        { path: 'summary', text: output.summary },
+        ...output.notes.map((text, i) => ({ path: `notes.${i}`, text })),
+      ]),
+      ...outputLanguageViolations(output),
+    ];
   },
 ];
 
@@ -156,7 +164,7 @@ Regras de montagem:
 3. Tipos de sessão: STATION_SKILL (técnica), STATION_STRENGTH (força nas estações), COMPROMISED_RUNNING (corrida logo após estação), ENGINE (motor aeróbio) e SIMULATION (só se "simulationDue" for verdadeiro, no máximo um por semana, nunca no polimento).
 4. Cargas das estações: nunca acima de 120% da carga oficial da categoria (metodologia); use carga progressiva coerente com o nível. Estação sem equipamento oficial (fora de "stationsWithEquipment") não leva carga oficial — use uma alternativa descrita em "notes".
 5. Cada estação usa UM volume (distância, repetições ou duração). Corridas e estações têm alvo de intensidade claro (zona, ritmo, FC ou PSE).
-6. Marque ao menos uma sessão-chave. notes: como progredir e o que observar. summary: 2 a 3 frases claras, sem prometer tempo de prova.
+6. Marque ao menos uma sessão-chave. notes: como progredir e o que observar. summary: 2 a 3 frases claras, sem prometer tempo de prova e sem citar dias da semana (a agenda é calculada pelo sistema).
 7. ${BODY_COMPOSITION_RULE}
 8. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',

@@ -1,883 +1,146 @@
 'use client';
 
 /**
- * Revisão do protocolo na fila: o profissional vê o plano inteiro (com a semana simulada),
- * edita à mão o que precisar ou pede um novo protocolo aos agentes com uma orientação. Aprovar
- * e recusar continuam na seção de decisão do caso. O servidor confere toda edição.
+ * Revisão do protocolo (treino ou alimentar): o plano é o protagonista. Alternância Ver/Editar no
+ * cabeçalho; na edição, o mesmo plano vira campos e uma barra fixa embaixo diz se há alterações
+ * não salvas, com "Descartar" e "Salvar edição". O servidor confere toda edição e devolve cada
+ * problema com o caminho do campo — mostrado no resumo do topo e na linha (sessão, exercício,
+ * refeição) a que se refere. Sair com alterações pede confirmação.
+ *
+ * Com `caseId` é o rascunho de um caso da Fila; com `amend`, o protocolo que o aluno já usa (a
+ * edição vira a próxima versão e o aluno recebe o protocolo atualizado). Aprovar, recusar, pedir
+ * ajuste e regerar ficam na barra de decisão da tela do caso (`protocol-case.tsx`).
  */
-import { useCallback, useState } from 'react';
+import { Eye, Pencil, RefreshCw, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
   editProtocolRequestSchema,
-  HYROX_STATION_LABELS,
-  MEAL_SLOT_LABELS,
-  RUNNING_SESSION_KIND_LABELS,
-  SESSION_MODALITY_LABELS,
-  SESSION_PRIORITY_LABELS,
-  type DailyTargets,
-  type MealItem,
-  type MealOption,
   type NutritionPlanStructure,
-  type PlanSession,
   type ProtocolReview as Protocol,
-  type StrengthExercise,
   type TrainingPlanStructure,
 } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
-import { MealMenu } from '@/components/plano/meal-menu';
-import { brl, OPTION_LETTERS } from '@/lib/meal-menu';
 import {
   amendActiveProtocol,
   getActiveProtocol,
   getExceptionProtocol,
   ProtocolEditError,
-  requestProtocolAdjustment,
   saveExceptionProtocol,
 } from '@/lib/control-center-api';
+import { groupIssues, isDirty, issueKey, type LocatedIssue } from '@/lib/protocol-edit';
+import { mealLabel, planOverview, sessionLetter } from '@/lib/protocol-format';
+import { cn } from '@/lib/utils';
 
+import { AnamnesisAnswersButton } from './anamnesis-answers';
 import { ConfirmAction } from './confirm-action';
-import { ResourceState, useControlCenterResource } from './control-center-ui';
+import { useControlCenterResource } from './control-center-ui';
+import { NutritionPlanEditor, NutritionPlanView } from './nutrition-plan';
+import { TrainingPlanEditor, TrainingPlanView } from './training-plan';
 
-type TrainingProtocol = Extract<Protocol, { kind: 'TRAINING' }>;
-type ExerciseOption = TrainingProtocol['exerciseOptions'][number];
-
-const LOAD_LABELS: Record<StrengthExercise['loadStrategy'], string> = {
-  BODYWEIGHT: 'Peso corporal',
-  FIXED_LOAD: 'Carga fixa',
-  DOUBLE_PROGRESSION: 'Dupla progressão',
-  RIR: 'Por reserva (RIR)',
-};
-const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
-const SLOTS: Record<string, string> = { MORNING: 'manhã', AFTERNOON: 'tarde', EVENING: 'noite' };
-const field =
-  'mt-1 w-full rounded-md border border-input bg-card px-2 py-1 text-label text-foreground';
-const card = 'rounded-xl border border-border bg-card p-4 sm:p-5';
-
-function day(date: string, slot: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  const label = `${WEEKDAYS[d.getUTCDay()] ?? ''} ${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-  return SLOTS[slot] ? `${label} · ${SLOTS[slot]}` : label;
+export interface ProtocolEditState {
+  editing: boolean;
+  dirty: boolean;
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-}: {
-  label: string;
-  value: number | undefined;
-  onChange: (value: number | undefined) => void;
-  min: number;
-  max: number;
-  step?: number;
-}) {
-  return (
-    <label className="block text-xs text-muted-foreground">
-      {label}
-      <input
-        type="number"
-        inputMode="decimal"
-        min={min}
-        max={max}
-        step={step}
-        value={value ?? ''}
-        onChange={(event) =>
-          onChange(event.target.value === '' ? undefined : Number(event.target.value))
-        }
-        className={field}
-      />
-    </label>
-  );
-}
+type Structure = TrainingPlanStructure | NutritionPlanStructure;
+const NBSP = String.fromCharCode(160);
+type SchemaIssue = NonNullable<
+  ReturnType<typeof editProtocolRequestSchema.safeParse>['error']
+>['issues'][number];
 
-function TextField({
-  label,
-  value,
-  onChange,
-  rows,
-  maxLength,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  rows?: number;
-  maxLength: number;
-}) {
-  return (
-    <label className="block text-xs text-muted-foreground">
-      {label}
-      {rows ? (
-        <textarea
-          rows={rows}
-          maxLength={maxLength}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={field}
-        />
-      ) : (
-        <input
-          maxLength={maxLength}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={field}
-        />
-      )}
-    </label>
-  );
-}
-
-const lines = (text: string) =>
-  text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-function sessionSummary(session: PlanSession): string[] {
-  const { content } = session;
-  if (content.modality === 'STRENGTH') {
-    return content.exercises.map(
-      (e) =>
-        `${e.name} — ${e.sets} × ${e.durationSeconds ? `${e.durationSeconds} s` : `${e.reps?.min ?? ''}–${e.reps?.max ?? ''}`} · descanso ${e.restSeconds} s${e.rir !== undefined ? ` · RIR ${e.rir}` : ''} · ${LOAD_LABELS[e.loadStrategy]}`,
-    );
+/** Mensagem do Zod (inglês por padrão) em português, para a conferência local antes do envio. */
+function zodMessage(issue: SchemaIssue): string {
+  switch (issue.code) {
+    case 'too_small':
+      return issue.origin === 'string'
+        ? 'Preencha este campo.'
+        : issue.origin === 'array'
+          ? `Precisa de pelo menos ${String(issue.minimum)}.`
+          : `O valor mínimo é ${String(issue.minimum)}.`;
+    case 'too_big':
+      return issue.origin === 'string'
+        ? `Texto longo demais (até ${String(issue.maximum)} caracteres).`
+        : issue.origin === 'array'
+          ? `No máximo ${String(issue.maximum)}.`
+          : `O valor máximo é ${String(issue.maximum)}.`;
+    case 'invalid_type':
+      return 'Campo obrigatório ou com valor inválido.';
+    default:
+      return /[a-z]/.test(issue.message) && !/\b(expected|invalid|must)\b/i.test(issue.message)
+        ? issue.message
+        : 'Valor inválido.';
   }
-  if (content.modality === 'RUNNING') {
-    return [RUNNING_SESSION_KIND_LABELS[content.kind]].concat(
-      content.segments.map(
-        (s) =>
-          `${s.repeat && s.repeat > 1 ? `${s.repeat} × ` : ''}${s.distanceMeters ? `${s.distanceMeters} m` : `${Math.round((s.durationSeconds ?? 0) / 60)} min`} (${s.type})`,
-      ),
-    );
+}
+
+/** Onde o problema está, em palavras ("Força A · Agachamento", "Almoço", "Dia de treino"). */
+export function issueLocation(key: string, structure: Structure): string | null {
+  const [kind, a, b] = key.split(':');
+  if ('sessions' in structure) {
+    const session = structure.sessions[Number(a)];
+    if (!session) return null;
+    const name = session.title.trim() || `Sessão ${sessionLetter(Number(a))}`;
+    if (kind === 'session') return name;
+    if (kind === 'exercise') {
+      const exercise =
+        session.content.modality === 'STRENGTH' ? session.content.exercises[Number(b)] : undefined;
+      return exercise ? `${name} · ${exercise.name}` : name;
+    }
+    return null;
   }
-  if (content.modality === 'HYROX') {
-    return content.blocks.map((b) =>
-      b.type === 'STATION'
-        ? HYROX_STATION_LABELS[b.station]
-        : b.type === 'RUN'
-          ? `Corrida ${b.distanceMeters} m`
-          : `Pausa ${b.durationSeconds} s`,
-    );
+  if (kind === 'meal') {
+    const meal = structure.meals[Number(a)];
+    return meal ? mealLabel(meal.slot) : null;
   }
-  return [`Esporte externo: ${content.label} · ${content.plannedMinutes} min`];
+  if (kind === 'targets') return a === 'restDay' ? 'Dia de descanso' : 'Dia de treino';
+  return null;
 }
 
-function TrainingView({ protocol }: { protocol: TrainingProtocol }) {
-  const { structure, weekPreview } = protocol;
-  return (
-    <div className="space-y-4">
-      <p className="text-label">{structure.summary}</p>
-      <div>
-        <h3 className="text-label font-semibold">Primeira semana (simulada a partir de hoje)</h3>
-        {weekPreview.sessions.length > 0 ? (
-          <ul className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
-            {weekPreview.sessions.map((s) => (
-              <li key={`${s.date}-${s.sessionKey}-${s.occurrence}`}>
-                <span className="font-medium">{day(s.date, s.slot)}</span> · {s.title}
-                <span className="text-muted-foreground">
-                  {' '}
-                  ({SESSION_MODALITY_LABELS[s.modality]})
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-1 text-xs text-muted-foreground">Nenhuma sessão coube nesta semana.</p>
-        )}
-        {weekPreview.dropped.length > 0 ? (
-          <ul className="mt-2 list-disc pl-5 text-xs text-muted-foreground">
-            {weekPreview.dropped.map((d, i) => (
-              <li key={`${d.sessionKey}-${i}`}>
-                Ficou fora: {d.title} — {d.reason}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-      <div>
-        <h3 className="text-label font-semibold">Fases</h3>
-        <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
-          {structure.phases.map((p) => (
-            <li key={p.name}>
-              {p.name} · {p.weeks} sem. · {p.focus}
-              {p.endsWithDeload ? ' · termina com semana leve' : ''}
-            </li>
-          ))}
-        </ul>
-      </div>
-      {structure.sessions.map((session) => (
-        <div key={session.key} className="rounded-lg border border-border p-3">
-          <p className="text-label font-medium">
-            {session.title}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {SESSION_MODALITY_LABELS[session.content.modality]} ·{' '}
-              {SESSION_PRIORITY_LABELS[session.priority]} · {session.weeklyFrequency}×/sem ·{' '}
-              {session.estimatedMinutes} min
-            </span>
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">{session.purpose}</p>
-          <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs">
-            {sessionSummary(session).map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
+function overviewOf(protocol: Protocol, queuePresentation: boolean): string {
+  if (protocol.kind === 'TRAINING') {
+    if (!queuePresentation) return planOverview(protocol.structure);
+    const frequency = protocol.structure.sessions.reduce(
+      (total, session) => total + session.weeklyFrequency,
+      0,
+    );
+    const weeks = protocol.structure.phases.reduce((total, phase) => total + phase.weeks, 0);
+    const focus =
+      protocol.strategy?.title ??
+      protocol.structure.phases
+        .map((phase) => phase.name)
+        .filter(Boolean)
+        .join(' · ');
+    return [
+      focus,
+      `${frequency}× por semana`,
+      weeks > 0 ? `duração: ${weeks} ${weeks === 1 ? 'semana' : 'semanas'}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  const { meals, trainingDay } = protocol.structure;
+  return `${meals.length} refeições · ${trainingDay.energyKcal.min}–${trainingDay.energyKcal.max} kcal no dia de treino`;
 }
 
-function Targets({ label, targets }: { label: string; targets: DailyTargets }) {
-  return (
-    <div className="rounded-lg border border-border p-3 text-xs">
-      <p className="text-label font-medium">{label}</p>
-      <p className="mt-1">
-        {targets.energyKcal.min}–{targets.energyKcal.max} kcal · P {targets.proteinG} g · C{' '}
-        {targets.carbsG} g · G {targets.fatG} g · fibras {targets.fiberG} g · água {targets.waterMl}{' '}
-        ml
-      </p>
-    </div>
-  );
-}
-
-function NutritionView({ structure }: { structure: NutritionPlanStructure }) {
-  return (
-    <div className="space-y-4">
-      <p className="text-label">{structure.summary}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Targets label="Dia de treino" targets={structure.trainingDay} />
-        <Targets label="Dia de descanso" targets={structure.restDay} />
-      </div>
-      {structure.meals.map((meal) => (
-        <div key={meal.slot} className="rounded-lg border border-border p-3 text-xs">
-          <p className="text-label font-medium">
-            {MEAL_SLOT_LABELS[meal.slot]}
-            <span className="ml-2 font-normal text-muted-foreground">
-              {Math.round(meal.energyShare * 100)}% da energia · {meal.proteinG} g de proteína
-            </span>
-          </p>
-          <p className="mt-1">{meal.guidance}</p>
-          <MealMenu meal={meal} />
-        </div>
-      ))}
-      {structure.estimatedDailyCostBrl ? (
-        <p className="text-xs text-muted-foreground">
-          Custo estimado do cardápio: ~{brl(structure.estimatedDailyCostBrl)} por dia (~
-          {brl(structure.estimatedDailyCostBrl * 30)} no mês), estimativa do nutricionista de IA.
-        </p>
-      ) : null}
-      {structure.freeMeals ? (
-        <div>
-          <h3 className="text-label font-semibold">
-            Refeições livres · {structure.freeMeals.perWeek}x por semana
-          </h3>
-          <ul className="mt-1 list-disc pl-5 text-xs">
-            {structure.freeMeals.options.map((o) => (
-              <li key={o.title}>
-                <strong>{o.title}</strong>: {o.description} (~{o.energyKcal} kcal). {o.fitTip}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      <div>
-        <h3 className="text-label font-semibold">Orientações</h3>
-        <ul className="mt-1 list-disc pl-5 text-xs">
-          {structure.guidelines.map((g) => (
-            <li key={g}>{g}</li>
-          ))}
-        </ul>
-      </div>
-      {structure.supplements.length > 0 ? (
-        <div>
-          <h3 className="text-label font-semibold">Suplementos</h3>
-          <ul className="mt-1 list-disc pl-5 text-xs">
-            {structure.supplements.map((s) => (
-              <li key={s.name}>
-                {s.name}: {s.guidance}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ExerciseEditor({
-  exercise,
-  options,
-  onChange,
-}: {
-  exercise: StrengthExercise;
-  options: readonly ExerciseOption[];
-  onChange: (exercise: StrengthExercise) => void;
-}) {
-  const known = options.some((o) => o.id === exercise.exerciseId);
-  const swap = (id: string) => {
-    const option = options.find((o) => o.id === id);
-    if (!option) return;
-    const byTime = option.measurement === 'DURATION';
-    onChange({
-      ...exercise,
-      exerciseId: option.id,
-      name: option.name,
-      reps: byTime ? undefined : (exercise.reps ?? { min: 8, max: 12 }),
-      durationSeconds: byTime ? (exercise.durationSeconds ?? 30) : undefined,
-    });
-  };
-  return (
-    <div className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-6">
-      <label className="block text-xs text-muted-foreground sm:col-span-6">
-        Exercício
-        <select
-          value={exercise.exerciseId}
-          onChange={(event) => swap(event.target.value)}
-          className={field}
-        >
-          {known ? null : <option value={exercise.exerciseId}>{exercise.name}</option>}
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <NumberField
-        label="Séries"
-        value={exercise.sets}
-        min={1}
-        max={12}
-        onChange={(sets) => onChange({ ...exercise, sets: sets ?? 1 })}
-      />
-      {exercise.durationSeconds !== undefined ? (
-        <NumberField
-          label="Duração (s)"
-          value={exercise.durationSeconds}
-          min={5}
-          max={3600}
-          onChange={(durationSeconds) =>
-            onChange({ ...exercise, durationSeconds: durationSeconds ?? 5 })
-          }
-        />
-      ) : (
-        <>
-          <NumberField
-            label="Reps mín."
-            value={exercise.reps?.min}
-            min={1}
-            max={100}
-            onChange={(min) =>
-              onChange({ ...exercise, reps: { min: min ?? 1, max: exercise.reps?.max ?? 1 } })
-            }
-          />
-          <NumberField
-            label="Reps máx."
-            value={exercise.reps?.max}
-            min={1}
-            max={100}
-            onChange={(max) =>
-              onChange({ ...exercise, reps: { min: exercise.reps?.min ?? 1, max: max ?? 1 } })
-            }
-          />
-        </>
-      )}
-      <NumberField
-        label="Descanso (s)"
-        value={exercise.restSeconds}
-        min={0}
-        max={600}
-        step={15}
-        onChange={(restSeconds) => onChange({ ...exercise, restSeconds: restSeconds ?? 0 })}
-      />
-      <NumberField
-        label="RIR"
-        value={exercise.rir}
-        min={0}
-        max={5}
-        onChange={(rir) => onChange({ ...exercise, rir })}
-      />
-      <label className="block text-xs text-muted-foreground">
-        Carga
-        <select
-          value={exercise.loadStrategy}
-          onChange={(event) =>
-            onChange({
-              ...exercise,
-              loadStrategy: event.target.value as StrengthExercise['loadStrategy'],
-            })
-          }
-          className={field}
-        >
-          {Object.entries(LOAD_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="sm:col-span-6">
-        <TextField
-          label="Observação ao aluno"
-          value={exercise.notes ?? ''}
-          maxLength={400}
-          onChange={(notes) => onChange({ ...exercise, notes: notes || undefined })}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TrainingEditor({
-  structure,
-  options,
-  onChange,
-}: {
-  structure: TrainingPlanStructure;
-  options: readonly ExerciseOption[];
-  onChange: (structure: TrainingPlanStructure) => void;
-}) {
-  const setSession = (index: number, session: PlanSession) =>
-    onChange({
-      ...structure,
-      sessions: structure.sessions.map((s, i) => (i === index ? session : s)),
-    });
-  return (
-    <div className="space-y-4">
-      {structure.sessions.map((session, si) => (
-        <fieldset key={session.key} className="space-y-2 rounded-lg border border-border p-3">
-          <legend className="px-1 text-label font-medium">{session.title}</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <TextField
-              label="Título"
-              value={session.title}
-              maxLength={80}
-              onChange={(title) => setSession(si, { ...session, title })}
-            />
-            <NumberField
-              label="Vezes por semana"
-              value={session.weeklyFrequency}
-              min={1}
-              max={7}
-              onChange={(weeklyFrequency) =>
-                setSession(si, { ...session, weeklyFrequency: weeklyFrequency ?? 1 })
-              }
-            />
-            <NumberField
-              label="Duração estimada (min)"
-              value={session.estimatedMinutes}
-              min={5}
-              max={300}
-              step={5}
-              onChange={(estimatedMinutes) =>
-                setSession(si, { ...session, estimatedMinutes: estimatedMinutes ?? 5 })
-              }
-            />
-          </div>
-          {session.content.modality === 'STRENGTH'
-            ? session.content.exercises.map((exercise, ei) => (
-                <ExerciseEditor
-                  key={`${ei}-${exercise.exerciseId}`}
-                  exercise={exercise}
-                  options={options}
-                  onChange={(next) => {
-                    if (session.content.modality !== 'STRENGTH') return;
-                    setSession(si, {
-                      ...session,
-                      content: {
-                        ...session.content,
-                        exercises: session.content.exercises.map((e, i) => (i === ei ? next : e)),
-                      },
-                    });
-                  }}
-                />
-              ))
-            : null}
-        </fieldset>
-      ))}
-    </div>
-  );
-}
-
-function TargetsEditor({
-  label,
-  targets,
-  onChange,
-}: {
-  label: string;
-  targets: DailyTargets;
-  onChange: (targets: DailyTargets) => void;
-}) {
-  const set = (key: Exclude<keyof DailyTargets, 'energyKcal'>) => (value: number | undefined) =>
-    onChange({ ...targets, [key]: value ?? 0 });
-  return (
-    <fieldset className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-4">
-      <legend className="px-1 text-label font-medium">{label}</legend>
-      <NumberField
-        label="Energia mín. (kcal)"
-        value={targets.energyKcal.min}
-        min={800}
-        max={6000}
-        step={10}
-        onChange={(min) =>
-          onChange({ ...targets, energyKcal: { ...targets.energyKcal, min: min ?? 800 } })
-        }
-      />
-      <NumberField
-        label="Energia máx. (kcal)"
-        value={targets.energyKcal.max}
-        min={800}
-        max={6000}
-        step={10}
-        onChange={(max) =>
-          onChange({ ...targets, energyKcal: { ...targets.energyKcal, max: max ?? 800 } })
-        }
-      />
-      <NumberField
-        label="Proteína (g)"
-        value={targets.proteinG}
-        min={30}
-        max={400}
-        onChange={set('proteinG')}
-      />
-      <NumberField
-        label="Carboidrato (g)"
-        value={targets.carbsG}
-        min={20}
-        max={1000}
-        onChange={set('carbsG')}
-      />
-      <NumberField
-        label="Gordura (g)"
-        value={targets.fatG}
-        min={20}
-        max={300}
-        onChange={set('fatG')}
-      />
-      <NumberField
-        label="Fibras (g)"
-        value={targets.fiberG}
-        min={10}
-        max={80}
-        onChange={set('fiberG')}
-      />
-      <NumberField
-        label="Água (ml)"
-        value={targets.waterMl}
-        min={1000}
-        max={8000}
-        step={100}
-        onChange={set('waterMl')}
-      />
-    </fieldset>
-  );
-}
-
-type FoodOption = NonNullable<Extract<Protocol, { kind: 'NUTRITION' }>['foodOptions']>[number];
-
-function FoodSelect({
-  value,
-  name,
-  foods,
-  onChange,
-}: {
-  value: string;
-  name: string;
-  foods: readonly FoodOption[];
-  onChange: (food: FoodOption) => void;
-}) {
-  const known = foods.some((f) => f.id === value);
-  return (
-    <select
-      aria-label="Alimento"
-      value={value}
-      onChange={(event) => {
-        const food = foods.find((f) => f.id === event.target.value);
-        if (food) onChange(food);
-      }}
-      className={field}
-    >
-      {known ? null : <option value={value}>{name}</option>}
-      {foods.map((f) => (
-        <option key={f.id} value={f.id}>
-          {f.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-/** Uma opção de cardápio: título, custo estimado e alimentos com a quantidade e as trocas. */
-function OptionEditor({
-  index,
-  option,
-  foods,
-  onChange,
-}: {
-  index: number;
-  option: MealOption;
-  foods: readonly FoodOption[];
-  onChange: (option: MealOption) => void;
-}) {
-  const setItem = (ii: number, next: MealItem) =>
-    onChange({ ...option, items: option.items.map((it, i) => (i === ii ? next : it)) });
-  return (
-    <div className="space-y-2 rounded-lg border border-border p-3">
-      <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
-        <TextField
-          label={`Opção ${OPTION_LETTERS[index] ?? index + 1}: título`}
-          value={option.title}
-          maxLength={80}
-          onChange={(title) => onChange({ ...option, title })}
-        />
-        <NumberField
-          label="Custo estimado (R$)"
-          value={option.estimatedCostBrl}
-          min={0}
-          max={300}
-          step={0.5}
-          onChange={(cost) => onChange({ ...option, estimatedCostBrl: cost ?? 0 })}
-        />
-      </div>
-      {option.items.map((item, ii) => (
-        <div key={ii} className="space-y-1.5 rounded-md bg-secondary/40 p-2">
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_7rem_auto]">
-            <label className="block text-xs text-muted-foreground">
-              Alimento
-              <FoodSelect
-                value={item.foodId}
-                name={item.name}
-                foods={foods}
-                onChange={(food) =>
-                  setItem(ii, { ...item, foodId: food.id, name: food.name, swaps: [] })
-                }
-              />
-            </label>
-            <NumberField
-              label="Quantidade (g)"
-              value={item.grams}
-              min={1}
-              max={1500}
-              onChange={(grams) => setItem(ii, { ...item, grams: grams ?? 1 })}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={option.items.length <= 1}
-              onClick={() =>
-                onChange({ ...option, items: option.items.filter((_, i) => i !== ii) })
-              }
-            >
-              Remover
-            </Button>
-          </div>
-          {item.unit ? (
-            <p className="text-xs text-muted-foreground">
-              Medida caseira: {item.unit.grams} g por {item.unit.singular}.
-            </p>
-          ) : null}
-          {item.swaps.map((swap, si) => (
-            <div key={si} className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
-              <label className="block text-xs text-muted-foreground">
-                Troca equivalente {si + 1} (a quantidade é calculada)
-                <FoodSelect
-                  value={swap.foodId}
-                  name={swap.name}
-                  foods={foods}
-                  onChange={(food) =>
-                    setItem(ii, {
-                      ...item,
-                      swaps: item.swaps.map((sw, i) =>
-                        i === si ? { ...sw, foodId: food.id, name: food.name } : sw,
-                      ),
-                    })
-                  }
-                />
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setItem(ii, { ...item, swaps: item.swaps.filter((_, i) => i !== si) })
-                }
-              >
-                Remover troca
-              </Button>
-            </div>
-          ))}
-          {item.swaps.length < 3 && foods[0] ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setItem(ii, {
-                  ...item,
-                  swaps: [
-                    ...item.swaps,
-                    {
-                      foodId: foods[0]?.id ?? '',
-                      name: foods[0]?.name ?? '',
-                      grams: 100,
-                      energyKcal: 0,
-                    },
-                  ],
-                })
-              }
-            >
-              Adicionar troca
-            </Button>
-          ) : null}
-        </div>
-      ))}
-      {option.items.length < 8 && foods[0] ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            onChange({
-              ...option,
-              items: [
-                ...option.items,
-                {
-                  foodId: foods[0]?.id ?? '',
-                  name: foods[0]?.name ?? '',
-                  grams: 100,
-                  energyKcal: 0,
-                  proteinG: 0,
-                  carbsG: 0,
-                  fatG: 0,
-                  swaps: [],
-                },
-              ],
-            })
-          }
-        >
-          Adicionar alimento
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
-function NutritionEditor({
-  structure,
-  foods,
-  onChange,
-}: {
-  structure: NutritionPlanStructure;
-  foods: readonly FoodOption[];
-  onChange: (structure: NutritionPlanStructure) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <TargetsEditor
-        label="Dia de treino"
-        targets={structure.trainingDay}
-        onChange={(trainingDay) => onChange({ ...structure, trainingDay })}
-      />
-      <TargetsEditor
-        label="Dia de descanso"
-        targets={structure.restDay}
-        onChange={(restDay) => onChange({ ...structure, restDay })}
-      />
-      {structure.meals.map((meal, mi) => {
-        const setMeal = (next: typeof meal) =>
-          onChange({ ...structure, meals: structure.meals.map((m, i) => (i === mi ? next : m)) });
-        return (
-          <fieldset
-            key={meal.slot}
-            className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-2"
-          >
-            <legend className="px-1 text-label font-medium">{MEAL_SLOT_LABELS[meal.slot]}</legend>
-            <NumberField
-              label="Parte da energia do dia (%)"
-              value={Math.round(meal.energyShare * 100)}
-              min={0}
-              max={100}
-              onChange={(pct) => setMeal({ ...meal, energyShare: (pct ?? 0) / 100 })}
-            />
-            <NumberField
-              label="Proteína (g)"
-              value={meal.proteinG}
-              min={0}
-              max={150}
-              onChange={(proteinG) => setMeal({ ...meal, proteinG: proteinG ?? 0 })}
-            />
-            <div className="sm:col-span-2">
-              <TextField
-                label="Orientação"
-                value={meal.guidance}
-                rows={2}
-                maxLength={300}
-                onChange={(guidance) => setMeal({ ...meal, guidance })}
-              />
-            </div>
-            {meal.options ? (
-              <div className="space-y-3 sm:col-span-2">
-                {meal.options.map((option, oi) => (
-                  <OptionEditor
-                    key={oi}
-                    index={oi}
-                    option={option}
-                    foods={foods}
-                    onChange={(next) =>
-                      setMeal({
-                        ...meal,
-                        options: meal.options?.map((o, i) => (i === oi ? next : o)),
-                      })
-                    }
-                  />
-                ))}
-                <p className="text-xs text-muted-foreground">
-                  Os nutrientes, os totais e a quantidade das trocas são recalculados pelo servidor
-                  ao salvar.
-                </p>
-              </div>
-            ) : (
-              <div className="sm:col-span-2">
-                <TextField
-                  label="Exemplos (um por linha, até 5)"
-                  value={meal.examples.join('\n')}
-                  rows={3}
-                  maxLength={1100}
-                  onChange={(text) => setMeal({ ...meal, examples: lines(text) })}
-                />
-              </div>
-            )}
-          </fieldset>
-        );
-      })}
-      <TextField
-        label="Orientações (uma por linha, até 10)"
-        value={structure.guidelines.join('\n')}
-        rows={5}
-        maxLength={3100}
-        onChange={(text) => onChange({ ...structure, guidelines: lines(text) })}
-      />
-    </div>
-  );
-}
-
-/**
- * Com `caseId` é o protocolo em revisão de um caso da fila; com `amend` é o protocolo que o
- * aluno já usa (a edição vira a versão seguinte e o aluno recebe o protocolo atualizado).
- */
 export function ProtocolReview({
   caseId,
   amend,
   canAct,
   onChanged,
+  onStateChange,
+  queuePresentation = false,
+  onLoaded,
 }: {
   caseId?: string;
   amend?: { studentId: string; kind: 'TRAINING' | 'NUTRITION' };
   canAct: boolean;
   onChanged: () => Promise<void>;
+  queuePresentation?: boolean;
+  /** Avisa a tela de cima se está editando e se há mudanças. */
+  onStateChange?: (state: ProtocolEditState) => void;
+  /** O protocolo salvo (carregado ou recarregado): a tela do caso mostra mesociclo e datas. */
+  onLoaded?: (protocol: Protocol) => void;
 }) {
   const amendStudentId = amend?.studentId;
   const amendKind = amend?.kind;
@@ -890,23 +153,76 @@ export function ProtocolReview({
   );
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   const [draft, setDraft] = useState<Protocol | null>(null);
-  const [issues, setIssues] = useState<readonly string[]>([]);
+  const [issues, setIssues] = useState<LocatedIssue[]>([]);
   const [saving, setSaving] = useState(false);
-  const [instruction, setInstruction] = useState('');
+  const [notice, setNotice] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const issuesRef = useRef<HTMLDivElement>(null);
+
+  const dirty = Boolean(data && draft && isDirty(data.structure, draft.structure));
+  const editing = draft !== null;
+
+  useEffect(() => {
+    onStateChange?.({ editing, dirty });
+  }, [editing, dirty, onStateChange]);
+
+  useEffect(() => {
+    if (data) onLoaded?.(data);
+  }, [data, onLoaded]);
+
+  // Fechar a aba ou recarregar com alterações não salvas pede confirmação do navegador.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const announce = useCallback((message: string) => {
+    // O mesmo texto duas vezes seguidas também é lido: alterna um espaço invisível no fim.
+    setAnnouncement((previous) => (previous === message ? message + NBSP : message));
+  }, []);
 
   if (!data) {
+    if (loading && !error) return <PlanSkeleton />;
     return (
-      <ResourceState
-        loading={loading}
-        error={error}
-        forbidden={forbidden}
-        onRetry={() => void refresh()}
-      />
+      <section role="alert" className="rounded-xl border border-coral bg-card p-5">
+        <p className="flex items-center gap-2 text-label font-semibold">
+          <TriangleAlert aria-hidden="true" className="size-4" />
+          {forbidden ? 'O protocolo não faz parte do seu acesso' : 'O protocolo não carregou'}
+        </p>
+        {error ? <p className="mt-1 text-label text-muted-foreground">{error}</p> : null}
+        {!forbidden ? (
+          <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+            <RefreshCw aria-hidden="true" /> Tentar novamente
+          </Button>
+        ) : null}
+      </section>
     );
   }
 
   const editable = canAct && data.editable;
-  const title = data.kind === 'TRAINING' ? 'Protocolo de treino' : 'Protocolo alimentar';
+  const title = data.kind === 'TRAINING' ? 'Plano de treino' : 'Plano alimentar';
+  const current = draft ?? data;
+  const grouped = groupIssues(issues);
+
+  const startEdit = () => {
+    setDraft(data);
+    setIssues([]);
+    setNotice('');
+  };
+  const discard = () => {
+    setDraft(null);
+    setIssues([]);
+  };
+  const change = (structure: Structure, structural = false) => {
+    if (!draft) return;
+    setDraft({ ...draft, structure } as Protocol);
+    // Mudou a ordem ou a lista: os problemas apontados podem não estar mais naquela linha.
+    if (structural && issues.length > 0) setIssues([]);
+  };
 
   const save = async () => {
     if (!draft) return;
@@ -915,7 +231,18 @@ export function ProtocolReview({
       structure: draft.structure,
     });
     if (!parsed.success) {
-      setIssues(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`));
+      setIssues(
+        parsed.error.issues.map((issue) => ({
+          // O caminho vem a partir do corpo do pedido (`structure.sessions…`).
+          key: issueKey(
+            issue.path
+              .filter((p): p is string | number => typeof p !== 'symbol')
+              .slice(issue.path[0] === 'structure' ? 1 : 0),
+          ),
+          message: zodMessage(issue),
+        })),
+      );
+      requestAnimationFrame(() => issuesRef.current?.focus());
       return;
     }
     setSaving(true);
@@ -924,124 +251,262 @@ export function ProtocolReview({
       if (amend) await amendActiveProtocol(amend.studentId, parsed.data);
       else await saveExceptionProtocol(caseId ?? '', parsed.data);
       setDraft(null);
+      setNotice(
+        amend
+          ? 'Emenda salva. O aluno recebe a versão atualizada no WhatsApp.'
+          : 'Edição salva e conferida pelo servidor.',
+      );
       await Promise.all([refresh(), onChanged()]);
     } catch (err) {
       setIssues(
-        err instanceof ProtocolEditError && err.issues.length > 0
-          ? err.issues
-          : [err instanceof Error ? err.message : 'Não foi possível salvar o protocolo.'],
+        err instanceof ProtocolEditError && err.details.length > 0
+          ? err.details.map((detail) => ({ key: issueKey(detail.path), message: detail.message }))
+          : [
+              {
+                key: 'plan',
+                message:
+                  err instanceof Error ? err.message : 'Não foi possível salvar o protocolo.',
+              },
+            ],
       );
+      requestAnimationFrame(() => issuesRef.current?.focus());
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <section className={card} aria-label={title}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-h3 font-semibold">
-          {title} <span className="text-xs font-normal text-muted-foreground">v{data.version}</span>
-        </h2>
-        {editable && !draft ? (
-          <Button type="button" variant="outline" onClick={() => setDraft(data)}>
-            {amend ? 'Emendar protocolo' : 'Editar à mão'}
-          </Button>
+    <section aria-label={title} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex flex-wrap items-center gap-2 text-h3 font-semibold">
+            {queuePresentation ? 'Protocolo' : title}
+            <span className="rounded-full border border-border px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground">
+              {queuePresentation ? `versão ${data.version}` : `v${data.version}`}
+            </span>
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+            {overviewOf(current, queuePresentation)}
+            {!queuePresentation && data.strategy ? ` · ${data.strategy.title}` : ''}
+          </p>
+        </div>
+        {queuePresentation ? (
+          <div className="flex items-center gap-1">
+            {caseId ? <AnamnesisAnswersButton caseId={caseId} variant="icon" /> : null}
+            {editable ? (
+              <ModeButton
+                icon={Pencil}
+                label="Editar"
+                active={editing}
+                compact
+                onClick={() => {
+                  if (!editing) startEdit();
+                }}
+              />
+            ) : null}
+          </div>
+        ) : editable ? (
+          <div
+            role="group"
+            aria-label="Modo do protocolo"
+            className="inline-flex rounded-lg border border-border p-0.5"
+          >
+            {dirty ? (
+              <DiscardConfirm
+                onConfirm={discard}
+                trigger={(open) => (
+                  <ModeButton icon={Eye} label="Ver" active={false} onClick={open} />
+                )}
+              />
+            ) : (
+              <ModeButton icon={Eye} label="Ver" active={!editing} onClick={discard} />
+            )}
+            <ModeButton
+              icon={Pencil}
+              label={amend ? 'Emendar' : 'Editar'}
+              active={editing}
+              onClick={() => {
+                if (!editing) startEdit();
+              }}
+            />
+          </div>
         ) : null}
-      </div>
-      {data.strategy ? (
-        <p className="mt-1 text-xs text-muted-foreground">Estratégia: {data.strategy.title}</p>
+      </header>
+
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+      {notice && !editing ? (
+        <p role="status" className="mt-4 text-xs text-muted-foreground">
+          {notice}
+        </p>
       ) : null}
 
-      <div className="mt-4">
-        {draft ? (
-          draft.kind === 'TRAINING' ? (
-            <TrainingEditor
-              structure={draft.structure}
-              options={draft.exerciseOptions}
-              onChange={(structure) => setDraft({ ...draft, structure })}
-            />
-          ) : (
-            <NutritionEditor
-              structure={draft.structure}
-              foods={draft.foodOptions ?? []}
-              onChange={(structure) => setDraft({ ...draft, structure })}
-            />
-          )
-        ) : data.kind === 'TRAINING' ? (
-          <TrainingView protocol={data} />
-        ) : (
-          <NutritionView structure={data.structure} />
-        )}
-      </div>
-
-      {issues.length > 0 ? (
-        <div role="alert" className="mt-4 rounded-lg border border-destructive p-3 text-xs">
-          <p className="font-medium">O protocolo editado não passou na conferência:</p>
-          <ul className="mt-1 list-disc pl-5">
-            {issues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
+      {issues.length > 0 && draft ? (
+        <div
+          ref={issuesRef}
+          tabIndex={-1}
+          role="alert"
+          className="mt-4 rounded-lg border border-coral bg-background p-3 text-label outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+        >
+          <p className="font-medium">
+            {issues.length === 1
+              ? 'A edição não passou na conferência:'
+              : `A edição não passou na conferência (${issues.length} pontos):`}
+          </p>
+          <ul className="mt-1.5 space-y-1 text-xs">
+            {issues.map((issue, index) => {
+              const where = issueLocation(issue.key, draft.structure);
+              return (
+                <li key={`${index}-${issue.message}`}>
+                  {where ? <span className="font-medium">{where}: </span> : null}
+                  {issue.message}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}
 
-      {draft ? (
-        <div className="mt-4 flex flex-wrap gap-3">
-          <Button type="button" disabled={saving} onClick={() => void save()}>
-            {saving ? 'Conferindo…' : 'Salvar edição'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={saving}
-            onClick={() => {
-              setDraft(null);
-              setIssues([]);
-            }}
-          >
-            Descartar edição
-          </Button>
-        </div>
-      ) : null}
-
-      {amend && draft ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Ao salvar, vira a próxima versão do protocolo do aluno (a agenda é mantida) e ele recebe o
-          protocolo atualizado no WhatsApp.
-        </p>
-      ) : null}
-
-      {editable && !draft && !amend ? (
-        <div className="mt-6 border-t border-border pt-4">
-          <h3 className="text-label font-semibold">Pedir ajuste aos agentes</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            O caso é encerrado e os agentes refazem só este protocolo com a sua orientação; o novo
-            volta para a fila.
-          </p>
-          <TextField
-            label="Orientação (ex.: trocar a corrida de sábado por bike, reduzir o volume de pernas)"
-            value={instruction}
-            rows={3}
-            maxLength={1000}
-            onChange={setInstruction}
-          />
-          <div className="mt-3">
-            <ConfirmAction
-              triggerLabel="Pedir ajuste"
-              triggerVariant="outline"
-              title="Pedir um novo protocolo aos agentes?"
-              description="Este rascunho é descartado e o novo chega à fila para a sua revisão."
-              confirmLabel="Pedir ajuste"
-              confirmDisabled={instruction.trim().length < 3}
-              onConfirm={async () => {
-                await requestProtocolAdjustment(caseId ?? '', instruction.trim());
-                setInstruction('');
-                await onChanged();
-              }}
+      <div className="mt-5">
+        {draft ? (
+          draft.kind === 'TRAINING' ? (
+            <TrainingPlanEditor
+              structure={draft.structure}
+              weekModel={draft.weekModel}
+              options={draft.exerciseOptions}
+              issues={grouped}
+              onChange={change}
+              announce={announce}
             />
+          ) : (
+            <NutritionPlanEditor
+              structure={draft.structure}
+              foods={draft.foodOptions ?? []}
+              issues={grouped}
+              onChange={change}
+            />
+          )
+        ) : data.kind === 'TRAINING' ? (
+          <TrainingPlanView protocol={data} compact={queuePresentation} />
+        ) : (
+          <NutritionPlanView structure={data.structure} compact={queuePresentation} />
+        )}
+      </div>
+
+      {draft ? (
+        <div className="sticky bottom-0 z-20 -mx-4 mt-6 -mb-4 rounded-b-xl border-t border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/85 sm:-mx-5 sm:-mb-5 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="status" className="mr-auto flex min-w-0 items-center gap-2 text-xs">
+              <span
+                aria-hidden="true"
+                className={cn('size-2 shrink-0 rounded-full', dirty ? 'bg-coral' : 'bg-border')}
+              />
+              <span className={dirty ? 'font-medium text-foreground' : 'text-muted-foreground'}>
+                {dirty ? 'Alterações não salvas' : 'Nenhuma alteração ainda'}
+              </span>
+              {amend && dirty ? (
+                <span className="hidden text-muted-foreground sm:inline">
+                  · ao salvar, vira a versão {data.version + 1} e o aluno recebe
+                </span>
+              ) : null}
+            </p>
+            {dirty ? (
+              <DiscardConfirm
+                onConfirm={discard}
+                trigger={(open) => (
+                  <Button type="button" variant="outline" disabled={saving} onClick={open}>
+                    Descartar
+                  </Button>
+                )}
+              />
+            ) : (
+              <Button type="button" variant="outline" disabled={saving} onClick={discard}>
+                Sair da edição
+              </Button>
+            )}
+            <Button type="button" disabled={!dirty || saving} onClick={() => void save()}>
+              {saving ? 'Conferindo…' : 'Salvar edição'}
+            </Button>
           </div>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ModeButton({
+  icon: Icon,
+  label,
+  active,
+  compact = false,
+  onClick,
+}: {
+  icon: typeof Eye;
+  label: string;
+  active: boolean;
+  compact?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={compact ? label : undefined}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-10 items-center gap-1.5 rounded-md text-label font-medium transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring',
+        compact ? 'w-10 justify-center p-0' : 'px-3',
+        active
+          ? 'bg-secondary text-secondary-foreground'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      <Icon aria-hidden="true" className="size-4" />
+      <span className={compact ? 'sr-only' : undefined}>{label}</span>
+    </button>
+  );
+}
+
+function DiscardConfirm({
+  onConfirm,
+  trigger,
+}: {
+  onConfirm: () => void;
+  trigger: (open: () => void) => ReactNode;
+}) {
+  return (
+    <ConfirmAction
+      triggerLabel="Descartar"
+      title="Descartar as alterações?"
+      description="O que você mudou nesta edição se perde. O protocolo volta a ser o que está salvo."
+      confirmLabel="Descartar alterações"
+      destructive
+      onConfirm={async () => {
+        onConfirm();
+      }}
+      renderTrigger={trigger}
+    />
+  );
+}
+
+function PlanSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Carregando o protocolo"
+      className="space-y-4 rounded-xl border border-border bg-card p-5"
+    >
+      <div className="h-5 w-48 animate-pulse rounded bg-muted" />
+      <div className="h-3 w-72 max-w-full animate-pulse rounded bg-muted" />
+      <div className="grid gap-px overflow-hidden rounded-xl border border-border sm:grid-cols-7">
+        {[0, 1, 2, 3, 4, 5, 6].map((key) => (
+          <div key={key} className="h-16 animate-pulse bg-muted" />
+        ))}
+      </div>
+      {[0, 1].map((key) => (
+        <div key={key} className="h-36 animate-pulse rounded-xl bg-muted" />
+      ))}
+    </div>
   );
 }

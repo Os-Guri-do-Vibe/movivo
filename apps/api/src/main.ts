@@ -15,6 +15,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService, getAppConfig, InvalidConfigurationError } from './core/config';
+import { installPostgresDriverCrashGuard } from './core/process/driver-crash-guard';
 import { setupSwagger } from './core/swagger/setup-swagger';
 
 /**
@@ -35,6 +36,14 @@ async function bootstrap(): Promise<void> {
    * memoizado, então o `ConfigModule` reaproveita e não relê os segredos.
    */
   getAppConfig();
+
+  // Uma conexão encerrada pelo banco no meio de uma escrita derruba o Node por um bug do
+  // driver `postgres`, fora de qualquer promise. Absorve só esse erro (ver o módulo).
+  const processLogger = new Logger('ProcessGuard');
+  installPostgresDriverCrashGuard({
+    error: (payload, message) => processLogger.error({ ...payload, msg: message }),
+    fatal: (payload, message) => processLogger.fatal({ ...payload, msg: message }),
+  });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // O logger do Nest fica em buffer até o pino assumir, para que nenhuma linha de

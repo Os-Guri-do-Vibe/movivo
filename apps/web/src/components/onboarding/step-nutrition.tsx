@@ -3,6 +3,13 @@
 import { MEAL_SLOT_LABELS, type MealSlot } from '@movivo/shared';
 
 import {
+  COOKING_ITEMS,
+  HUNGER_ITEMS,
+  RESTRICTION_ITEMS,
+  SEVERITY_ITEMS,
+  SUPPLEMENT_ITEMS,
+} from './anamnesis-options';
+import {
   ChoiceGroup,
   Combobox,
   CurrencyInput,
@@ -19,9 +26,7 @@ import {
   mealsOutsideError,
   nutritionComplete,
   type AllergyDraft,
-  type DietaryRestriction,
   type NutritionDraft,
-  type Supplement,
 } from './onboarding-drafts';
 import { Labeled, StepFrame } from './step-frame';
 
@@ -29,72 +34,6 @@ const MEAL_ITEMS = (Object.keys(MEAL_SLOT_LABELS) as MealSlot[]).map((value) => 
   value,
   label: MEAL_SLOT_LABELS[value],
 }));
-
-const RESTRICTION_ITEMS: { value: DietaryRestriction; label: string }[] = [
-  { value: 'VEGETARIAN', label: 'Vegetariano' },
-  { value: 'VEGAN', label: 'Vegano' },
-  { value: 'LACTOSE_FREE', label: 'Sem lactose' },
-  { value: 'GLUTEN_FREE', label: 'Sem glúten' },
-  { value: 'HALAL', label: 'Halal' },
-  { value: 'KOSHER', label: 'Kosher' },
-];
-
-const SUPPLEMENT_ITEMS: { value: Supplement; label: string }[] = [
-  { value: 'CREATINE', label: 'Creatina' },
-  { value: 'WHEY', label: 'Whey ou outra proteína em pó' },
-  { value: 'CAFFEINE', label: 'Cafeína' },
-  { value: 'VITAMIN_D', label: 'Vitamina D' },
-  { value: 'OMEGA_3', label: 'Ômega 3' },
-  { value: 'MULTIVITAMIN', label: 'Multivitamínico' },
-  { value: 'OTHER', label: 'Outro' },
-];
-
-const HUNGER_ITEMS: { value: NonNullable<NutritionDraft['hunger']>; label: string }[] = [
-  { value: 'LOW', label: 'Pouca fome' },
-  { value: 'NORMAL', label: 'Normal' },
-  { value: 'HIGH', label: 'Muita fome' },
-  { value: 'VARIES', label: 'Varia bastante' },
-];
-
-const SEVERITY_ITEMS: {
-  value: NonNullable<AllergyDraft['severity']>;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: 'INTOLERANCE',
-    label: 'Intolerância',
-    description: 'Desconforto na digestão, como gases, inchaço ou diarreia.',
-  },
-  {
-    value: 'ALLERGY',
-    label: 'Alergia',
-    description: 'Reação no corpo, como coceira, manchas na pele ou inchaço leve.',
-  },
-  {
-    value: 'SEVERE_ALLERGY',
-    label: 'Alergia grave',
-    description: 'Reação forte, como falta de ar ou inchaço na boca ou na garganta.',
-  },
-];
-
-const COOKING_ITEMS: {
-  value: NonNullable<NutritionDraft['cookingCapacity']>;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: 'NONE',
-    label: 'Não cozinho',
-    description: 'Como fora, peço comida ou alguém cozinha para mim.',
-  },
-  {
-    value: 'BASIC',
-    label: 'Cozinho o básico',
-    description: 'Arroz, ovo, carne grelhada, coisas simples.',
-  },
-  { value: 'GOOD', label: 'Cozinho bem', description: 'Faço receitas variadas sem dificuldade.' },
-];
 
 const MAX_ALLERGIES = 10;
 

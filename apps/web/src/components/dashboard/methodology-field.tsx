@@ -20,10 +20,15 @@ const TABLE_GRID: Readonly<Record<number, string>> = {
 };
 
 /** Texto curto da faixa usual (o que a literatura e a prática sustentam). */
-function plausibleText(field: FieldSpec | ColumnSpec): string | null {
-  if ((field.kind !== 'number' && field.kind !== 'range') || !field.plausible) return null;
+function plausibleText(
+  field: FieldSpec | ColumnSpec,
+  override?: readonly [number, number],
+): string | null {
+  if (field.kind !== 'number' && field.kind !== 'range') return null;
+  const plausible = override ?? field.plausible;
+  if (!plausible) return null;
   const unit = field.unit ? ` ${field.unit}` : '';
-  return `faixa usual ${field.plausible[0]}–${field.plausible[1]}${unit}`;
+  return `faixa usual ${plausible[0]}–${plausible[1]}${unit}`;
 }
 
 function toNumber(raw: string): number | null {
@@ -372,7 +377,16 @@ export function MethodologyField({
                     rowGrid,
                   )}
                 >
-                  <p className="text-label font-medium">{row.label}</p>
+                  <div>
+                    <p className="text-label font-medium">{row.label}</p>
+                    {row.plausible ? (
+                      <p className="text-xs text-muted-foreground">
+                        {Object.values(field.columns).map((column) =>
+                          plausibleText(column, row.plausible),
+                        )[0] ?? null}
+                      </p>
+                    ) : null}
+                  </div>
                   {Object.entries(field.columns).map(([key, column]) => (
                     <div key={key}>
                       <p
@@ -380,7 +394,9 @@ export function MethodologyField({
                         className="mb-1 text-xs text-muted-foreground @2xl:hidden"
                       >
                         {column.label}
-                        {plausibleText(column) ? ` · ${plausibleText(column)}` : ''}
+                        {plausibleText(column, row.plausible)
+                          ? ` · ${plausibleText(column, row.plausible)}`
+                          : ''}
                       </p>
                       <SimpleInput
                         id={`${id}-${row.key}-${key}`}

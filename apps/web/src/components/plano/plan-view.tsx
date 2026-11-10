@@ -1,8 +1,8 @@
 import {
-  EXTERNAL_SPORT_LABELS,
+  externalSportName,
   HYROX_STATION_LABELS,
   MEAL_SLOT_LABELS,
-  RUNNING_SESSION_KIND_LABELS,
+  runningSessionLabel,
   SESSION_MODALITY_LABELS,
   SESSION_PRIORITY_LABELS,
   type DailyTargets,
@@ -24,11 +24,11 @@ const SLOT_LABELS = {
 } as const;
 
 const ENERGY_LABELS: Record<string, string> = {
-  DEFICIT: 'Déficit moderado de energia',
-  MAINTENANCE: 'Manutenção de energia',
-  SURPLUS: 'Superávit moderado de energia',
+  DEFICIT: 'Déficit moderado de calorias',
+  MAINTENANCE: 'Manutenção de calorias',
+  SURPLUS: 'Superávit moderado de calorias',
   RECOMPOSITION: 'Recomposição corporal',
-  PERFORMANCE_FUELING: 'Energia para o desempenho',
+  PERFORMANCE_FUELING: 'Calorias para o desempenho',
 };
 
 /** "terça, 04/11 · à noite". A data chega como calendário (sem fuso), então o parse é em UTC. */
@@ -53,7 +53,7 @@ function sessionDetail(session: PlanSession): string[] {
     });
   }
   if (content.modality === 'RUNNING') {
-    return [RUNNING_SESSION_KIND_LABELS[content.kind]].concat(
+    return [runningSessionLabel(content)].concat(
       content.segments.map((s) => {
         const volume = s.distanceMeters
           ? `${(s.distanceMeters / 1000).toLocaleString('pt-BR')} km`
@@ -71,7 +71,7 @@ function sessionDetail(session: PlanSession): string[] {
           : `Descanso ${b.durationSeconds} s`,
     );
   }
-  return [`${EXTERNAL_SPORT_LABELS[content.sport]} — ${content.plannedMinutes} min`];
+  return [`${externalSportName(content.sport, content.label)} — ${content.plannedMinutes} min`];
 }
 
 function Targets({ title, targets }: { title: string; targets: DailyTargets }) {
@@ -79,7 +79,7 @@ function Targets({ title, targets }: { title: string; targets: DailyTargets }) {
     <div className="rounded-xl border border-border bg-card p-4">
       <h4 className="text-label font-semibold">{title}</h4>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-body">
-        <dt className="text-muted-foreground">Energia</dt>
+        <dt className="text-muted-foreground">Caloria</dt>
         <dd>
           {targets.energyKcal.min}–{targets.energyKcal.max} kcal
         </dd>

@@ -80,4 +80,34 @@ describe('applyAdjustment', () => {
     const shortened = applyAdjustment(rounds, { shorten: { targetMinutes: 20, factor: 0.5 } });
     expect(shortened.modality === 'HYROX' && shortened.rounds).toBe(2);
   });
+
+  it('progressão (periodização): a corrida cresce na parte principal e preserva aquecimento e recuperação', () => {
+    const running: SessionContent = {
+      modality: 'RUNNING',
+      kind: 'INTERVALS',
+      workoutType: 'AEROBIC_INTERVALS',
+      terrain: 'ANY',
+      segments: [
+        { type: 'WARMUP', durationSeconds: 600, target: { by: 'ZONE', zone: 'Z1' } },
+        {
+          type: 'WORK',
+          repeat: 6,
+          durationSeconds: 120,
+          target: { by: 'RPE', rpe: { min: 6, max: 7 } },
+        },
+        { type: 'RECOVERY', repeat: 6, durationSeconds: 90, target: { by: 'ZONE', zone: 'Z1' } },
+        { type: 'STEADY', distanceMeters: 4_000, target: { by: 'ZONE', zone: 'Z2' } },
+        { type: 'COOLDOWN', durationSeconds: 600, target: { by: 'ZONE', zone: 'Z1' } },
+      ],
+    };
+    const grown = applyAdjustment(running, { progress: { factor: 1.2 } });
+    if (grown.modality !== 'RUNNING') throw new Error('modalidade');
+    expect(grown.segments[0]?.durationSeconds).toBe(600);
+    expect(grown.segments[1]?.repeat).toBe(7);
+    expect(grown.segments[2]?.repeat).toBe(6);
+    expect(grown.segments[3]?.distanceMeters).toBe(4_800);
+    expect(grown.segments[4]?.durationSeconds).toBe(600);
+    // Sem fator maior que 1 não muda nada; musculação não é afetada.
+    expect(applyAdjustment(running, { progress: { factor: 1 } })).toEqual(running);
+  });
 });

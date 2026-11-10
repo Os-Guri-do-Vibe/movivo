@@ -4,8 +4,14 @@
  * Esportes que o aluno já pratica por fora (etapa 4, "Sua semana"). Não são prescritos pela
  * MOVIVO: entram como o que já ocupa a semana, para os treinos serem encaixados em volta.
  */
-import { EXTERNAL_SPORT_LABELS, type ExternalSport, type Weekday } from '@movivo/shared';
+import {
+  EXTERNAL_SPORT_LABELS,
+  OTHER_SPORT_NAME_MAX,
+  type ExternalSport,
+  type Weekday,
+} from '@movivo/shared';
 
+import { RPE_ITEMS } from './anamnesis-options';
 import { DAYS_PER_WEEK_ITEMS } from './choice-items';
 import {
   ClockInput,
@@ -15,27 +21,23 @@ import {
   FieldLabel,
   FieldValidation,
   QuestionField,
+  TextInput,
   YesNo,
 } from './fields';
 import {
   fixedDaysExceedSessions,
   newExternalSport,
   sportDurationError,
+  sportOtherError,
   type ExternalSportDraft,
 } from './onboarding-drafts';
+import { Labeled } from './step-frame';
 import { WEEKDAY_ITEMS } from './weekday-items';
 
 const SPORT_ITEMS = (Object.keys(EXTERNAL_SPORT_LABELS) as ExternalSport[]).map((value) => ({
   value,
   label: EXTERNAL_SPORT_LABELS[value],
 }));
-
-const RPE_ITEMS = [
-  { value: '3', label: 'Leve', description: 'Dá para conversar sem esforço.' },
-  { value: '5', label: 'Moderada', description: 'Respiração acelerada, mas confortável.' },
-  { value: '7', label: 'Intensa', description: 'Desafiadora, só consigo falar frases curtas.' },
-  { value: '9', label: 'Muito intensa', description: 'Perto do meu limite, saio exausto(a).' },
-];
 
 const MAX_EXTERNAL_SPORTS = 3;
 
@@ -65,11 +67,34 @@ function ExternalSportFields({
       <Combobox
         id={`sport-name-${index}`}
         legend="Qual esporte?"
-        items={SPORT_ITEMS.filter((item) => !unavailable.includes(item.value))}
+        items={SPORT_ITEMS.filter(
+          (item) => item.value === 'OTHER' || !unavailable.includes(item.value),
+        )}
         value={sport.sport}
-        onChange={(value) => onChange({ ...sport, sport: value })}
+        onChange={(value) =>
+          onChange({
+            ...sport,
+            sport: value,
+            sportOther: value === 'OTHER' ? sport.sportOther : '',
+          })
+        }
         placeholder="Selecione o esporte"
       />
+      {sport.sport === 'OTHER' && (
+        <div className="border-l-2 border-primary pl-4">
+          <Labeled id={`sport-other-${index}`} label="Qual esporte você pratica?">
+            <FieldValidation error={sportOtherError(sport)}>
+              <TextInput
+                id={`sport-other-${index}`}
+                value={sport.sportOther}
+                onChange={(sportOther) => onChange({ ...sport, sportOther })}
+                placeholder="Ex.: jiu-jitsu, vôlei, escalada"
+                maxLength={OTHER_SPORT_NAME_MAX}
+              />
+            </FieldValidation>
+          </Labeled>
+        </div>
+      )}
       <Combobox
         id={`sport-sessions-${index}`}
         legend="Quantos dias por semana você pratica esse esporte?"

@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq';
 import { describe, expect, it, vi } from 'vitest';
 
+import { PROTOCOL_REVIEW_WINDOW_MS } from '../coaching/policy/protocol-review-window';
 import { DomainEventHandlers, type DomainEvent } from '../domain-events/domain-event-handlers';
 import { QUEUE } from '../jobs/jobs.config';
 import type { QueueManager } from '../jobs/queue-manager.service';
@@ -45,9 +46,9 @@ const opened = (payload: DomainEvent['payload']): DomainEvent => ({
 });
 
 describe('ProtocolAutoReleaseWorker', () => {
-  it('agenda a liberação do protocolo opcional para o fim da janela de 2h', async () => {
+  it('agenda a liberação do protocolo opcional para o fim da janela de 24h', async () => {
     const { enqueue, deliver } = setup();
-    const dueAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const dueAt = new Date(Date.now() + PROTOCOL_REVIEW_WINDOW_MS);
     await deliver(
       opened({
         exceptionCaseId: 'caso-1',
@@ -67,8 +68,8 @@ describe('ProtocolAutoReleaseWorker', () => {
     expect(name).toBe('auto-release');
     expect(data).toEqual(target);
     expect(options.jobId).toBe('auto-release_caso-1');
-    expect(options.delay).toBeGreaterThan(2 * 60 * 60 * 1000 - 5_000);
-    expect(options.delay).toBeLessThanOrEqual(2 * 60 * 60 * 1000);
+    expect(options.delay).toBeGreaterThan(PROTOCOL_REVIEW_WINDOW_MS - 5_000);
+    expect(options.delay).toBeLessThanOrEqual(PROTOCOL_REVIEW_WINDOW_MS);
   });
 
   it('a revisão obrigatória nunca agenda liberação', async () => {

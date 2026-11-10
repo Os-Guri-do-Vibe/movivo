@@ -53,6 +53,7 @@ import {
   loggingGapPlanTask,
   mealReminderTask,
 } from '../progress/meal-routine-tasks';
+import { strengthDomainCases } from './strength-domain-cases';
 
 /**
  * Catálogo das tarefas do dia a dia do aluno (leitura de print de treino, foto e texto de
@@ -80,7 +81,12 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(classifyTask, classifyCases);
     this.registry.register(answerTask, [...answerCases, ...answerEvidenceCases]);
     for (const task of Object.values(specialistAnswerTasks)) {
-      this.registry.register(task, task === specialistAnswerTasks.NUTRITION ? recipeCases : []);
+      this.registry.register(
+        task,
+        task === specialistAnswerTasks.NUTRITION
+          ? recipeCases
+          : (strengthDomainCases[task.id] ?? []),
+      );
     }
     this.registry.register(substituteTask, substituteCases);
     this.registry.register(riskTask, riskCases);
@@ -90,7 +96,7 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(habitsTask, habitsCases);
     this.registry.register(painAssessmentTask, []);
     this.registry.register(painGuidanceTask, []);
-    this.registry.register(strengthReviewTask, []);
+    this.registry.register(strengthReviewTask, strengthDomainCases[strengthReviewTask.id] ?? []);
     this.registry.register(enduranceReviewTask, []);
     this.registry.register(workoutFeedbackTask, []);
     this.registry.register(missedSessionPlanTask, []);
@@ -102,7 +108,7 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(trackingGapTask, followUpCases[trackingGapTask.id] ?? []);
     this.registry.register(qualityReviewTask, []);
     this.registry.register(photoComparisonTask, []);
-    this.registry.register(cycleReviewTask, []);
+    this.registry.register(cycleReviewTask, strengthDomainCases[cycleReviewTask.id] ?? []);
     this.registry.register(cycleWrapUpTask, []);
     this.registry.register(nutritionFollowUpTask, followUpCases[nutritionFollowUpTask.id] ?? []);
     this.registry.register(trainingFollowUpTask, followUpCases[trainingFollowUpTask.id] ?? []);

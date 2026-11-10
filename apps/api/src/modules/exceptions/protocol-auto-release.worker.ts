@@ -2,7 +2,7 @@
  * Liberação automática da "Revisão Humana Opcional" da Fila do Profissional.
  *
  * Quando um protocolo opcional entra na fila (`ExceptionOpened` com `autoReleaseAt`), um job com
- * atraso até o fim da janela de 2h é agendado. Ao vencer, o worker libera o protocolo pelo mesmo
+ * atraso até o fim da janela de 24h é agendado. Ao vencer, o worker libera o protocolo pelo mesmo
  * caminho da aprovação humana (decisão `AUTO_RELEASE`), e o planejamento ativa o rascunho e
  * entrega o link ao aluno quando treino e alimentação estão prontos. A revisão obrigatória nunca
  * agenda job: só sai por aprovação de um profissional.

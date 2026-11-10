@@ -7,9 +7,9 @@
 import PDFDocument from 'pdfkit';
 
 import {
-  EXTERNAL_SPORT_LABELS,
+  externalSportName,
   HYROX_STATION_LABELS,
-  RUNNING_SESSION_KIND_LABELS,
+  runningSessionLabel,
   type EnduranceTarget,
   type PlanSession,
 } from '@movivo/shared';
@@ -36,11 +36,11 @@ export const SLOT_LABELS: Record<string, string> = {
   ANY: '',
 };
 export const ENERGY_LABELS: Record<string, string> = {
-  DEFICIT: 'Déficit moderado de energia',
-  MAINTENANCE: 'Manutenção de energia',
-  SURPLUS: 'Superávit moderado de energia',
+  DEFICIT: 'Déficit moderado de calorias',
+  MAINTENANCE: 'Manutenção de calorias',
+  SURPLUS: 'Superávit moderado de calorias',
   RECOMPOSITION: 'Recomposição corporal',
-  PERFORMANCE_FUELING: 'Energia para o desempenho',
+  PERFORMANCE_FUELING: 'Calorias para o desempenho',
 };
 export const SEGMENT_LABELS: Record<string, string> = {
   WARMUP: 'Aquecimento',
@@ -133,7 +133,7 @@ export function sessionLines(session: PlanSession): string[] {
   }
   if (content.modality === 'RUNNING') {
     return [
-      RUNNING_SESSION_KIND_LABELS[content.kind],
+      runningSessionLabel(content),
       ...content.segments.map((s) => {
         const reps = s.repeat && s.repeat > 1 ? `${s.repeat} × ` : '';
         const notes = s.notes ? `. ${s.notes}` : '';
@@ -155,7 +155,7 @@ export function sessionLines(session: PlanSession): string[] {
     ];
   }
   return [
-    `${EXTERNAL_SPORT_LABELS[content.sport]}: ${content.plannedMinutes} min, esforço ~${content.plannedRpe}/10. Você já pratica; o plano se organiza em volta.`,
+    `${externalSportName(content.sport, content.label)}: ${content.plannedMinutes} min, esforço ~${content.plannedRpe}/10. Você já pratica; o plano se organiza em volta.`,
   ];
 }
 
