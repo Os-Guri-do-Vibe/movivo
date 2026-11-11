@@ -3,15 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
 
-const { getKnowledgeDocuments, getMethodology } = vi.hoisted(() => ({
-  getKnowledgeDocuments: vi.fn(),
-  getMethodology: vi.fn(),
-}));
+const { getKnowledgeDocuments } = vi.hoisted(() => ({ getKnowledgeDocuments: vi.fn() }));
 
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
   getKnowledgeDocuments,
-  getMethodology,
 }));
 
 import { KnowledgeHistoryPanel } from './knowledge-history';
@@ -20,30 +16,6 @@ const meta = {
   generatedAt: '2026-08-20T12:00:00.000Z',
   timezone: 'America/Sao_Paulo' as const,
   dataQuality: [],
-};
-
-const methodologyResponse = {
-  data: {
-    versions: [
-      {
-        id: '11111111-1111-4111-8111-111111111111',
-        version: 1,
-        status: 'PUBLISHED' as const,
-        content: 'x'.repeat(200),
-        sha256: 'a'.repeat(64),
-        changeNote: 'Versão inicial migrada.',
-        createdBy: 'Rodrigo',
-        reviewedBy: 'Profissional CREF',
-        createdAt: '2026-08-18T12:00:00.000Z',
-        reviewedAt: '2026-08-18T13:00:00.000Z',
-        publishedAt: '2026-08-18T14:00:00.000Z',
-        statusChangedAt: '2026-08-19T09:00:00.000Z',
-        current: true,
-      },
-    ],
-    currentVersionId: '11111111-1111-4111-8111-111111111111',
-  },
-  meta,
 };
 
 const knowledgeResponse = {
@@ -82,31 +54,23 @@ const knowledgeResponse = {
 
 beforeEach(() => {
   getKnowledgeDocuments.mockReset();
-  getMethodology.mockReset();
 });
 
 describe('KnowledgeHistoryPanel', () => {
-  it('mescla metodologia e documentos em uma linha do tempo, mais recente primeiro', async () => {
+  it('lista os documentos em uma linha do tempo, mais recente primeiro', async () => {
     getKnowledgeDocuments.mockResolvedValue(knowledgeResponse);
-    getMethodology.mockResolvedValue(methodologyResponse);
 
     render(<KnowledgeHistoryPanel />);
 
     const items = await screen.findAllByRole('listitem');
-    expect(items).toHaveLength(2);
-    // O evento de documento (2026-08-20) é mais recente que o da metodologia (2026-08-19).
+    expect(items).toHaveLength(1);
     expect(items[0]).toHaveTextContent('Evidência de descanso');
-    expect(items[1]).toHaveTextContent('Versão 1');
   });
 
   it('sem eventos, mostra o estado vazio', async () => {
     getKnowledgeDocuments.mockResolvedValue({
       ...knowledgeResponse,
       data: { ...knowledgeResponse.data, documents: [] },
-    });
-    getMethodology.mockResolvedValue({
-      ...methodologyResponse,
-      data: { ...methodologyResponse.data, versions: [] },
     });
 
     render(<KnowledgeHistoryPanel />);
@@ -132,38 +96,18 @@ describe('KnowledgeHistoryPanel', () => {
         ],
       },
     });
-    getMethodology.mockResolvedValue({
-      ...methodologyResponse,
-      data: {
-        ...methodologyResponse.data,
-        versions: [
-          {
-            ...methodologyResponse.data.versions[0],
-            createdBy: null,
-            reviewedBy: null,
-            changeNote: null,
-            reviewedAt: null,
-            publishedAt: null,
-            statusChangedAt: null,
-          },
-        ],
-      },
-    });
-
     render(<KnowledgeHistoryPanel />);
 
     const items = await screen.findAllByRole('listitem');
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(1);
     // "Responsável não informado" fica ao lado do ID técnico no mesmo <p> — texto quebrado
     // entre nós, por isso a contagem via textContent em vez de getAllByText.
-    expect(document.body.textContent?.match(/Responsável não informado/g)).toHaveLength(2);
-    expect(screen.getByText('Sem nota registrada')).toBeInTheDocument();
+    expect(document.body.textContent?.match(/Responsável não informado/g)).toHaveLength(1);
     expect(screen.getByText('Arquivo descanso.md')).toBeInTheDocument();
   });
 
   it('só mostra o link de auditoria completa quando o ator pode ler auditoria', async () => {
     getKnowledgeDocuments.mockResolvedValue(knowledgeResponse);
-    getMethodology.mockResolvedValue(methodologyResponse);
 
     const { rerender } = render(<KnowledgeHistoryPanel canReadAudit={false} />);
     await screen.findAllByRole('listitem');

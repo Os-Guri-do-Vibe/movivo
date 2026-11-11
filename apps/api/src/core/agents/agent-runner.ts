@@ -1,0 +1,301 @@
+/**
+ * AgentRunner — executa uma tarefa de agente de ponta a ponta.
+ *
+ * Monta o prompt em camadas (o código monta, o modelo não busca contexto):
+ *   system  = constituição + papel + tarefa + metodologia publicada + schema de saída
+ *   usuário = <dados> fatias do Estado do Aluno + entrada da tarefa </dados>
+ * Chama o gateway no tier da tarefa, valida a saída contra o schema e os validadores
+ * determinísticos e, havendo violações, devolve ao modelo a lista exata do que corrigir — até
+ * `maxCorrectionRounds`. A saída aprovada é sempre uma PROPOSTA: quem executa é o motor de
+ * políticas, fora daqui.
+ */
+import { Injectable, Optional } from '@nestjs/common';
+import { z } from 'zod';
+
+import type { PersonaKey } from '@movivo/shared';
+
+import type {
+  GatewayMessage,
+  MessagePart,
+  ModelVendor,
+  ReasoningEffort,
+  TierRoute,
+} from '../ai/ai.types';
+import { ModelGateway } from '../ai/model-gateway';
+import type { ScrubUser } from '../ai/pii-scrubber';
+import type { AgentContextSources, MethodologyContext } from './agent-context';
+import {
+  PublishedAgentProfiles,
+  promptVersionWith,
+  type AgentProfileText,
+} from './agent-profile.reader';
+import type { AgentTask, Violation } from './agent-task';
+import { CONSTITUTION } from './constitution';
+import { fitLongTexts } from './fit-texts';
+
+export interface AgentRunOptions {
+  /** Titular sobre quem é a tarefa (nulo em tarefas sem aluno). */
+  userId: string | null;
+  scrubUser?: ScrubUser;
+  sources: AgentContextSources;
+  /** Só avaliação: força o modelo (comparação antes de trocar a configuração do tier). */
+  routeOverride?: TierRoute;
+  /**
+   * Operação: roda a tarefa só neste modelo, sem reserva de outro fornecedor, com os limites
+   * (tokens, timeout, temperatura) que ele tem no tier da tarefa (ou no REASONING).
+   */
+  pinnedModel?: PinnedModel;
+  /** Imagens ou PDFs da tarefa de visão (base64): vão junto do texto, nunca dentro do JSON de dados. */
+  images?: readonly Extract<MessagePart, { type: 'image' | 'document' }>[];
+  /** Só avaliação: a ficha do agente em teste (rascunho) no lugar da publicada. */
+  profileOverride?: AgentProfileText;
+  /** Quem fala com o aluno: a ficha da persona (pelo sexo do aluno) entra depois da do agente. */
+  persona?: PersonaKey;
+}
+
+export interface AgentRunResult<O> {
+  output: O;
+  /** Uma por chamada ao modelo (inclui as rodadas de correção). */
+  modelRunIds: string[];
+  correctionRounds: number;
+  stateVersion: number;
+  methodologyVersions: MethodologyContext['versions'];
+  costBrl: number;
+  /** Código da tarefa + versão da ficha do agente usada. */
+  promptVersion: string;
+}
+
+export interface PinnedModel {
+  vendor: ModelVendor;
+  model: string;
+  /** Liga o raciocínio (thinking) com este esforço. */
+  reasoningEffort?: ReasoningEffort;
+  /** Teto de saída desta execução (o raciocínio conta nele); ausente = o da rota do tier. */
+  maxOutputTokens?: number;
+  /** Timeout de cada chamada desta execução; ausente = o da rota do tier. */
+  timeoutMs?: number;
+}
+
+/** A tarefa não produziu saída válida dentro das rodadas de correção. */
+export class AgentTaskError extends Error {
+  constructor(
+    readonly taskId: string,
+    readonly violations: Violation[],
+    readonly modelRunIds: string[],
+    /** Texto da última resposta reprovada (a das `violations`), para diagnosticar o caso. */
+    readonly rejectedOutput: string | null = null,
+  ) {
+    super(`${taskId}: saída inválida após as rodadas de correção`);
+    this.name = 'AgentTaskError';
+  }
+}
+
+/** Extrai o JSON da resposta (tolera cercas de código que alguns modelos insistem em usar). */
+export function extractJson(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
+  const body = fenced?.[1] ?? trimmed;
+  const start = body.search(/[[{]/);
+  if (start < 0) throw new SyntaxError('resposta sem JSON');
+  return JSON.parse(body.slice(start));
+}
+
+const jsonSchemas = new WeakMap<object, Parameters<typeof fitLongTexts>[1]>();
+
+/** Resposta do modelo como JSON, com os textos longos demais cortados no limite do contrato. */
+function parseOutput<I, O>(task: AgentTask<I, O>, text: string): unknown {
+  let schema = jsonSchemas.get(task);
+  if (!schema) {
+    schema = z.toJSONSchema(task.output, { unrepresentable: 'any' }) as Parameters<
+      typeof fitLongTexts
+    >[1];
+    jsonSchemas.set(task, schema);
+  }
+  return fitLongTexts(extractJson(text), schema);
+}
+
+function zodViolations(error: z.ZodError): Violation[] {
+  return error.issues.map((issue) => ({
+    path: issue.path.join('.') || '(raiz)',
+    message: issue.message,
+  }));
+}
+
+export function composeSystem(
+  task: AgentTask<unknown, unknown>,
+  methodology: string,
+  profile: string | null = null,
+  persona: string | null = null,
+): string {
+  const schema = JSON.stringify(z.toJSONSchema(task.output, { unrepresentable: 'any' }));
+  return [
+    CONSTITUTION,
+    profile ? `# Ficha do agente\n${profile}` : '',
+    persona ? `# Persona (quem fala com o aluno)\n${persona}` : '',
+    `# Seu papel\n${task.role}`,
+    `# Tarefa\n${task.instructions}`,
+    methodology ? `# Metodologia MOVIVO (publicada)\n${methodology}` : '',
+    `# Schema da resposta (JSON Schema)\n${schema}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function correctionMessage(violations: Violation[]): string {
+  const list = violations.map((v) => `- ${v.path}: ${v.message}`).join('\n');
+  return `Sua resposta anterior tem problemas que impedem o uso:\n${list}\n\nCorrija TODOS e devolva o JSON completo outra vez, seguindo o schema.`;
+}
+
+@Injectable()
+export class AgentRunner {
+  constructor(
+    private readonly gateway: ModelGateway,
+    @Optional() private readonly profiles: PublishedAgentProfiles | null = null,
+  ) {}
+
+  async run<I, O>(
+    task: AgentTask<I, O>,
+    rawInput: I,
+    options: AgentRunOptions,
+  ): Promise<AgentRunResult<O>> {
+    const input = task.input.parse(rawInput);
+    const [methodology, state, profile, persona] = await Promise.all([
+      options.sources.methodology(task.methodology),
+      options.sources.state(task.state),
+      options.profileOverride ?? this.profiles?.forTask(task.id) ?? null,
+      options.persona ? (this.profiles?.persona(options.persona) ?? null) : null,
+    ]);
+    const promptVersion = promptVersionWith(task.promptVersion, profile, persona);
+    const system = composeSystem(
+      task as AgentTask<unknown, unknown>,
+      methodology.text,
+      profile?.content ?? null,
+      persona?.content ?? null,
+    );
+    const dataText = `<dados>\n${JSON.stringify({ estadoDoAluno: state.slices, entrada: input })}\n</dados>`;
+    const messages: GatewayMessage[] = [
+      {
+        role: 'user',
+        content: options.images?.length
+          ? [{ type: 'text', text: dataText }, ...options.images]
+          : dataText,
+      },
+    ];
+
+    const modelRunIds: string[] = [];
+    let costBrl = 0;
+    let violations: Violation[] = [];
+    let rejectedOutput: string | null = null;
+
+    /** As rodadas de correção numa rota (a do tier, ou uma rota fixa). */
+    const attempt = async (route?: TierRoute): Promise<AgentRunResult<O> | null> => {
+      const conversation = [...messages];
+      let previous: string | null = null;
+      for (let round = 0; round <= task.maxCorrectionRounds; round += 1) {
+        const result = await this.gateway.complete({
+          tier: task.tier,
+          taskId: task.id,
+          promptVersion,
+          userId: options.userId,
+          scrubUser: options.scrubUser,
+          system,
+          messages: conversation,
+          json: true,
+          routeOverride: route,
+        });
+        modelRunIds.push(result.modelRunId);
+        costBrl += result.costBrl;
+
+        violations = await this.validate(
+          task,
+          input,
+          result.text,
+          state.slices,
+          methodology.parameters ?? {},
+        );
+        if (violations.length > 0) rejectedOutput = result.text;
+        if (violations.length === 0) {
+          return {
+            output: task.output.parse(parseOutput(task, result.text)),
+            modelRunIds,
+            correctionRounds: round,
+            stateVersion: state.version,
+            methodologyVersions: methodology.versions,
+            costBrl,
+            promptVersion,
+          };
+        }
+        // Resposta idêntica à da rodada anterior: o modelo não está corrigindo; insistir só gasta.
+        if (result.text === previous) return null;
+        previous = result.text;
+        conversation.push({ role: 'assistant', content: result.text });
+        conversation.push({ role: 'user', content: correctionMessage(violations) });
+      }
+      return null;
+    };
+
+    const fixedRoute =
+      options.routeOverride ??
+      (options.pinnedModel ? await this.pinnedRoute(task.tier, options.pinnedModel) : undefined);
+    const first = await attempt(fixedRoute);
+    if (first) return first;
+    // O modelo principal não convergiu nas rodadas de correção: uma nova tentativa, do zero, com o
+    // modelo reserva do tier (outro fornecedor erra de outro jeito). Rota fixa (avaliação) não troca.
+    // Cada reserva de outro fornecedor, na ordem do tier: fornecedor fora do ar ou sem crédito
+    // (erro na chamada) passa para o próximo.
+    if (!fixedRoute) {
+      const routes = await this.gateway.routesFor(task.tier);
+      const primary = routes[0]?.vendor;
+      for (const fallback of routes.slice(1).filter((route) => route.vendor !== primary)) {
+        const next = await attempt(fallback).catch(() => null);
+        if (next) return next;
+      }
+    }
+    throw new AgentTaskError(task.id, violations, modelRunIds, rejectedOutput);
+  }
+
+  /** A rota configurada do modelo fixado: no tier da tarefa e, se ele não estiver lá, no REASONING. */
+  private async pinnedRoute(
+    tier: AgentTask<unknown, unknown>['tier'],
+    pinned: PinnedModel,
+  ): Promise<TierRoute> {
+    for (const candidate of [tier, 'REASONING'] as const) {
+      const route = (await this.gateway.routesFor(candidate)).find(
+        (r) => r.vendor === pinned.vendor && r.model === pinned.model,
+      );
+      if (route) {
+        return {
+          ...route,
+          ...(pinned.reasoningEffort ? { reasoningEffort: pinned.reasoningEffort } : {}),
+          ...(pinned.maxOutputTokens ? { maxOutputTokens: pinned.maxOutputTokens } : {}),
+          ...(pinned.timeoutMs ? { timeoutMs: pinned.timeoutMs } : {}),
+        };
+      }
+    }
+    throw new Error(
+      `modelo fixado ${pinned.vendor}/${pinned.model} não está habilitado no tier ${tier} nem no REASONING`,
+    );
+  }
+
+  private async validate<I, O>(
+    task: AgentTask<I, O>,
+    input: I,
+    text: string,
+    state: Record<string, unknown>,
+    methodology: NonNullable<MethodologyContext['parameters']>,
+  ): Promise<Violation[]> {
+    let raw: unknown;
+    try {
+      raw = parseOutput(task, text);
+    } catch {
+      return [{ path: '(raiz)', message: 'a resposta não é um JSON válido' }];
+    }
+    const parsed = task.output.safeParse(raw);
+    if (!parsed.success) return zodViolations(parsed.error);
+    const found: Violation[] = [];
+    for (const validator of task.validators) {
+      found.push(...(await validator(input, parsed.data, { state, methodology })));
+    }
+    return found;
+  }
+}

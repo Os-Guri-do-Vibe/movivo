@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -144,30 +144,30 @@ describe('KnowledgeArticlesPanel · explorador', () => {
     expect(screen.getByRole('button', { name: /Volume e hipertrofia/ })).toBeVisible();
     expect(screen.getByRole('button', { name: /Revisão sistemática/ })).toBeVisible();
     expect(screen.queryByText('Já excluído')).not.toBeInTheDocument();
-    expect(screen.getByText('(4)')).toBeInTheDocument();
+    expect(screen.getByText(/4 artigos/)).toBeInTheDocument();
     expect(screen.getAllByText('Ativo').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Processando').length).toBeGreaterThan(0);
   });
 
-  it('a lixeira só aparece depois de clicar no artigo', async () => {
+  it('as ações só aparecem depois de clicar no artigo', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
     const tile = await screen.findByRole('button', { name: /Volume e hipertrofia/ });
-    expect(screen.queryByRole('button', { name: 'Excluir Volume e hipertrofia' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Excluir' })).toBeNull();
 
     await user.click(tile);
     expect(tile).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Excluir Volume e hipertrofia' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Excluir' })).toBeVisible();
 
     await user.click(tile);
-    expect(screen.queryByRole('button', { name: 'Excluir Volume e hipertrofia' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Excluir' })).toBeNull();
   });
 
   it('exclui sem pedir justificativa, só com uma confirmação', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
     await user.click(await screen.findByRole('button', { name: /Volume e hipertrofia/ }));
-    await user.click(screen.getByRole('button', { name: 'Excluir Volume e hipertrofia' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Excluir este artigo?' });
     expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument();
@@ -190,16 +190,103 @@ describe('KnowledgeArticlesPanel · explorador', () => {
     const legacy = screen.getByRole('button', { name: /Já excluído/ });
     expect(within(legacy).getByText('Arquivado')).toBeVisible();
     await user.click(legacy);
-    expect(screen.getByRole('button', { name: 'Excluir Já excluído' })).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Detalhes de Já excluído' })).getByRole('button', {
+        name: 'Excluir',
+      }),
+    ).toBeVisible();
   });
 
   it('cancelar a exclusão não chama a API', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
     await user.click(await screen.findByRole('button', { name: /Volume e hipertrofia/ }));
-    await user.click(screen.getByRole('button', { name: 'Excluir Volume e hipertrofia' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir' }));
     await user.click(await screen.findByRole('button', { name: 'Cancelar' }));
     expect(deleteKnowledgeDocument).not.toHaveBeenCalled();
+  });
+
+  it('mostra os detalhes do artigo selecionado e fecha sem apagar nada', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeArticlesPanel canUpload canApprove />);
+    await user.click(await screen.findByRole('button', { name: /Volume e hipertrofia/ }));
+
+    const details = screen.getByRole('region', { name: 'Detalhes de Volume e hipertrofia' });
+    expect(within(details).getByText('Enviado por')).toBeVisible();
+    expect(within(details).getByText('Rodrigo')).toBeVisible();
+    expect(within(details).getByText('12')).toBeVisible();
+
+    await user.click(within(details).getByRole('button', { name: 'Fechar detalhes' }));
+    expect(
+      screen.queryByRole('region', { name: 'Detalhes de Volume e hipertrofia' }),
+    ).not.toBeInTheDocument();
+    expect(deleteKnowledgeDocument).not.toHaveBeenCalled();
+  });
+
+  it('filtra por situação e volta para Todos', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeArticlesPanel />);
+    await screen.findByRole('button', { name: /Volume e hipertrofia/ });
+
+    await user.click(screen.getByRole('button', { name: /Com falha/ }));
+    expect(screen.queryByRole('button', { name: /Volume e hipertrofia/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /PDF escaneado/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Falha de fila/ })).toBeVisible();
+    expect(screen.getByText(/2 de 4 artigos/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /Todos/ }));
+    expect(screen.getByRole('button', { name: /Volume e hipertrofia/ })).toBeVisible();
+  });
+
+  it('ordena por nome', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeArticlesPanel />);
+    await screen.findByRole('button', { name: /Volume e hipertrofia/ });
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Ordenar por' }), 'name');
+    const titles = within(screen.getByRole('list', { name: 'Artigos na base' }))
+      .getAllByRole('button')
+      .map((button) => button.textContent ?? '');
+    expect(titles[0]).toContain('Falha de fila');
+    expect(titles.at(-1)).toContain('Volume e hipertrofia');
+  });
+
+  it('com a busca desligada, a tela não promete que a IA consulta os artigos', async () => {
+    render(<KnowledgeArticlesPanel canUpload canApprove />);
+    await screen.findByRole('heading', { name: 'Artigos científicos' });
+
+    expect(screen.getByText(/A busca \(RAG\) está desligada/)).toBeVisible();
+    expect(screen.queryByText(/Estudos que a IA consulta/)).toBeNull();
+  });
+
+  it('com a busca ligada, diz que a IA consulta os artigos ao responder', async () => {
+    getKnowledgeDocuments.mockResolvedValue({
+      ...base,
+      data: { ...base.data, policy: { ...base.data.policy, retrievalEnabled: true } },
+    });
+    render(<KnowledgeArticlesPanel canUpload canApprove />);
+
+    expect(await screen.findByText(/Estudos que a IA consulta ao responder/)).toBeVisible();
+    expect(screen.queryByText(/A busca \(RAG\) está desligada/)).toBeNull();
+  });
+
+  it('sem artigos, o estado vazio convida a escolher arquivos', async () => {
+    getKnowledgeDocuments.mockResolvedValue(response([]));
+    render(<KnowledgeArticlesPanel canUpload />);
+    expect(await screen.findByText('Nenhum artigo na base ainda')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Escolher arquivos' })).toBeEnabled();
+    expect(screen.queryByRole('searchbox', { name: 'Buscar artigo' })).toBeNull();
+  });
+
+  it('soltar arquivos no explorador coloca os artigos na fila de envio', async () => {
+    render(<KnowledgeArticlesPanel canUpload />);
+    const list = await screen.findByRole('list', { name: 'Artigos na base' });
+    const file = pdf('solto.pdf');
+
+    fireEvent.drop(list, { dataTransfer: { files: [file], types: ['Files'] } });
+
+    expect(await screen.findByText('solto.pdf')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Salvar artigo' })).toBeEnabled();
   });
 
   it('leitor sem permissão vê os artigos, mas não envia nem exclui', async () => {
@@ -207,7 +294,7 @@ describe('KnowledgeArticlesPanel · explorador', () => {
     render(<KnowledgeArticlesPanel />);
     await user.click(await screen.findByRole('button', { name: /Volume e hipertrofia/ }));
     expect(screen.queryByRole('button', { name: /Excluir/ })).toBeNull();
-    expect(screen.queryByText('Escolher arquivos')).toBeNull();
+    expect(screen.queryByText('Enviar arquivos')).toBeNull();
   });
 
   it('falha definitiva explica o motivo e não oferece nova tentativa inútil', async () => {
@@ -316,7 +403,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
   it('só mostra o botão de salvar depois de escolher arquivos', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     expect(screen.queryByRole('button', { name: /Salvar/ })).toBeNull();
 
     await user.upload(screen.getByTestId('articles-file-input'), pdf());
@@ -327,7 +414,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
   it('salva com um clique, sem metadados, justificativa ou aprovação', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     const file = pdf();
     await user.upload(screen.getByTestId('articles-file-input'), file);
     expect(screen.queryByLabelText(/Título|Tópico|Categoria|Justificativa/)).toBeNull();
@@ -341,7 +428,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
   it('envia vários arquivos de uma vez, um por vez', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     await user.upload(screen.getByTestId('articles-file-input'), [
       pdf('a.pdf'),
       new File(['x'], 'b.docx'),
@@ -358,7 +445,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
   ])('recusa %s na hora, sem chamar a API', async (_label, file, message) => {
     const user = userEvent.setup({ applyAccept: false });
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     await user.upload(screen.getByTestId('articles-file-input'), file);
     expect(await screen.findByText(new RegExp(message))).toBeVisible();
     expect(screen.queryByRole('button', { name: /Salvar/ })).toBeDisabled();
@@ -371,7 +458,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
       .mockResolvedValueOnce(base)
       .mockRejectedValueOnce(new ControlCenterApiError(409, 'Este artigo já está na base.'));
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     await user.upload(screen.getByTestId('articles-file-input'), [pdf('a.pdf'), pdf('b.pdf')]);
     await user.click(screen.getByRole('button', { name: 'Salvar 2 artigos' }));
 
@@ -383,7 +470,7 @@ describe('KnowledgeArticlesPanel · upload', () => {
   it('remover da lista antes de salvar', async () => {
     const user = userEvent.setup();
     render(<KnowledgeArticlesPanel canUpload />);
-    await screen.findByText('Escolher arquivos');
+    await screen.findByText('Enviar arquivos');
     await user.upload(screen.getByTestId('articles-file-input'), pdf('a.pdf'));
     await user.click(screen.getByRole('button', { name: 'Remover a.pdf da lista' }));
     expect(screen.queryByText('a.pdf')).toBeNull();

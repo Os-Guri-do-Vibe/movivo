@@ -179,7 +179,7 @@ describe('ConversationsDashboard', () => {
     getConversationMessages.mockResolvedValue(
       history([
         msg('m1', 'OUTBOUND', 'Boa, Ana!\n---\nHoje é treino de perna.\n---\nBora?', at, 'TEXT', {
-          origin: 'COACH',
+          origin: 'AGENT',
         }),
       ]),
     );
@@ -193,7 +193,7 @@ describe('ConversationsDashboard', () => {
     const bubble = (el: HTMLElement) => el.closest('div') as HTMLElement;
     expect(new Set([bubble(first), bubble(second), bubble(third)]).size).toBe(3);
     expect(bubble(first).parentElement).toBe(bubble(third).parentElement);
-    expect(within(log).getAllByText('AI Coach')).toHaveLength(1);
+    expect(within(log).getAllByText('IA')).toHaveLength(1);
     expect(within(log).queryByText(/---/)).toBeNull();
   });
 
@@ -238,13 +238,13 @@ describe('ConversationsDashboard', () => {
     expect(screen.getByText('*isso*')).toBeInTheDocument();
   });
 
-  it('rotula quem escreveu: aluno, AI Coach, aviso automático e profissional', async () => {
+  it('rotula quem escreveu: aluno, IA, aviso automático e profissional', async () => {
     getConversations.mockResolvedValue(list);
     const at = '2026-10-09T15:00:00.000Z';
     getConversationMessages.mockResolvedValue(
       history([
         msg('m1', 'INBOUND', 'oi', at),
-        msg('m2', 'OUTBOUND', 'resposta da IA', at, 'TEXT', { origin: 'COACH' }),
+        msg('m2', 'OUTBOUND', 'resposta da IA', at, 'TEXT', { origin: 'AGENT' }),
         msg('m3', 'OUTBOUND', 'lembrete', at, 'TEXT', { origin: 'SYSTEM' }),
         msg('m4', 'OUTBOUND', 'escrevi no celular', at, 'TEXT', { origin: 'PROFESSIONAL' }),
       ]),
@@ -252,7 +252,7 @@ describe('ConversationsDashboard', () => {
     render(<ConversationsDashboard />);
     await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
     const log = await screen.findByRole('log', { name: 'Mensagens' });
-    expect(await within(log).findByText('AI Coach')).toBeInTheDocument();
+    expect(await within(log).findByText('IA')).toBeInTheDocument();
     expect(within(log).getByText('MOVIVO · aviso automático')).toBeInTheDocument();
     expect(within(log).getByText('Profissional CREF')).toBeInTheDocument();
     expect(within(log).getByText('Ana Souza')).toBeInTheDocument();
@@ -394,7 +394,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
     await screen.findByRole('log', { name: 'Mensagens' });
   };
 
-  it('a borda do aluno na lista é verde com o AI Coach ativo e vermelha com ele pausado', async () => {
+  it('a borda do aluno na lista é verde com a IA ativo e vermelha com ele pausado', async () => {
     getConversations.mockResolvedValue(list);
     render(<ConversationsDashboard />);
     const ana = await screen.findByRole('button', { name: /Ana Souza/ });
@@ -408,7 +408,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
     expect(bruno).toHaveTextContent('Atendimento automático pausado.');
   });
 
-  it('com o AI Coach ativo: campo desabilitado e botão "Pausar" (vermelho, ícone de pausa)', async () => {
+  it('com a IA ativo: campo desabilitado e botão "Pausar" (vermelho, ícone de pausa)', async () => {
     await openAna();
     const input = screen.getByRole('textbox', { name: /Mensagem para Ana Souza/ });
     expect(input).toBeDisabled();
@@ -416,7 +416,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
     expect(screen.getByRole('button', { name: 'Enviar mensagem' })).toBeDisabled();
 
     const toggle = screen.getByRole('button', {
-      name: 'Pausar o atendimento automático do AI Coach',
+      name: 'Pausar o atendimento automático',
     });
     expect(toggle).toHaveTextContent('Pausar');
     expect(toggle).toHaveClass('bg-red-600');
@@ -424,7 +424,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
     expect(screen.queryByRole('button', { name: /Ativar o atendimento/ })).toBeNull();
   });
 
-  it('com o AI Coach pausado: campo habilitado e botão "Ativar" (verde, ícone de play)', async () => {
+  it('com a IA pausado: campo habilitado e botão "Ativar" (verde, ícone de play)', async () => {
     getConversations.mockResolvedValue(list);
     getConversationMessages.mockResolvedValue(history([]));
     render(<ConversationsDashboard />);
@@ -433,7 +433,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
     const input = await screen.findByRole('textbox', { name: /Mensagem para/ });
     expect(input).toBeEnabled();
     const toggle = screen.getByRole('button', {
-      name: 'Ativar o atendimento automático do AI Coach',
+      name: 'Ativar o atendimento automático',
     });
     expect(toggle).toHaveTextContent('Ativar');
     expect(toggle).toHaveClass('bg-emerald-700');
@@ -448,19 +448,17 @@ describe('ConversationsDashboard — atendimento manual', () => {
     });
     await openAna();
 
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
 
     expect(setConversationAiPaused).toHaveBeenCalledWith(ANA, true);
     expect(
-      await screen.findByRole('button', { name: 'Ativar o atendimento automático do AI Coach' }),
+      await screen.findByRole('button', { name: 'Ativar o atendimento automático' }),
     ).toHaveClass('bg-emerald-700');
     expect(screen.getByRole('textbox', { name: /Mensagem para Ana Souza/ })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-red-600');
   });
 
-  it('clicar em "Ativar" reativa o AI Coach, trava o campo e volta a borda para verde', async () => {
+  it('clicar em "Ativar" reativa a IA, trava o campo e volta a borda para verde', async () => {
     setConversationAiPaused.mockResolvedValue({
       data: { studentId: ANA, aiPaused: false },
       meta: META,
@@ -473,11 +471,11 @@ describe('ConversationsDashboard — atendimento manual', () => {
     render(<ConversationsDashboard />);
     await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Ativar o atendimento automático do AI Coach' }),
+      await screen.findByRole('button', { name: 'Ativar o atendimento automático' }),
     );
 
     expect(setConversationAiPaused).toHaveBeenCalledWith(ANA, false);
-    await screen.findByRole('button', { name: 'Pausar o atendimento automático do AI Coach' });
+    await screen.findByRole('button', { name: 'Pausar o atendimento automático' });
     expect(screen.getByRole('textbox', { name: /Mensagem para Ana Souza/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-emerald-600');
   });
@@ -494,9 +492,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
       meta: META,
     });
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     const input = await screen.findByRole('textbox', { name: /Mensagem para Ana Souza/ });
 
     await userEvent.type(input, '  Oi, Ana! Como foi o treino?{Enter}');
@@ -513,9 +509,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
       meta: META,
     });
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     const input = await screen.findByRole('textbox', { name: /Mensagem para Ana Souza/ });
     await userEvent.type(input, 'linha 1{Shift>}{Enter}{/Shift}linha 2');
     expect(sendConversationMessage).not.toHaveBeenCalled();
@@ -528,9 +522,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
       meta: META,
     });
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     const input = await screen.findByRole('textbox', { name: /Mensagem para Ana Souza/ });
     await userEvent.type(input, '   {Enter}');
     expect(sendConversationMessage).not.toHaveBeenCalled();
@@ -546,9 +538,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
       new ControlCenterApiError(409, 'O aluno não tem consentimento de dados de saúde vigente.'),
     );
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     const input = await screen.findByRole('textbox', { name: /Mensagem para Ana Souza/ });
     await userEvent.type(input, 'Oi{Enter}');
 
@@ -564,9 +554,7 @@ describe('ConversationsDashboard — atendimento manual', () => {
       ),
     );
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Seu papel não pode');
     expect(screen.getByRole('textbox', { name: /Mensagem para Ana Souza/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-emerald-600');
@@ -718,9 +706,7 @@ describe('ConversationsDashboard — tempo real', () => {
       meta: META,
     });
     await openAna();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Pausar o atendimento automático do AI Coach' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar o atendimento automático' }));
     await userEvent.type(
       await screen.findByRole('textbox', { name: /Mensagem para/ }),
       'Já vou aí{Enter}',
@@ -767,7 +753,7 @@ describe('ConversationsDashboard — tempo real', () => {
 
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-red-600');
     expect(
-      screen.getByRole('button', { name: 'Ativar o atendimento automático do AI Coach' }),
+      screen.getByRole('button', { name: 'Ativar o atendimento automático' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /Mensagem para Ana Souza/ })).toBeEnabled();
   });

@@ -9,6 +9,7 @@ import {
   MIN_AGE_YEARS,
   MIN_HEIGHT_CM,
   MIN_WEIGHT_KG,
+  onboardingStep1Schema,
   UNDER_AGE_MESSAGE,
   WHATSAPP_OPERATIONAL_NOTICE,
   type BiologicalSex,
@@ -16,6 +17,7 @@ import {
 
 import {
   isPhoneComplete,
+  isPhoneInvalid,
   toE164,
   type ConsentItemView,
   type PhoneCountryIso,
@@ -26,11 +28,14 @@ import {
   FieldError,
   FieldHelp,
   FieldLabel,
+  FieldValidation,
   QuestionField,
   QuestionStack,
   TextInput,
 } from './fields';
+import { BIOLOGICAL_SEX_ITEMS } from './anamnesis-options';
 import { DatePicker } from './date-picker';
+import { maskNumber } from './masks';
 import { PhoneInput } from './phone-input';
 import { PhoneOtp } from './phone-otp';
 
@@ -49,7 +54,7 @@ function isHeightValid(heightCm: string): boolean {
   const value = Number(heightCm);
   return (
     heightCm.trim().length > 0 &&
-    Number.isFinite(value) &&
+    Number.isInteger(value) &&
     value >= MIN_HEIGHT_CM &&
     value <= MAX_HEIGHT_CM
   );
@@ -65,11 +70,25 @@ function isWeightValid(weightKg: string): boolean {
   );
 }
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function isEmailValid(email: string): boolean {
-  return EMAIL_REGEX.test(email.trim());
+  return onboardingStep1Schema.shape.email.safeParse(email.trim()).success;
 }
+
+const MAX_NAME_LENGTH = 120;
+/** Letras de qualquer idioma, com acento, espaço, hífen, ponto e apóstrofo entre elas. */
+const NAME_PATTERN = /^\p{L}[\p{L}\p{M}'’. -]*$/u;
+
+function nameError(name: string): string | undefined {
+  const clean = name.trim();
+  if (clean === '') return undefined;
+  if (clean.length < 2) return 'Informe seu nome completo.';
+  return NAME_PATTERN.test(clean)
+    ? undefined
+    : 'Use só letras no nome. Acentos, espaço, hífen e apóstrofo são aceitos.';
+}
+
+/** Mais de 120 anos é erro de digitação, não aluno. */
+const MAX_AGE_YEARS = 120;
 
 export function Step1Registration({
   data,
@@ -101,9 +120,17 @@ export function Step1Registration({
   const requiredConsents = consents.filter((c) => c.required);
   const allRequiredAccepted = requiredConsents.every((c) => acceptedConsents.has(c.type));
   const emailInvalid = data.email.trim().length > 0 && !isEmailValid(data.email);
+  const heightInvalid = data.heightCm.trim() !== '' && !isHeightValid(data.heightCm);
+  const weightInvalid = data.weightKg.trim() !== '' && !isWeightValid(data.weightKg);
+  const phoneInvalid = isPhoneInvalid(data.phoneCountryIso, data.phoneMasked);
+  const [oldestBirthDate] = React.useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear() - MAX_AGE_YEARS, 0, 1);
+  });
 
   const canContinue =
     data.name.trim().length >= 2 &&
+    !nameError(data.name) &&
     data.birthDate.length === 10 &&
     !underAge &&
     data.biologicalSex !== null &&
@@ -116,22 +143,25 @@ export function Step1Registration({
 
   return (
     <QuestionStack className="pb-4">
-      <div>
+      <div className="text-center">
         <h1 className="text-h1 font-bold text-petroleo">Vamos começar por você</h1>
         <p className="mt-2 text-body text-muted-foreground">
-          É rápido. Estas informações ajudam o profissional responsável a preparar um treino que
-          faça sentido para a sua rotina.
+          Seus dados básicos. Idade, sexo biológico, altura e peso entram nos cálculos do seu treino
+          e da sua alimentação, que os profissionais da MOVIVO revisam.
         </p>
       </div>
 
       <QuestionField>
         <FieldLabel htmlFor="name">Qual é o seu nome completo?</FieldLabel>
-        <TextInput
-          id="name"
-          value={data.name}
-          onChange={(name) => onChange({ ...data, name })}
-          autoComplete="name"
-        />
+        <FieldValidation error={nameError(data.name)}>
+          <TextInput
+            id="name"
+            value={data.name}
+            onChange={(name) => onChange({ ...data, name })}
+            autoComplete="name"
+            maxLength={MAX_NAME_LENGTH}
+          />
+        </FieldValidation>
       </QuestionField>
 
       <QuestionField>
@@ -142,52 +172,66 @@ export function Step1Registration({
           onChange={(birthDate) => onChange({ ...data, birthDate })}
           error={underAge}
           autoComplete="bday"
+          minDate={oldestBirthDate}
+          invalidMessage="Informe uma data de nascimento válida, no formato dd/mm/aaaa."
         />
         <FieldError message={underAge ? UNDER_AGE_MESSAGE : undefined} />
       </QuestionField>
 
       <ChoiceGroup<BiologicalSex>
         legend="Qual é o seu sexo biológico?"
-        items={[
-          { value: 'FEMALE', label: 'Feminino' },
-          { value: 'MALE', label: 'Masculino' },
-        ]}
+        help="Usado só nos cálculos, como gasto de energia e progressão de carga."
+        items={BIOLOGICAL_SEX_ITEMS}
         selected={data.biologicalSex ? [data.biologicalSex] : []}
         onToggle={(biologicalSex) => onChange({ ...data, biologicalSex })}
-        indicatorSide="left"
       />
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <QuestionField className="row-span-2 grid grid-rows-subgrid">
-          <FieldLabel htmlFor="heightCm">Qual é a sua altura? (cm)</FieldLabel>
-          <TextInput
-            id="heightCm"
-            value={data.heightCm}
-            onChange={(heightCm) => onChange({ ...data, heightCm })}
-            type="text"
-            inputMode="numeric"
-            placeholder="Ex: 170"
-            maxLength={3}
-          />
-        </QuestionField>
+      <FieldValidation
+        error={
+          [
+            heightInvalid &&
+              `Informe a altura em centímetros, entre ${MIN_HEIGHT_CM} e ${MAX_HEIGHT_CM}.`,
+            weightInvalid && `Informe o peso em quilos, entre ${MIN_WEIGHT_KG} e ${MAX_WEIGHT_KG}.`,
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined
+        }
+      >
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+          <QuestionField className="row-span-2 grid grid-rows-subgrid">
+            <FieldLabel htmlFor="heightCm">Qual é a sua altura? (cm)</FieldLabel>
+            <TextInput
+              id="heightCm"
+              value={data.heightCm}
+              onChange={(heightCm) => onChange({ ...data, heightCm: maskNumber(heightCm, 3, 0) })}
+              type="text"
+              inputMode="numeric"
+              placeholder="Ex.: 170"
+              maxLength={3}
+            />
+          </QuestionField>
 
-        <QuestionField className="row-span-2 grid grid-rows-subgrid">
-          <FieldLabel htmlFor="weightKg">Qual é o seu peso? (kg)</FieldLabel>
-          <TextInput
-            id="weightKg"
-            value={data.weightKg}
-            onChange={(weightKg) => onChange({ ...data, weightKg })}
-            type="text"
-            inputMode="decimal"
-            placeholder="Ex: 70"
-            maxLength={6}
-          />
-        </QuestionField>
-      </div>
+          <QuestionField className="row-span-2 grid grid-rows-subgrid">
+            <FieldLabel htmlFor="weightKg">Qual é o seu peso hoje? (kg)</FieldLabel>
+            <TextInput
+              id="weightKg"
+              value={data.weightKg}
+              onChange={(weightKg) => onChange({ ...data, weightKg: maskNumber(weightKg, 3, 1) })}
+              type="text"
+              inputMode="decimal"
+              placeholder="Ex.: 70"
+              maxLength={5}
+            />
+          </QuestionField>
+        </div>
+      </FieldValidation>
 
       <QuestionField>
         <FieldLabel htmlFor="phone">Qual é o seu WhatsApp?</FieldLabel>
-        <FieldHelp>Enviaremos seu treino e faremos seu acompanhamento por este número.</FieldHelp>
+        <FieldHelp>
+          É por ele que você recebe seu plano e conversa com a MOVIVO. Vamos enviar um código para
+          confirmar o número.
+        </FieldHelp>
         <PhoneInput
           id="phone"
           countryIso={data.phoneCountryIso}
@@ -195,6 +239,13 @@ export function Step1Registration({
           onChange={(phoneMasked) => onChange({ ...data, phoneMasked })}
           onCountryChange={(phoneCountryIso, phoneMasked) =>
             onChange({ ...data, phoneCountryIso, phoneMasked })
+          }
+        />
+        <FieldError
+          message={
+            phoneInvalid
+              ? 'Confira o número: ele não parece um celular válido para o país escolhido.'
+              : undefined
           }
         />
         {phoneComplete && !phoneVerified && (
@@ -212,14 +263,19 @@ export function Step1Registration({
 
       <QuestionField>
         <FieldLabel htmlFor="email">Qual é o seu e-mail?</FieldLabel>
-        <TextInput
-          id="email"
-          type="email"
-          autoComplete="email"
-          value={data.email}
-          onChange={(email) => onChange({ ...data, email })}
-        />
-        <FieldError message={emailInvalid ? 'Digite um e-mail válido.' : undefined} />
+        <FieldValidation
+          error={emailInvalid ? 'Digite um e-mail válido, como nome@exemplo.com.' : undefined}
+        >
+          <TextInput
+            id="email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            value={data.email}
+            onChange={(email) => onChange({ ...data, email: email.replace(/\s/g, '') })}
+            maxLength={255}
+          />
+        </FieldValidation>
       </QuestionField>
 
       <div className="flex flex-col gap-3 rounded-xl border border-coral bg-coral/10 p-4">
@@ -259,17 +315,29 @@ export function Step1Registration({
   );
 }
 
+/** Destinos aceitos no texto do consentimento: só HTTPS ou caminho do próprio site. */
+const SAFE_HREF = /^(https:\/\/|\/(?!\/))/i;
+
 /** Renderiza o `label` do consentimento com o link de Termos, sem alterar o texto do backend. */
-function ConsentLabel({ consent }: { consent: ConsentItemView }) {
+export function ConsentLabel({ consent }: { consent: ConsentItemView }) {
   const parts = consent.label.split(/(\[[^\]]+\]\([^)]+\))/g);
   return (
     <>
       {parts.map((part, i) => {
         const match = /\[([^\]]+)\]\(([^)]+)\)/.exec(part);
         if (!match) return <React.Fragment key={i}>{part}</React.Fragment>;
+        const [, text, href = ''] = match;
+        // Um destino fora do padrão (ex.: `javascript:`) vira texto puro, nunca link.
+        if (!SAFE_HREF.test(href.trim())) return <React.Fragment key={i}>{text}</React.Fragment>;
         return (
-          <a key={i} href={match[2]} target="_blank" rel="noreferrer" className="underline">
-            {match[1]}
+          <a
+            key={i}
+            href={href.trim()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {text}
           </a>
         );
       })}

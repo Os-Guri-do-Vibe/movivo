@@ -54,6 +54,9 @@ export const SECRET_KEYS = [
   // adaptador MOCK (dev/CI); conta/chave real é bloqueador de lançamento, não de dev.
   'ASAAS_API_KEY',
   'ASAAS_WEBHOOK_SECRET',
+  // Strava (OAuth + webhook de atividades). OPCIONAIS no boot: sem eles a integração fica desligada.
+  'STRAVA_CLIENT_SECRET',
+  'STRAVA_WEBHOOK_VERIFY_TOKEN',
   // Sprint 5 - credencial exclusivamente local para o seed do painel CREF.
   'DEV_PROFESSIONAL_PASSWORD',
   // ADR-009 — fornecedor alternativo de STT, só para teste LOCAL (o fornecedor padrão
@@ -61,8 +64,6 @@ export const SECRET_KEYS = [
   // PROVIDER=GROQ cai no fallback fail-closed que lança em vez de transcrever.
   'GROQ_API_KEY',
 ] as const;
-
-export type SecretKey = (typeof SECRET_KEYS)[number];
 
 export type RawEnv = Record<string, string | undefined>;
 

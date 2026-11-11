@@ -31,6 +31,7 @@ vi.mock('next/headers', () => ({
 import { POST as start } from '../start/route';
 import { POST as consents } from '../session/consents/route';
 import { GET as session } from '../session/route';
+import { DELETE as deletePhoto, PUT as putPhoto } from '../session/photo/[angle]/route';
 import { PATCH as step } from '../session/step/[n]/route';
 
 import { sessionRef } from './bff';
@@ -53,6 +54,10 @@ function request(
 
 function writeHeaders(extra: Record<string, string> = {}) {
   return { origin: ORIGIN, 'sec-fetch-site': 'same-origin', ...extra };
+}
+
+function photoParams(angle: string) {
+  return { params: Promise.resolve({ angle }) };
 }
 
 function stepParams(n: string) {
@@ -228,5 +233,126 @@ describe('escritas na sessão', () => {
     const headers = new Headers((fetchMock.mock.calls[0] as [string, RequestInit])[1].headers);
     expect(headers.get('X-Forwarded-For')).toBe('198.51.100.4');
     expect(headers.get('User-Agent')).toBe('Navegador/2.0');
+  });
+});
+
+describe('fotos do corpo', () => {
+  const headers = () =>
+    writeHeaders({ 'x-anamnesis-ref': sessionRef(TOKEN), 'content-type': 'image/jpeg' });
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+  function photoRequest(
+    method: 'PUT' | 'DELETE',
+    angle: string,
+    extra: Record<string, string> = {},
+  ) {
+    return new NextRequest(`${ORIGIN}/api/anamnesis/session/photo/${angle}`, {
+      method,
+      headers: { ...headers(), ...extra },
+      body: method === 'PUT' ? jpeg : undefined,
+    });
+  }
+
+  it('encaminha os bytes da imagem para a posição, com o tipo declarado', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    fetchMock.mockResolvedValue(Response.json({ angle: 'FRONT' }));
+    const response = await putPhoto(photoRequest('PUT', 'FRONT'), photoParams('FRONT'));
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`http://api.test/api/v1/anamnesis/session/${TOKEN}/photo/FRONT`);
+    expect(init.method).toBe('PUT');
+    expect(new Headers(init.headers).get('Content-Type')).toBe('image/jpeg');
+    expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(jpeg);
+  });
+
+  it('apaga a foto da posição', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    fetchMock.mockResolvedValue(Response.json({ angle: 'LEFT' }));
+    const response = await deletePhoto(photoRequest('DELETE', 'LEFT'), photoParams('LEFT'));
+    expect(response.status).toBe(200);
+    expect((fetchMock.mock.calls[0] as [string, RequestInit])[1].method).toBe('DELETE');
+  });
+
+  it('posição inexistente, tipo que não é imagem e aba trocada nunca chegam à API', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    expect((await putPhoto(photoRequest('PUT', 'TOP'), photoParams('TOP'))).status).toBe(404);
+    expect(
+      (
+        await putPhoto(
+          photoRequest('PUT', 'BACK', { 'content-type': 'application/pdf' }),
+          photoParams('BACK'),
+        )
+      ).status,
+    ).toBe(415);
+    expect(
+      (
+        await putPhoto(
+          photoRequest('PUT', 'BACK', { 'x-anamnesis-ref': sessionRef('b'.repeat(64)) }),
+          photoParams('BACK'),
+        )
+      ).status,
+    ).toBe(412);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('recusa origem cruzada', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    const response = await putPhoto(
+      photoRequest('PUT', 'BACK', { origin: 'https://evil.test' }),
+      photoParams('BACK'),
+    );
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('tamanho declarado acima do teto é recusado antes de ler o corpo', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    const response = await putPhoto(
+      photoRequest('PUT', 'FRONT', { 'content-length': String(7 * 1024 * 1024) }),
+      photoParams('FRONT'),
+    );
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('robustez e logs', () => {
+  const stepRequest = (body: string) =>
+    request('/api/anamnesis/session/step/2', {
+      method: 'PATCH',
+      headers: writeHeaders({ 'x-anamnesis-ref': sessionRef(TOKEN) }),
+      body,
+    });
+
+  it('corpo de etapa acima de 64 KB não chega à API', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    const response = await step(stepRequest('x'.repeat(65 * 1024)), stepParams('2'));
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('erro interno da API vira mensagem genérica e o log não leva token nem detalhe', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockResolvedValue(Response.json({ message: 'stack: db failed' }, { status: 500 }));
+    const response = await step(stepRequest('{}'), stepParams('2'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ message: 'Não foi possível concluir agora.' });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
+    expect(log).toHaveBeenCalledWith('anamnesis_upstream_failed', { route: 'step/2', status: 500 });
+    log.mockRestore();
+  });
+
+  it('API fora do ar responde 502 em PT-BR e registra só a rota lógica', async () => {
+    jar.set(COOKIE, { value: TOKEN });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockRejectedValue(
+      new TypeError(`fetch failed http://api.test/anamnesis/session/${TOKEN}/step/2`),
+    );
+    const response = await step(stepRequest('{}'), stepParams('2'));
+    expect(response.status).toBe(502);
+    expect((await response.json()).message).toMatch(/Tente de novo/);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
+    log.mockRestore();
   });
 });

@@ -32,7 +32,7 @@ export interface LandingPlan {
 }
 
 export const PLAN_BENEFITS = [
-  'Protocolo individualizado',
+  'Plano individual de treino e alimentação',
   'Acompanhamento pelo WhatsApp',
   'Ajustes contínuos',
   'Respaldo profissional',

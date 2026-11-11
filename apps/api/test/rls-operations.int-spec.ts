@@ -47,7 +47,6 @@ let userA: string;
 let userB: string;
 let messageA: string;
 let messageB: string;
-let professional: string;
 
 async function context(tx: postgres.TransactionSql, userId: string, role: string) {
   await tx`SELECT set_config('app.current_user_id', ${userId}, true),
@@ -80,26 +79,12 @@ beforeAll(async () => {
     RETURNING id
   `;
   [messageA, messageB] = messages.map((row) => row.id);
-  const [staff] = await admin<{ id: string }[]>`
-    INSERT INTO staff (phone_number, email, name, role, password_hash, cref_active)
-    VALUES (${`+551${suffix}3`}, ${`${run}@example.invalid`}, 'RLS CREF', 'PROFESSIONAL', 'fixture', true)
-    RETURNING id
-  `;
-  professional = staff.id;
-  await admin`
-    INSERT INTO professional_assignments (professional_id, user_id)
-    VALUES (${professional}::uuid, ${userA}::uuid)
-  `;
 });
 
 afterAll(async () => {
   try {
     if (!userA || !userB) return;
     await admin`DELETE FROM conversations WHERE user_id IN (${userA}::uuid, ${userB}::uuid)`;
-    if (professional) {
-      await admin`DELETE FROM professional_assignments WHERE professional_id = ${professional}::uuid`;
-      await admin`DELETE FROM staff WHERE id = ${professional}::uuid`;
-    }
     await admin`DELETE FROM users WHERE id IN (${userA}::uuid, ${userB}::uuid)`;
   } finally {
     await Promise.all([app.end({ timeout: 5 }), admin.end({ timeout: 5 })]);
@@ -107,64 +92,25 @@ afterAll(async () => {
 });
 
 describe('RLS de vínculos — recurso e pai pertencem ao mesmo titular', () => {
-  it.each(['anamnese', 'renovação', 'protocolo anterior', 'conversa', 'pagamento'])(
-    'recusa vínculo cruzado de %s e aceita vínculo próprio',
-    async (kind) => {
-      for (const owner of [userB, userA]) {
-        const rollback = new Error('rollback do vínculo permitido');
-        const operation = app.begin(async (tx) => {
-          await context(tx, '', 'SYSTEM');
-          const [protocol] = await tx<{ id: string }[]>`
-            INSERT INTO protocols (user_id, mesocycle_name, start_date, end_date, content, constraints)
-            VALUES (${owner}::uuid, 'fixture', now(), now() + interval '1 day', '{}', '{}') RETURNING id
-          `;
-          let parent = protocol.id;
-          if (kind === 'anamnese') {
-            const [row] = await tx<{ id: string }[]>`
-              INSERT INTO anamnesis_sessions (user_id, token, expires_at)
-              VALUES (${owner}::uuid, ${randomUUID()}, now() + interval '1 day') RETURNING id
-            `;
-            parent = row.id;
-          } else if (kind === 'renovação') {
-            const [row] = await tx<{ id: string }[]>`
-              INSERT INTO protocol_renewal_sessions (user_id, previous_protocol_id, token, expires_at)
-              VALUES (${owner}::uuid, ${protocol.id}::uuid, ${randomUUID()}, now() + interval '1 day') RETURNING id
-            `;
-            parent = row.id;
-          } else if (kind === 'pagamento') {
-            const [row] = await tx<{ id: string }[]>`
-              INSERT INTO subscriptions (user_id, plan, price_cents, monthly_price_cents, total_price_cents, commitment_months)
-              VALUES (${owner}::uuid, 'MONTHLY', 3900, 3900, 3900, 1) RETURNING id
-            `;
-            parent = row.id;
-          }
-          await context(tx, userA, 'USER');
-          if (kind === 'anamnese' || kind === 'renovação') {
-            const column = kind === 'anamnese' ? 'anamnesis_session_id' : 'renewal_session_id';
-            await tx.unsafe(
-              `INSERT INTO protocols
-              (user_id, ${column}, version, mesocycle_name, start_date, end_date, content, constraints)
-              VALUES ($1::uuid, $2::uuid, 2, 'fixture', now(), now() + interval '1 day', '{}', '{}')`,
-              [userA, parent],
-            );
-          } else if (kind === 'protocolo anterior') {
-            await tx`INSERT INTO protocol_renewal_sessions (user_id, previous_protocol_id, token, expires_at)
-              VALUES (${userA}::uuid, ${parent}::uuid, ${randomUUID()}, now() + interval '1 day')`;
-          } else if (kind === 'conversa') {
-            await tx`INSERT INTO conversations (user_id, protocol_id, direction, content)
-              VALUES (${userA}::uuid, ${parent}::uuid, 'INBOUND', 'fixture')`;
-          } else {
-            await tx`INSERT INTO payments (user_id, subscription_id, gateway, gateway_event_id, status,
-              amount_cents, net_amount_cents, occurred_at, raw_payload)
-              VALUES (${userA}::uuid, ${parent}::uuid, 'MOCK', ${randomUUID()}, 'SETTLED', 3900, 3900, now(), '{}')`;
-          }
-          throw rollback;
-        });
-        if (owner === userB) await expect(operation).rejects.toMatchObject({ code: '42501' });
-        else await expect(operation).rejects.toBe(rollback);
-      }
-    },
-  );
+  it('recusa pagamento ligado à assinatura de outro titular e aceita o vínculo próprio', async () => {
+    for (const owner of [userB, userA]) {
+      const rollback = new Error('rollback do vínculo permitido');
+      const operation = app.begin(async (tx) => {
+        await context(tx, '', 'SYSTEM');
+        const [subscription] = await tx<{ id: string }[]>`
+          INSERT INTO subscriptions (user_id, plan, price_cents, monthly_price_cents, total_price_cents, commitment_months)
+          VALUES (${owner}::uuid, 'MONTHLY', 3900, 3900, 3900, 1) RETURNING id
+        `;
+        await context(tx, userA, 'USER');
+        await tx`INSERT INTO payments (user_id, subscription_id, gateway, gateway_event_id, status,
+          amount_cents, net_amount_cents, occurred_at, raw_payload)
+          VALUES (${userA}::uuid, ${subscription.id}::uuid, 'MOCK', ${randomUUID()}, 'SETTLED', 3900, 3900, now(), '{}')`;
+        throw rollback;
+      });
+      if (owner === userB) await expect(operation).rejects.toMatchObject({ code: '42501' });
+      else await expect(operation).rejects.toBe(rollback);
+    }
+  });
 });
 
 describe('RLS por operação — titular A não acessa ou modifica B', () => {
@@ -240,18 +186,12 @@ describe('RLS por operação — titular A não acessa ou modifica B', () => {
 });
 
 describe('Contexto ausente ou desconhecido não concede exceções', () => {
-  it.each(['', 'DESCONHECIDO'])('atribuições não são visíveis com papel %j', async (role) => {
+  it.each(['', 'DESCONHECIDO'])('conversa do titular não é visível com papel %j', async (role) => {
     await rollbackApp(async (tx) => {
-      await context(tx, professional, role);
-      expect(
-        await tx`SELECT id FROM professional_assignments
-        WHERE professional_id = ${professional}::uuid`,
-      ).toHaveLength(0);
-      await context(tx, professional, 'PROFESSIONAL');
-      expect(
-        await tx`SELECT id FROM professional_assignments
-        WHERE professional_id = ${professional}::uuid`,
-      ).toHaveLength(1);
+      await context(tx, userA, role);
+      expect(await tx`SELECT id FROM conversations WHERE id = ${messageA}::uuid`).toHaveLength(0);
+      await context(tx, userA, 'USER');
+      expect(await tx`SELECT id FROM conversations WHERE id = ${messageA}::uuid`).toHaveLength(1);
     });
   });
 

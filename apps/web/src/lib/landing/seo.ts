@@ -10,10 +10,10 @@ export const HOME_TITLE = 'Movivo - Assessoria de Treino';
 
 /** Meta description da home (≤ 160 caracteres). */
 export const HOME_DESCRIPTION =
-  'Orientação de treino individualizada pelo WhatsApp, com tecnologia e IA e supervisão de profissional de Educação Física com CREF. Teste grátis por 7 dias.';
+  'Assessoria de movimento, performance e bem-estar pelo WhatsApp: treino e alimentação individuais, com IA como apoio e profissionais registrados. Teste grátis por 7 dias.';
 
 /** Descrição mais longa, usada nos dados estruturados. */
 export const ORGANIZATION_DESCRIPTION =
-  'A MOVIVO é uma plataforma de orientação de treino individualizada pelo WhatsApp, que combina tecnologia, inteligência artificial e supervisão de profissional de Educação Física registrado no CREF.';
+  'A MOVIVO é uma assessoria de movimento, performance e bem-estar pelo WhatsApp, que combina orientação de profissionais registrados nos seus conselhos, ciência e tecnologia, com inteligência artificial como ferramenta de apoio.';
 
-export const SERVICE_NAME = 'Orientação de treino individualizada pelo WhatsApp';
+export const SERVICE_NAME = 'Assessoria de movimento, performance e bem-estar pelo WhatsApp';

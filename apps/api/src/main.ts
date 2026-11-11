@@ -15,6 +15,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService, getAppConfig, InvalidConfigurationError } from './core/config';
+import { installPostgresDriverCrashGuard } from './core/process/driver-crash-guard';
 import { setupSwagger } from './core/swagger/setup-swagger';
 
 /**
@@ -23,6 +24,8 @@ import { setupSwagger } from './core/swagger/setup-swagger';
  * implícito do Express — ver rationale completo no bootstrap, junto de `useBodyParser`.
  */
 export const DEFAULT_JSON_BODY_LIMIT = '2mb';
+/** Corpo bruto de uma foto: um pouco acima do teto do serviço, que dá a mensagem de erro. */
+export const PHOTO_BODY_LIMIT = '6mb';
 
 async function bootstrap(): Promise<void> {
   /*
@@ -33,6 +36,14 @@ async function bootstrap(): Promise<void> {
    * memoizado, então o `ConfigModule` reaproveita e não relê os segredos.
    */
   getAppConfig();
+
+  // Uma conexão encerrada pelo banco no meio de uma escrita derruba o Node por um bug do
+  // driver `postgres`, fora de qualquer promise. Absorve só esse erro (ver o módulo).
+  const processLogger = new Logger('ProcessGuard');
+  installPostgresDriverCrashGuard({
+    error: (payload, message) => processLogger.error({ ...payload, msg: message }),
+    fatal: (payload, message) => processLogger.fatal({ ...payload, msg: message }),
+  });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // O logger do Nest fica em buffer até o pino assumir, para que nenhuma linha de
@@ -60,6 +71,8 @@ async function bootstrap(): Promise<void> {
    * a ver com o resto da API.
    */
   app.useBodyParser('json', { limit: DEFAULT_JSON_BODY_LIMIT });
+  // Fotos do corpo na anamnese chegam como bytes da imagem (teto de 5 MB por foto no serviço).
+  app.useBodyParser('raw', { type: 'image/*', limit: PHOTO_BODY_LIMIT });
   const config = app.get(AppConfigService);
 
   // Versionamento de API na URL — regra §12.10. Todo endpoint vive sob /api/v1.

@@ -49,17 +49,16 @@ let professionalId = '';
  * mais os chunks prontos por parâmetro: exige extração + staged chunks + embeddings já
  * gravados, cada hash conferido contra o conteúdo real (nunca um placeholder arbitrário).
  */
-const DOCUMENT_CONTENT =
-  'Descanso entre séries conforme protocolo: 60 a 90 segundos para hipertrofia.';
+const DOCUMENT_CONTENT = `Descanso entre séries conforme protocolo: 60 a 90 segundos para hipertrofia. (${RUN})`;
 const DOCUMENT_SHA256 = createHash('sha256').update(DOCUMENT_CONTENT, 'utf8').digest('hex');
-const CHUNK_TEXT = 'descanso entre series conforme protocolo';
+const CHUNK_TEXT = `descanso entre series conforme protocolo ${RUN}`;
 const CHUNK_SHA256 = createHash('sha256').update(CHUNK_TEXT, 'utf8').digest('hex');
 const ZERO_EMBEDDING = `[${new Array(1536).fill(0).join(',')}]`;
 
 beforeAll(async () => {
   [uploaderId, professionalId] = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(sql`
-      INSERT INTO staff (phone_number, email, name, role, password_hash, cref_active) VALUES
+      INSERT INTO staff (phone_number, email, name, role, password_hash, council_active) VALUES
         (${`+5551${RUN}1`}, ${`uploader-rag-${RUN}@movivo.test`}, 'Uploader RAG', 'ADMIN', 'x', false),
         (${`+5551${RUN}2`}, ${`revisor-rag-${RUN}@movivo.test`}, 'Revisor RAG', 'PROFESSIONAL', 'x', true)
       RETURNING id
@@ -72,7 +71,7 @@ beforeAll(async () => {
         id, title, topic, original_filename, mime_type, size_bytes, sha256, uploaded_by, logical_key
       ) VALUES (
         ${documentId}::uuid, 'Fonte RAG integrada', 'descanso', 'fonte.md', 'text/markdown',
-        80, ${DOCUMENT_SHA256}, ${uploaderId}::uuid, 'fonte-rag-integrada'
+        80, ${DOCUMENT_SHA256}, ${uploaderId}::uuid, ${`fonte-rag-${RUN}`}
       )
     `);
     await tx.execute(sql`
@@ -83,14 +82,9 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  // Achado 2026-08-18: sem isto, o "Revisor RAG" fica com `cref_active = true` pra
-  // sempre — `assign_unique_active_professional` (chamado no submit real da anamnese)
-  // exige EXATAMENTE um profissional ativo e passa a falhar com 500 pra qualquer
-  // submissão feita depois desta suíte rodar contra um Postgres persistente (o de dev,
-  // não o efêmero do CI). Os documentos/reviews continuam intactos — são histórico
-  // imutável por design, não resíduo de teste.
+  // Desativa o revisor criado pela suíte: os documentos e revisões ficam, são histórico imutável.
   await tenant.runAsSystem((tx) =>
-    tx.execute(sql`UPDATE staff SET cref_active = false WHERE id = ${professionalId}::uuid`),
+    tx.execute(sql`UPDATE staff SET council_active = false WHERE id = ${professionalId}::uuid`),
   );
   await appClient.end({ timeout: 5 });
   await migratorClient.end({ timeout: 5 });

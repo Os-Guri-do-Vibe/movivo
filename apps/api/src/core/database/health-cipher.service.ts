@@ -2,6 +2,19 @@
  * Cifra de aplicação: novas escritas nunca enviam plaintext/chave ao PostgreSQL.
  * AES-256-GCM local com ID autenticado ou Vault Transit (chave não sai do Vault).
  * Leitura de pgcrypto antigo preservada exclusivamente para migração/restore.
+ *
+ * ## Envelope para payloads grandes (fotos, PDFs)
+ * O Vault Transit rejeita (HTTP 500 "JSON string value exceeds allowed length") qualquer
+ * valor de texto acima de 1 MiB no JSON, e o plaintext viaja em base64 — uma foto de celular
+ * passa disso. Com provider VAULT, acima de `ENVELOPE_MIN_BYTES` o dado é cifrado LOCALMENTE
+ * com uma chave de dado (DEK) aleatória de uso único (AES-256-GCM) e só a DEK, de 32 bytes,
+ * vai ao Transit para ser embrulhada. A chave mestra continua sem sair do Vault e o tamanho do
+ * dado deixa de importar. Payloads pequenos seguem o caminho de sempre, e a leitura de todos
+ * os formatos antigos é preservada.
+ *
+ * Formato: `movivo:health:env:v1:<n>:<DEK embrulhada, n bytes><iv 12><tag 16><dado cifrado>`.
+ * A DEK embrulhada usa o formato pequeno (`vault:vN:…` ou `movivo:health:v1:…`) e todo o
+ * cabeçalho entra como AAD, então adulterar a DEK embrulhada invalida a autenticação.
  */
 import { request as httpsRequest } from 'node:https';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
@@ -14,7 +27,13 @@ import { type DrizzleClient } from './database.module';
 
 const PREFIX = 'movivo:health:v1:';
 const TEXT_PREFIX = 'movivo:health:text:v1:';
+const ENVELOPE_PREFIX = 'movivo:health:env:v1:';
 const LEGACY_KEY_ID = 'legacy-derived';
+/**
+ * Acima disto (bytes UTF-8 do plaintext) usa envelope. Folga ampla sobre o teto de 1 MiB do
+ * JSON do Vault, que vale para o plaintext já em base64 (×1,33): 256 KiB → ~342 KiB no fio.
+ */
+export const ENVELOPE_MIN_BYTES = 256 * 1024;
 
 @Injectable()
 export class HealthCipherService {
@@ -109,22 +128,78 @@ export class HealthCipherService {
 
   async encryptHealth(plaintext: string): Promise<Buffer> {
     try {
-      if (this.config.healthCipher?.provider === 'VAULT') {
-        return Buffer.from(
-          await this.transit('encrypt', Buffer.from(plaintext).toString('base64')),
-        );
+      if (
+        this.config.healthCipher?.provider === 'VAULT' &&
+        Buffer.byteLength(plaintext, 'utf8') > ENVELOPE_MIN_BYTES
+      ) {
+        return await this.sealEnvelope(plaintext);
       }
-      const id = this.config.healthCipher?.keyId ?? LEGACY_KEY_ID;
-      const header = `${PREFIX}${id}:`;
-      const iv = randomBytes(12);
-      const cipher = createCipheriv('aes-256-gcm', this.localKey(id), iv, {
-        authTagLength: 16,
-      });
-      cipher.setAAD(Buffer.from(header));
-      const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-      return Buffer.concat([Buffer.from(header), iv, cipher.getAuthTag(), encrypted]);
+      return await this.sealSmall(plaintext);
     } catch {
       throw new Error('HealthCipherService: falha ao cifrar.');
+    }
+  }
+
+  /** Caminho direto: Vault Transit ou AES-256-GCM local. Para payloads que cabem no Transit. */
+  private async sealSmall(plaintext: string): Promise<Buffer> {
+    if (this.config.healthCipher?.provider === 'VAULT') {
+      return Buffer.from(await this.transit('encrypt', Buffer.from(plaintext).toString('base64')));
+    }
+    const id = this.config.healthCipher?.keyId ?? LEGACY_KEY_ID;
+    const header = `${PREFIX}${id}:`;
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.localKey(id), iv, {
+      authTagLength: 16,
+    });
+    cipher.setAAD(Buffer.from(header));
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    return Buffer.concat([Buffer.from(header), iv, cipher.getAuthTag(), encrypted]);
+  }
+
+  /** DEK de uso único cifra o dado aqui; só a DEK (32 bytes) passa pelo Transit. */
+  private async sealEnvelope(plaintext: string): Promise<Buffer> {
+    const dek = randomBytes(32);
+    try {
+      const wrapped = await this.sealSmall(dek.toString('base64'));
+      const header = Buffer.concat([Buffer.from(`${ENVELOPE_PREFIX}${wrapped.length}:`), wrapped]);
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', dek, iv, { authTagLength: 16 });
+      cipher.setAAD(header);
+      const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+      return Buffer.concat([header, iv, cipher.getAuthTag(), encrypted]);
+    } finally {
+      dek.fill(0);
+    }
+  }
+
+  private async openEnvelope(ciphertext: Buffer): Promise<string> {
+    const start = ENVELOPE_PREFIX.length;
+    const separator = ciphertext.indexOf(58, start);
+    if (separator < 0 || separator > start + 6) throw new Error('Envelope inválido');
+    const lengthText = ciphertext.subarray(start, separator).toString();
+    if (!/^[1-9]\d{0,5}$/.test(lengthText)) throw new Error('Envelope inválido');
+    const wrappedEnd = separator + 1 + Number(lengthText);
+    if (ciphertext.length < wrappedEnd + 28) throw new Error('Envelope inválido');
+    const dek = Buffer.from(
+      await this.openSmall(ciphertext.subarray(separator + 1, wrappedEnd)),
+      'base64',
+    );
+    try {
+      if (dek.length !== 32) throw new Error('Envelope inválido');
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        dek,
+        ciphertext.subarray(wrappedEnd, wrappedEnd + 12),
+        { authTagLength: 16 },
+      );
+      decipher.setAAD(ciphertext.subarray(0, wrappedEnd));
+      decipher.setAuthTag(ciphertext.subarray(wrappedEnd + 12, wrappedEnd + 28));
+      return Buffer.concat([
+        decipher.update(ciphertext.subarray(wrappedEnd + 28)),
+        decipher.final(),
+      ]).toString('utf8');
+    } finally {
+      dek.fill(0);
     }
   }
 
@@ -159,6 +234,20 @@ export class HealthCipherService {
 
   async decryptHealth(ciphertext: Buffer): Promise<string> {
     try {
+      if (ciphertext.subarray(0, ENVELOPE_PREFIX.length).toString() === ENVELOPE_PREFIX) {
+        return await this.openEnvelope(ciphertext);
+      }
+      return await this.openSmall(ciphertext);
+    } catch {
+      throw new Error(
+        'HealthCipherService: falha ao decifrar (chave indisponível ou dado corrompido).',
+      );
+    }
+  }
+
+  /** Formatos de payload único: Vault Transit, AES-GCM local e pgcrypto legado. */
+  private async openSmall(ciphertext: Buffer): Promise<string> {
+    {
       if (ciphertext.subarray(0, 6).toString() === 'vault:') {
         const value = await this.transit('decrypt', ciphertext.toString());
         return Buffer.from(value, 'base64').toString('utf8');
@@ -191,10 +280,6 @@ export class HealthCipherService {
       )) as unknown as Array<{ plaintext: string }>;
       if (typeof rows[0]?.plaintext !== 'string') throw new Error('Legado inválido');
       return rows[0].plaintext;
-    } catch {
-      throw new Error(
-        'HealthCipherService: falha ao decifrar (chave indisponível ou dado corrompido).',
-      );
     }
   }
 }

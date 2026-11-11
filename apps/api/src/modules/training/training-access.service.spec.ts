@@ -1,0 +1,138 @@
+import { GoneException, UnauthorizedException } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { AppConfigService } from '../../core/config';
+import type { TenantDatabase } from '../../core/database/tenant-database.service';
+import { TrainingAccessService } from './training-access.service';
+
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const RAW_TOKEN = 'a'.repeat(43);
+
+function mutationChain(returning: () => unknown[]) {
+  const chain = {
+    set: () => chain,
+    where: () => chain,
+    values: () => chain,
+    returning: async () => returning(),
+    then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
+      Promise.resolve([]).then(resolve, reject),
+  };
+  return chain;
+}
+
+function makeService(options: { updates?: unknown[][]; selects?: unknown[][] } = {}) {
+  const updates = [...(options.updates ?? [])];
+  const selects = [...(options.selects ?? [])];
+  const inserted: Record<string, unknown>[] = [];
+  const updated: Record<string, unknown>[] = [];
+  const tx = {
+    insert: () => {
+      const chain = mutationChain(() => []);
+      chain.values = (values?: unknown) => {
+        inserted.push(values as Record<string, unknown>);
+        return chain;
+      };
+      return chain;
+    },
+    update: () => {
+      const chain = mutationChain(() => updates.shift() ?? []);
+      chain.set = (values?: unknown) => {
+        updated.push(values as Record<string, unknown>);
+        return chain;
+      };
+      return chain;
+    },
+    select: () => {
+      const rows = selects.shift() ?? [];
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        limit: async () => rows,
+      };
+      return chain;
+    },
+  };
+  const db = {
+    runAsSystem: vi.fn((callback: (value: typeof tx) => unknown) => callback(tx)),
+  } as unknown as TenantDatabase;
+  const config = {
+    whatsapp: { publicSiteUrl: 'https://app.movivo.test' },
+  } as unknown as AppConfigService;
+  return { service: new TrainingAccessService(db, config), inserted, updated };
+}
+
+describe('TrainingAccessService', () => {
+  it('cria magic link sem expor o hash persistido na URL', async () => {
+    const { service, inserted } = makeService();
+    const link = await service.createMagicLink(USER_ID);
+
+    expect(link).toMatch(/^https:\/\/app\.movivo\.test\/hoje\/acessar#token=[\w-]{43}$/);
+    expect(inserted[0]).toMatchObject({
+      userId: USER_ID,
+      kind: 'MAGIC',
+    });
+    expect(link).not.toContain(String(inserted[0]?.tokenHash));
+  });
+
+  it('rejeita magic token malformado, expirado ou consumido', async () => {
+    await expect(makeService().service.exchange('curto')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    await expect(makeService({ updates: [[]] }).service.exchange(RAW_TOKEN)).rejects.toBeInstanceOf(
+      GoneException,
+    );
+  });
+
+  it('troca magic token uma unica vez por token de sessao', async () => {
+    const { service, inserted } = makeService({ updates: [[{ userId: USER_ID }]] });
+    const sessionToken = await service.exchange(RAW_TOKEN);
+
+    expect(sessionToken).toMatch(/^[\w-]{43}$/);
+    expect(inserted[0]).toMatchObject({ userId: USER_ID, kind: 'SESSION' });
+  });
+
+  it('espia o primeiro nome sem consumir o token, falhando em silencio quando invalido', async () => {
+    await expect(makeService().service.peekFirstName('curto')).resolves.toBeNull();
+    await expect(
+      makeService({ selects: [[]] }).service.peekFirstName(RAW_TOKEN),
+    ).resolves.toBeNull();
+
+    const { service, updated, inserted } = makeService({
+      selects: [[{ name: 'Ana Souza' }]],
+    });
+    await expect(service.peekFirstName(RAW_TOKEN)).resolves.toBe('Ana');
+    expect(updated).toHaveLength(0);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('acha o dono do magic link mesmo ja consumido, e ignora token malformado ou desconhecido', async () => {
+    await expect(makeService().service.findMagicOwner('curto')).resolves.toBeNull();
+    await expect(
+      makeService({ selects: [[]] }).service.findMagicOwner(RAW_TOKEN),
+    ).resolves.toBeNull();
+
+    const owner = { userId: USER_ID, name: 'Ana Souza' };
+    await expect(
+      makeService({ selects: [[owner]] }).service.findMagicOwner(RAW_TOKEN),
+    ).resolves.toEqual(owner);
+  });
+
+  it('exige bearer de sessao valido e registra o ultimo uso', async () => {
+    await expect(makeService().service.requireUser(undefined)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    await expect(makeService().service.requireUser('Bearer invalido')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    await expect(
+      makeService({ selects: [[]] }).service.requireUser(`Bearer ${RAW_TOKEN}`),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    const { service, updated } = makeService({
+      selects: [[{ id: 'token-1', userId: USER_ID }]],
+    });
+    await expect(service.requireUser(`Bearer ${RAW_TOKEN}`)).resolves.toBe(USER_ID);
+    expect(updated[0]).toHaveProperty('lastUsedAt');
+  });
+});

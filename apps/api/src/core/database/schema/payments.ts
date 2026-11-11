@@ -13,7 +13,7 @@
  * constraint não tem janela. O worker faz `onConflictDoNothing` sobre ela e pronto.
  *
  * ## Append-only, estorno é linha nova
- * Mesmo padrão de `audit_logs`/`agent_config`/`expenses`: `buildPaymentsImmutabilitySql`
+ * Mesmo padrão de `audit_logs`/`expenses`: `buildPaymentsImmutabilitySql`
  * instala trigger de rejeição (55000) + `REVOKE UPDATE, DELETE, TRUNCATE` da role de runtime
  * (42501). Estorno/chargeback **nunca** altera a linha da cobrança original: entra como linha
  * nova com `amount_cents` negativo e `status` próprio. Somar a coluna devolve o líquido

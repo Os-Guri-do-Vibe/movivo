@@ -35,14 +35,14 @@ export const mfaCodeSchema = z
   .regex(/^[0-9A-Za-z -]+$/, 'Código inválido.');
 
 export const mfaSetupSchema = z.object({ challengeToken: mfaChallengeTokenSchema });
-export const mfaVerifySchema = z.object({
+/** Desafio + código TOTP: corpo tanto da verificação no login quanto da ativação do MFA. */
+export const mfaChallengeCodeSchema = z.object({
   challengeToken: mfaChallengeTokenSchema,
   code: mfaCodeSchema,
 });
-export const mfaEnableSchema = mfaVerifySchema;
 
 export type MfaSetupInput = z.infer<typeof mfaSetupSchema>;
-export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+export type MfaChallengeCodeInput = z.infer<typeof mfaChallengeCodeSchema>;
 
 export const mfaStepSchema = z.enum(['verify', 'setup']);
 export type MfaStep = z.infer<typeof mfaStepSchema>;

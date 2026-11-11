@@ -3,6 +3,7 @@ import { Global, Module } from '@nestjs/common';
 import { AppConfigService } from '../config';
 import { BatchingEmbedding } from './batching-embedding';
 import { EMBEDDING_PORT, FakeEmbedding, type EmbeddingPort } from './embedding.port';
+import { KnowledgeRetrievalService } from './knowledge-retrieval.service';
 import { OpenAiEmbedding } from './openai-embedding';
 
 /** O embedding também é transferência para um modelo e obedece ao mesmo gate de HEALTH. */
@@ -31,7 +32,8 @@ export function createEmbedding(config: AppConfigService): EmbeddingPort {
       inject: [AppConfigService],
       useFactory: createEmbedding,
     },
+    KnowledgeRetrievalService,
   ],
-  exports: [EMBEDDING_PORT],
+  exports: [EMBEDDING_PORT, KnowledgeRetrievalService],
 })
 export class KnowledgeModule {}

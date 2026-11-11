@@ -12,7 +12,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *  (b) **`payments` é append-only.** A role de runtime (`movivo_app`) não consegue UPDATE
  *      nem DELETE (42501, barrado no privilégio antes de chegar ao trigger); a role de
  *      migração (`movivo_migrator`, que mantém o grant) esbarra no trigger (55000). Mesma
- *      divisão de barreiras de `expenses` e `agent_config`.
+ *      divisão de barreiras de `expenses`.
  *
  *  (c) **Estorno é linha nova de sinal contrário.** A linha da cobrança original continua
  *      intacta e `sum(amount_cents)` devolve o líquido sem nenhum CASE.

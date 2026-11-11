@@ -43,3 +43,12 @@ export function maskBrazilianPhone(value: string): string {
 export function toE164BrazilianPhone(masked: string): string {
   return `+55${localDigits(masked)}`;
 }
+
+/** E.164 brasileiro (`+55` + DDD de 2 dígitos + celular de 9 dígitos) → "+55 (11) 91234-5678".
+ *  Fora desse formato (outro país, número malformado), devolve o valor original sem inventar. */
+export function formatPhone(value: string): string {
+  const match = /^\+55(\d{2})(\d{5})(\d{4})$/.exec(value);
+  if (!match) return value;
+  const [, ddd, first, second] = match;
+  return `+55 (${ddd}) ${first}-${second}`;
+}

@@ -2,6 +2,10 @@
  * Manutenção explícita, sem AppModule/workers. Default: somente decifra e verifica.
  * --apply --actor=<UUID staff> recifra com a chave ativa; preserve backup + chaves antigas.
  * Compare-and-swap evita sobrescrever alteração concorrente. Reexecutável após interrupção.
+ *
+ * As tabelas `legacy_*_archive` ficam de fora de propósito: são somente leitura e guardam o
+ * texto cifrado com a chave vigente no corte. Aposentar essa chave exige a rotina manual de
+ * recifrar o arquivo (DBA, com o trigger de imutabilidade suspenso e backup).
  */
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -14,15 +18,9 @@ import { TenantDatabase } from '../core/database/tenant-database.service';
 
 const targets = [
   ['anamnesis_sessions', 'data_block_2', 'id'],
-  ['protocol_renewal_sessions', 'data_block_3', 'id'],
-  ['checkins', 'notes_cipher', 'id'],
-  ['workout_sessions', 'feedback_cipher', 'id'],
-  ['protocols', 'mesocycle_notes_cipher', 'id'],
   ['staff', 'mfa_secret_cipher', 'id'],
   ['short_links', 'target_url', 'code'],
   ['conversations', 'content', 'id'],
-  ['coaching_sessions', 'summary', 'id'],
-  ['protocols', 'pdf_content', 'id'],
 ] as const;
 
 /** CAS + auditoria na mesma transação. Falha de auditoria aborta a escrita. */
@@ -103,8 +101,7 @@ async function main() {
       if (!rows.length) throw new Error('Operador deve ser ADMIN ativo.');
     }
     for (const [tableName, columnName, idName] of targets) {
-      const textColumn = tableName === 'conversations' || tableName === 'coaching_sessions';
-      const pdfColumn = tableName === 'protocols' && columnName === 'pdf_content';
+      const textColumn = tableName === 'conversations';
       const table = sql.identifier(tableName);
       const column = sql.identifier(columnName);
       const id = sql.identifier(idName);
@@ -124,41 +121,25 @@ async function main() {
         for (const row of rows) {
           const original = row.cipher;
           if (textColumn && typeof original !== 'string') throw new Error('Texto inválido.');
-          if (pdfColumn && !Buffer.isBuffer(original)) throw new Error('PDF inválido.');
           if (textColumn && !(original as string).startsWith('movivo:health:text:v1:'))
-            pendingPlaintext++;
-          if (pdfColumn && (original as Buffer).subarray(0, 5).toString() === '%PDF-')
             pendingPlaintext++;
           if (!textColumn && typeof original === 'string' && !original.startsWith('pgp:v1:')) {
             throw new Error('Alias sem cifra; execute a migração de schema antes da rotação.');
           }
-          const plaintext = pdfColumn
-            ? await cipher.decryptBytes(original as Buffer)
-            : textColumn
-              ? await cipher.decryptText(original as string)
-              : await cipher.decryptHealth(
-                  typeof original === 'string'
-                    ? Buffer.from(original.slice(7), 'base64')
-                    : original,
-                );
+          const plaintext = textColumn
+            ? await cipher.decryptText(original as string)
+            : await cipher.decryptHealth(
+                typeof original === 'string' ? Buffer.from(original.slice(7), 'base64') : original,
+              );
           verified++;
           if (apply) {
-            const next = pdfColumn
-              ? await cipher.encryptBytes(plaintext as Buffer)
-              : textColumn
-                ? await cipher.encryptText(plaintext as string)
-                : await cipher.encryptHealth(plaintext as string);
-            const roundtrip = pdfColumn
-              ? await cipher.decryptBytes(next as Buffer)
-              : textColumn
-                ? await cipher.decryptText(next as string)
-                : await cipher.decryptHealth(next as Buffer);
-            if (
-              Buffer.isBuffer(plaintext) && Buffer.isBuffer(roundtrip)
-                ? !roundtrip.equals(plaintext)
-                : roundtrip !== plaintext
-            )
-              throw new Error('Round-trip falhou.');
+            const next = textColumn
+              ? await cipher.encryptText(plaintext as string)
+              : await cipher.encryptHealth(plaintext as string);
+            const roundtrip = textColumn
+              ? await cipher.decryptText(next as string)
+              : await cipher.decryptHealth(next as Buffer);
+            if (roundtrip !== plaintext) throw new Error('Round-trip falhou.');
             const replacement = textColumn
               ? next
               : typeof original === 'string'
@@ -195,7 +176,7 @@ async function main() {
           verified,
           updated,
           conflicts,
-          ...(textColumn || pdfColumn ? { pendingPlaintext } : {}),
+          ...(textColumn ? { pendingPlaintext } : {}),
         }) + '\n',
       );
       if (conflicts)

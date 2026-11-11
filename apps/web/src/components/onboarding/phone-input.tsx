@@ -118,7 +118,7 @@ export function PhoneInput({
     <div ref={rootRef} className="relative w-full">
       <div
         data-testid="phone-field"
-        className="flex h-[52px] w-full overflow-hidden rounded-xl border border-input bg-white transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-white"
+        className="flex h-[52px] w-full overflow-hidden rounded-xl border border-input bg-white transition-[border-color,box-shadow] duration-150 hover:border-petroleo/60 focus-within:border-petroleo focus-within:ring-[3px] focus-within:ring-primary/40"
       >
         <button
           ref={triggerRef}

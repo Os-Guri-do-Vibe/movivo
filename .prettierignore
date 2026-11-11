@@ -20,7 +20,6 @@ next-env.d.ts
 .claude/
 .codex/
 docs/
-sprint/
 # Termos de Uso e Política de Privacidade (páginas públicas): texto jurídico, não se reformata.
 apps/web/content/legal/
 CLAUDE.md

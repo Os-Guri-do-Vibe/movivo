@@ -8,10 +8,10 @@ import { RevealLines } from '../ui/reveal-lines';
 import styles from './adaptive-training.module.css';
 
 const TIMELINE = [
-  { when: 'Semana 01', what: 'Protocolo inicial' },
-  { when: 'Semana 02', what: 'Feedback recebido' },
-  { when: 'Semana 03', what: 'Carga e execução observadas' },
-  { when: 'Semana 04', what: 'Ajustes no protocolo' },
+  { when: 'Semana 01', what: 'Plano inicial' },
+  { when: 'Semana 02', what: 'Registros e check-in' },
+  { when: 'Semana 03', what: 'Carga, ritmo e alimentação observados' },
+  { when: 'Semana 04', what: 'Ajustes no plano' },
   { when: 'Próximo ciclo', what: 'Nova evolução' },
 ] as const;
 

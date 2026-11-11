@@ -106,7 +106,7 @@ export interface EvolutionTransport {
    */
   fetchQrCode(instanceName: string): Promise<string | null>;
   /**
-   * Baixa uma mensagem de voz (US audio — AI Coach por áudio). `mediaKey` é o `key`
+   * Baixa uma mensagem de voz (US audio — IA por áudio). `mediaKey` é o `key`
    * (`{ remoteJid, fromMe, id, participant? }`) que `EvolutionInboundEdge` serializou em
    * `audio.mediaKey` — a única coisa que este endpoint da EvolutionAPI aceita pra
    * localizar a mídia (ela não embute o áudio no webhook: `base64: false` em
@@ -498,6 +498,37 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
         mimetype: 'application/pdf',
         media: toContainerReachableUrl(documentUrl),
         fileName: fileName ?? 'protocolo-movivo.pdf',
+        caption,
+      }),
+    });
+    await this.registerSent(res);
+  }
+
+  /** PDF como base64 (`fileName` é obrigatório nesse modo, senão a EvolutionAPI recusa). */
+  async sendDocumentFile(
+    to: string,
+    base64: string,
+    caption: string,
+    fileName: string,
+  ): Promise<void> {
+    if (!this.apiKey) {
+      this.logger.info('envio de WhatsApp simulado (sem credencial EvolutionAPI)');
+      return;
+    }
+    const instanceName = await this.currentInstanceName();
+    if (!instanceName) {
+      this.logger.info('envio de WhatsApp simulado (nenhuma instância EvolutionAPI conectada)');
+      return;
+    }
+    await this.humanizeBeforeSend(to, instanceName);
+    const res = await this.request(`/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        number: toEvolutionNumber(to),
+        mediatype: 'document',
+        mimetype: 'application/pdf',
+        media: base64,
+        fileName,
         caption,
       }),
     });

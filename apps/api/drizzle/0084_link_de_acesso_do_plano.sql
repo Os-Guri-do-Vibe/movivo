@@ -1,0 +1,2 @@
+ALTER TABLE "access_link_tokens" DROP CONSTRAINT "ck_access_link_tokens_purpose";--> statement-breakpoint
+ALTER TABLE "access_link_tokens" ADD CONSTRAINT "ck_access_link_tokens_purpose" CHECK ("access_link_tokens"."purpose" in ('PROTOCOL', 'PLAN', 'CHECKOUT', 'SUBSCRIPTION_PORTAL'));

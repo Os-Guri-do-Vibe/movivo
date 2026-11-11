@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { HealthCipherService } from './health-cipher.service';
+import { ENVELOPE_MIN_BYTES, HealthCipherService } from './health-cipher.service';
 
 const KEY = 'segredo-aleatorio-legado-de-teste';
 const keyring = {
@@ -163,5 +163,120 @@ describe('Vault malformed response', () => {
     await expect(svc.decryptHealth(Buffer.from('vault:v1:cipher'))).rejects.toThrow(
       'falha ao decifrar',
     );
+  });
+});
+
+describe('Envelope para payloads grandes (Vault Transit)', () => {
+  const VAULT_JSON_STRING_LIMIT = 1024 * 1024;
+
+  /** Transit falso com o mesmo teto do Vault real: valor de texto > 1 MiB → HTTP 500. */
+  function fakeTransit() {
+    const bodies: number[] = [];
+    const fetcher = vi.fn(async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { plaintext?: string; ciphertext?: string };
+      const value = body.plaintext ?? body.ciphertext ?? '';
+      bodies.push(value.length);
+      if (value.length > VAULT_JSON_STRING_LIMIT) {
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+      const data = url.includes('/encrypt/')
+        ? { ciphertext: `vault:v1:${body.plaintext}` }
+        : { plaintext: (body.ciphertext ?? '').replace(/^vault:v1:/, '') };
+      return { ok: true, status: 200, json: async () => ({ data }) };
+    });
+    vi.stubGlobal('fetch', fetcher);
+    return { fetcher, bodies };
+  }
+
+  function vaultService() {
+    const { svc, config, execute } = service();
+    Object.assign(config.healthCipher, {
+      provider: 'VAULT',
+      vaultAddr: 'https://vault.example',
+      vaultToken: 'token-test',
+      vaultKey: 'health',
+      vaultTimeoutMs: 1000,
+    });
+    return { svc, execute };
+  }
+
+  it('foto de 5 MB (base64, como o BodyPhotoService envia) cifra e decifra sem passar pelo Transit', async () => {
+    const { svc, execute } = vaultService();
+    const { fetcher, bodies } = fakeTransit();
+    const photo = randomBytes(5 * 1024 * 1024).toString('base64');
+
+    const stored = await svc.encryptHealth(photo);
+
+    expect(stored.subarray(0, 21).toString()).toBe('movivo:health:env:v1:');
+    expect(stored.includes(Buffer.from(photo.slice(0, 64)))).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(Math.max(...bodies)).toBeLessThan(1024);
+    expect(await svc.decryptHealth(stored)).toBe(photo);
+    expect(Math.max(...bodies)).toBeLessThan(1024);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('cada cifra usa DEK e IV novos', async () => {
+    const { svc } = vaultService();
+    fakeTransit();
+    const big = 'a'.repeat(ENVELOPE_MIN_BYTES + 1);
+    const a = await svc.encryptHealth(big);
+    const b = await svc.encryptHealth(big);
+    expect(a.equals(b)).toBe(false);
+    expect(await svc.decryptHealth(a)).toBe(big);
+    expect(await svc.decryptHealth(b)).toBe(big);
+  });
+
+  it('payload pequeno segue direto no Transit, no formato de sempre', async () => {
+    const { svc } = vaultService();
+    const { fetcher } = fakeTransit();
+    const stored = await svc.encryptHealth('x'.repeat(ENVELOPE_MIN_BYTES));
+    expect(stored.toString().startsWith('vault:v1:')).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await svc.decryptHealth(stored)).toBe('x'.repeat(ENVELOPE_MIN_BYTES));
+  });
+
+  it('PDF grande (encryptBytes/decryptBytes) faz round-trip em envelope', async () => {
+    const { svc } = vaultService();
+    fakeTransit();
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), randomBytes(3 * 1024 * 1024)]);
+    const stored = await svc.encryptBytes(pdf);
+    expect(stored.subarray(0, 21).toString()).toBe('movivo:health:env:v1:');
+    expect((await svc.decryptBytes(stored)).equals(pdf)).toBe(true);
+  });
+
+  it('dado adulterado, DEK embrulhada trocada ou truncamento são recusados', async () => {
+    const { svc } = vaultService();
+    fakeTransit();
+    const big = 'b'.repeat(ENVELOPE_MIN_BYTES + 10);
+    const stored = await svc.encryptHealth(big);
+    const flip = (offset: number) => {
+      const copy = Buffer.from(stored);
+      copy[offset] = (copy[offset] ?? 0) ^ 0xff;
+      return copy;
+    };
+    const headerEnd = stored.indexOf(Buffer.from('vault:v1:'));
+    await expect(svc.decryptHealth(flip(stored.length - 1))).rejects.toThrow('falha ao decifrar');
+    await expect(svc.decryptHealth(flip(headerEnd + 12))).rejects.toThrow('falha ao decifrar');
+    await expect(svc.decryptHealth(stored.subarray(0, 40))).rejects.toThrow('falha ao decifrar');
+    await expect(
+      svc.decryptHealth(Buffer.from('movivo:health:env:v1:abc:xxxxxxxxxxxxxxxxxxxxxxxx')),
+    ).rejects.toThrow('falha ao decifrar');
+  });
+
+  it('Vault indisponível ao embrulhar a DEK falha sem vazar detalhe', async () => {
+    const { svc } = vaultService();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('token-test detalhe-sensível')));
+    await expect(svc.encryptHealth('c'.repeat(ENVELOPE_MIN_BYTES + 1))).rejects.toThrow(
+      /^HealthCipherService: falha ao cifrar\.$/,
+    );
+  });
+
+  it('provider LOCAL não usa envelope: AES-GCM local já não tem teto', async () => {
+    const { svc } = service();
+    const big = 'd'.repeat(ENVELOPE_MIN_BYTES * 3);
+    const stored = await svc.encryptHealth(big);
+    expect(stored.subarray(0, 17).toString()).toBe('movivo:health:v1:');
+    expect(await svc.decryptHealth(stored)).toBe(big);
   });
 });

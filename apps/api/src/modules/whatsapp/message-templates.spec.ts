@@ -1,89 +1,55 @@
-import { DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
-  analyzingMessage,
-  BUBBLE_SEPARATOR,
+  PROTOCOLS_READY_DOCUMENTS,
+  protocolsReadyBubbles,
+} from '../planning/plan-delivery.service';
+import {
   confirmationCareMessage,
   confirmationMessage,
   phoneVerificationMessage,
-  protocolDeliveryPdfText,
-  PROTOCOL_WAITING_DELAY_MS,
+  staffQueueAlertMessage,
 } from './message-templates';
 
-const PERSONA = DEFAULT_AGENT_PERSONA;
-const NO_EMOJI: AgentPersona = { ...DEFAULT_AGENT_PERSONA, emojiPolicy: 'NENHUM' };
-
-/** Guardrails inegociáveis (CLAUDE.md / Sofia §13): a copy nunca pode conter estes termos. */
+/** Guardrails inegociáveis: a copy nunca pode conter estes termos. */
 const FORBIDDEN = /diagn[óo]stico|tratamento|\bcura\b|garantid|garantia|prescri/i;
 
 const allTexts = [
   confirmationMessage('Ana'),
   phoneVerificationMessage('268267'),
   confirmationCareMessage(),
-  analyzingMessage(PERSONA),
-  analyzingMessage(NO_EMOJI),
-  protocolDeliveryPdfText('Ana'),
-  protocolDeliveryPdfText(null),
-  protocolDeliveryPdfText('Ana', 'Seu treino trabalha corpo inteiro 3x por semana.'),
-  // Achado 2026-09-09 (bug reproduzido ao vivo pelo fundador): a saudação de reentrega
-  // pós-substituição tinha um travessão que escapou da checagem por não ter cobertura
-  // aqui — este é exatamente o caminho onde ele apareceu, por isso entra na varredura.
-  protocolDeliveryPdfText('Rodrigo', undefined, [
-    { from: 'Supino Reto (Barra)', to: 'Supino Reto (Máquina)' },
-  ]),
-  // Achado 2026-09-30 (troca em lote): a mesma saudação com mais de uma troca.
-  protocolDeliveryPdfText('Rodrigo', undefined, [
-    { from: 'Leg Press 45°', to: 'Agachamento Hack' },
-    { from: 'Cadeira Extensora', to: 'Afundo' },
-    { from: 'Mesa Flexora', to: 'Stiff' },
-  ]),
+  confirmationCareMessage('Ana'),
+  confirmationMessage(null),
+  staffQueueAlertMessage('sinal de segurança', 'urgente'),
 ];
 
-describe('saudação de reentrega pós-substituição (troca em lote)', () => {
-  it('uma troca: singular, nomeando o de/para', () => {
-    const text = protocolDeliveryPdfText('Rodrigo', undefined, [
-      { from: 'Supino Reto (Barra)', to: 'Supino Reto (Máquina)' },
-    ]);
-    expect(text).toContain('a troca do seu exercício já foi feita');
-    expect(text).toContain('"Supino Reto (Barra)" virou "Supino Reto (Máquina)"');
-  });
-
-  it('várias trocas: plural, nomeando todas em português natural', () => {
-    const text = protocolDeliveryPdfText('Rodrigo', undefined, [
-      { from: 'Leg Press 45°', to: 'Agachamento Hack' },
-      { from: 'Cadeira Extensora', to: 'Afundo' },
-      { from: 'Mesa Flexora', to: 'Stiff' },
-    ]);
-    expect(text).toContain('a troca dos seus exercícios já foi feita');
-    expect(text).toContain(
-      '"Leg Press 45°" virou "Agachamento Hack", "Cadeira Extensora" virou "Afundo" e "Mesa Flexora" virou "Stiff"',
-    );
-  });
-
-  it('sem trocas (lista vazia) mantém a saudação de 1ª entrega', () => {
-    expect(protocolDeliveryPdfText('Rodrigo', undefined, [])).toContain('seu treino está pronto');
-  });
-});
-
-describe('templates de WhatsApp (US-2.5)', () => {
+describe('templates de WhatsApp', () => {
   it('nenhuma copy contém termo proibido', () => {
     for (const text of allTexts) expect(text).not.toMatch(FORBIDDEN);
   });
 
   /**
-   * Regra de produto (achado 2026-09-09, correção do fundador): o Agente IA Coach do
-   * WhatsApp nunca usa travessão "—" em nenhuma mensagem, nem nas fixas/determinísticas
-   * como estas. Mesma motivação de `EM_DASH`/`stripEmDash` em `response-formatter.ts`
-   * (que cobre a saída LIVRE do LLM) — esta varredura cobre a copy FIXA, que não passa
-   * por aquele pipeline.
+   * Regra de produto: o atendimento do WhatsApp nunca usa travessão "—", nem nas mensagens
+   * fixas. A saída livre do modelo passa por outra varredura; esta cobre a copy FIXA.
    */
   it('nenhuma copy fixa usa travessão (—)', () => {
     for (const text of allTexts) expect(text).not.toContain('—');
   });
 
-  it('variante de cuidado cita o CREF', () => {
-    expect(confirmationCareMessage()).toMatch(/CREF/);
+  it('nenhuma mensagem do fluxo leva link', () => {
+    for (const text of allTexts) expect(text).not.toMatch(/https?:\/\/|www\.|\.com\b/i);
+  });
+
+  it('variante de cuidado informa a revisão profissional', () => {
+    // Uma bolha só: os três parágrafos vão separados por linha em branco.
+    expect(confirmationCareMessage('Ana')).toBe(
+      [
+        'Ana, recebemos suas respostas. Agradecemos a confiança.',
+        'Por segurança, um profissional vai revisar algumas informações antes de liberar seus protocolos. É um cuidado que a gente tem sempre que algumas respostas pedem um olhar mais próximo.',
+        'Assim que estiver tudo certo, avisamos por aqui. Se surgir alguma dúvida nesse meio-tempo, é só responder esta conversa.',
+      ].join('\n\n'),
+    );
+    expect(confirmationCareMessage('Ana')).not.toContain('\n---\n');
   });
 
   it('variante de cuidado não promete plano automático', () => {
@@ -93,63 +59,58 @@ describe('templates de WhatsApp (US-2.5)', () => {
 
   it('código de verificação sai em negrito do WhatsApp (*código*)', () => {
     expect(phoneVerificationMessage('268267')).toBe(
-      'Seu código de confirmação da MOVIVO é *268267*.\n\n' +
-        'Ele confirma que este WhatsApp é seu e é válido por 10 minutos.\n\n' +
-        'Não compartilhe este código com ninguém.',
+      'Seu código de verificação da MOVIVO é *268267*.\n' +
+        'Ele vale por 10 minutos e confirma que este WhatsApp é seu.\n' +
+        'Não compartilhe com ninguém, nem com quem disser ser da MOVIVO.\n' +
+        'Se não foi você que pediu, é só ignorar esta mensagem.',
     );
+    // Uma bolha só: o código não pode ser quebrado em várias mensagens.
+    expect(phoneVerificationMessage('268267')).not.toContain('\n---\n');
   });
 
   it('confirma sincronamente sem prometer prazo operacional', () => {
-    expect(confirmationMessage('Ana')).toMatch(/Recebemos suas informações/i);
+    expect(confirmationMessage('Ana')).toBe(
+      [
+        'Olá, Ana! Suas respostas foram recebidas com sucesso. 💚',
+        'Agora, vamos preparar seu protocolo de treino e seu plano alimentar, ambos individualizados e personalizados de acordo com seus objetivos, necessidades e preferências.',
+        'Em breve, você receberá tudo por aqui.',
+      ].join('\n\n'),
+    );
+    // Uma bolha só.
+    expect(confirmationMessage('Ana')).not.toContain('\n---\n');
     expect(confirmationMessage('Ana')).not.toMatch(/2 horas|em até 2h|prazo/i);
   });
 
   it('confirmação saúda pelo primeiro nome quando disponível, e genericamente quando não', () => {
-    expect(confirmationMessage('Ana')).toMatch(/^Olá, Ana! 💚/);
-    expect(confirmationMessage(null)).toMatch(/^Olá! 💚/);
-  });
-
-  it('entrega COM PDF: saúda pelo primeiro nome (achado 2026-09-04)', () => {
-    expect(protocolDeliveryPdfText('Ana')).toBe(
-      'Ana, seu treino está pronto. 💚\n\n' +
-        'Montamos seu protocolo considerando seus objetivos, sua rotina, sua disponibilidade e ' +
-        'tudo o que você compartilhou com a gente.\n\n' +
-        'A partir de agora, esse é o seu ponto de partida.\n\n' +
-        'Acesse seu treino, conheça cada etapa e, sempre que precisar, fale com a gente por ' +
-        'aqui.\n\n' +
-        'Agora é colocar o corpo em movimento e construir progresso, um treino de cada vez.',
+    expect(confirmationMessage('Ana')).toMatch(
+      /^Olá, Ana! Suas respostas foram recebidas com sucesso\. 💚/,
     );
-    expect(protocolDeliveryPdfText(null)).toMatch(/^Seu treino está pronto\. 💚/);
+    expect(confirmationMessage(null)).toMatch(
+      /^Olá! Suas respostas foram recebidas com sucesso\. 💚/,
+    );
+    expect(confirmationCareMessage('Ana')).toMatch(/^Ana, recebemos suas respostas/);
+    expect(confirmationCareMessage()).toMatch(/^Recebemos suas respostas/);
   });
 
-  it('entrega COM PDF: sem resumo de IA é 1 bolha; com resumo vira 2 bolhas', () => {
-    expect(protocolDeliveryPdfText('Ana').split(BUBBLE_SEPARATOR)).toHaveLength(1);
-    const withSummary = protocolDeliveryPdfText('Ana', 'Resumo curto do treino.');
-    const bubbles = withSummary.split(BUBBLE_SEPARATOR);
-    expect(bubbles).toHaveLength(2);
-    expect(bubbles[1]).toBe('Resumo curto do treino.');
-  });
-});
-
-describe('analyzingMessage — apresentação 30min após o submit', () => {
-  it('o atraso é de 30 minutos', () => {
-    expect(PROTOCOL_WAITING_DELAY_MS).toBe(30 * 60 * 1000);
+  it('alerta à equipe leva só tipo e prioridade, sem nome nem dado de saúde', () => {
+    expect(staffQueueAlertMessage('sinal de segurança', 'urgente')).toBe(
+      'Novo caso na fila MOVIVO\nTipo: sinal de segurança\nPrioridade: urgente',
+    );
   });
 
-  it('é a apresentação do agente configurada no painel, verbatim, independente de reviewUrgency', () => {
-    // Achado 2026-09-04 (a pedido do fundador): mandatory e optional mandavam textos
-    // diferentes — a variante MANDATORY chegou a sair pro fundador em teste quando o
-    // esperado era a apresentação normal. Unificado: um texto só, sempre `agentSelfIntro`.
-    const persona: AgentPersona = {
-      ...PERSONA,
-      agentName: 'ATLAS',
-      agentSelfIntro: 'Oi! Sou a ATLAS.\n\nJá recebi suas informações.',
-    };
-    const text = analyzingMessage(persona);
-    // `agentSelfIntro` é a mensagem estática inteira — sai como veio do painel, sem
-    // prefixo "Sou {nome}." nem qualquer outra transformação.
-    expect(text).toBe('Oi! Sou a ATLAS.\n\nJá recebi suas informações.');
-    expect(text).not.toMatch(/intelig[êe]ncia artificial/i);
-    expect(text).not.toMatch(/já estou analisando/i);
+  it('entrega dos protocolos: uma bolha de texto, depois um PDF por protocolo com a legenda', () => {
+    expect(protocolsReadyBubbles('Ana')).toEqual([
+      'Ana, seu protocolo de treino e dieta estão prontos.\n\nSe algo não combinar com a sua rotina ou preferências pessoais, é só nos avisar que a gente faz os ajustes para você.',
+    ]);
+    expect(protocolsReadyBubbles(null)[0]).toMatch(
+      /^Seu protocolo de treino e dieta estão prontos\./,
+    );
+    expect(PROTOCOLS_READY_DOCUMENTS).toEqual([
+      { plan: 'treino', caption: '*Protocolo de treino*: sua semana e cada sessão em detalhe.' },
+      {
+        plan: 'alimentacao',
+        caption: '*Protocolo alimentar*: metas do dia, refeições e orientações.',
+      },
+    ]);
   });
 });

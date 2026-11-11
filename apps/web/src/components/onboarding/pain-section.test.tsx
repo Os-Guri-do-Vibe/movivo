@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { EMPTY_PAIN, PainSection } from './pain-section';
+import { EMPTY_PAIN, PainSection, type PainData } from './pain-section';
 
 describe('PainSection', () => {
   it('"Não" encerra a seção — nenhum outro campo aparece', () => {
@@ -31,7 +31,7 @@ describe('PainSection', () => {
         onChange={vi.fn()}
       />,
     );
-    const slider = screen.getByLabelText(/intensidade do desconforto em joelho/i);
+    const slider = screen.getByLabelText('Joelho: quanto incomoda hoje?');
     expect(slider).toHaveAttribute('aria-valuetext', '5 de 10');
   });
 
@@ -39,7 +39,7 @@ describe('PainSection', () => {
     const user = userEvent.setup();
 
     function ControlledPainSection() {
-      const [data, setData] = React.useState({
+      const [data, setData] = React.useState<PainData>({
         ...EMPTY_PAIN,
         hasPain: true,
       });
@@ -51,16 +51,14 @@ describe('PainSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Outra' }));
     const otherRegion = screen.getByLabelText('Qual é a outra região?');
-    const initialSlider = screen.getByLabelText('Intensidade do desconforto em Outra');
+    const initialSlider = screen.getByLabelText('Outra: quanto incomoda hoje?');
 
     expect(
       otherRegion.compareDocumentPosition(initialSlider) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     await user.type(otherRegion, 'Cotovelo esquerdo');
-    expect(
-      screen.getByLabelText('Intensidade do desconforto em Cotovelo esquerdo'),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Cotovelo esquerdo: quanto incomoda hoje?')).toBeInTheDocument();
   });
 
   it('posiciona os indicadores de seleção à esquerda na Parte 4', () => {
@@ -77,12 +75,15 @@ describe('PainSection', () => {
 
     const painAnswer = screen.getAllByRole('radio', { name: 'Sim' })[0];
     const region = screen.getByRole('button', { name: 'Joelho' });
-    const trend = screen.getByRole('radio', { name: 'Estável' });
+    const trend = screen.getByRole('radio', { name: 'Sem mudança' });
 
-    for (const option of [painAnswer, region, trend]) {
+    for (const option of [painAnswer, trend]) {
       expect(option).toHaveClass('justify-start');
       expect(option?.firstElementChild).toHaveClass('rounded-full');
     }
+    // Regiões são múltipla escolha: o indicador é o quadrado de check.
+    expect(region).toHaveClass('justify-start');
+    expect(region.firstElementChild).toHaveClass('rounded-md');
   });
 
   it('explicação profissional revela o campo sem usar o termo proibido', () => {
@@ -98,11 +99,7 @@ describe('PainSection', () => {
         onChange={vi.fn()}
       />,
     );
-    expect(
-      screen.getByLabelText(
-        'O que ele te disse? Com suas palavras, tudo bem não lembrar o nome exato.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText('O que foi explicado?')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/diagnóstico/i);
   });
 
@@ -119,9 +116,7 @@ describe('PainSection', () => {
         onChange={vi.fn()}
       />,
     );
-    expect(
-      screen.getByLabelText('Quais movimentos ou exercícios devem ser evitados?'),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText('O que foi pedido para evitar?')).toBeInTheDocument();
   });
 
   it('arrastar o slider de intensidade chama onChange com o novo valor', () => {
@@ -136,7 +131,7 @@ describe('PainSection', () => {
         onChange={onChange}
       />,
     );
-    const slider = screen.getByLabelText(/intensidade do desconforto em joelho/i);
+    const slider = screen.getByLabelText('Joelho: quanto incomoda hoje?');
     Object.defineProperty(slider, 'value', { value: '8', writable: true });
     slider.dispatchEvent(new Event('input', { bubbles: true }));
     slider.dispatchEvent(new Event('change', { bubbles: true }));
@@ -159,10 +154,7 @@ describe('PainSection', () => {
     await user.click(screen.getByText('Piorando'));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ trend: 'WORSENING' }));
 
-    await user.type(
-      screen.getByLabelText('Quais movimentos ou situações provocam o desconforto?'),
-      'a',
-    );
+    await user.type(screen.getByLabelText('O que costuma provocar ou piorar o desconforto?'), 'a');
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ trigger: 'a' }));
   });
 

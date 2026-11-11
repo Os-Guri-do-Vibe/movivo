@@ -1,11 +1,6 @@
 import 'server-only';
 
-import {
-  friendlyIssueMessages,
-  mfaChallengeResponseSchema,
-  type FriendlyIssueInput,
-  type MfaStep,
-} from '@movivo/shared';
+import { mfaChallengeResponseSchema, type MfaStep } from '@movivo/shared';
 import { cookies, headers } from 'next/headers';
 import QRCode from 'qrcode';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -17,6 +12,7 @@ import {
   type DashboardCapability,
   type DashboardRole,
 } from '@/lib/control-center-access';
+import { friendlyMessage } from '@/lib/api-message';
 import { publicEnv, secureCookies } from '@/lib/env';
 
 import { trustedOrigins } from '../../_lib/trusted-origins';
@@ -454,12 +450,7 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
   }
 
   const record = isRecord(value) ? value : {};
-  const message =
-    typeof record.message === 'string'
-      ? record.message
-      : response.status === 401
-        ? 'Sua sessão expirou. Entre novamente.'
-        : 'Não foi possível concluir a solicitação.';
+  const message = friendlyMessage(response.status, record.message);
   const safeBody: Record<string, unknown> = { error: `request_failed_${response.status}`, message };
   if (typeof record.code === 'string') safeBody.code = record.code;
   if (Array.isArray(record.issues)) safeBody.issues = record.issues;
@@ -471,26 +462,6 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
     status: response.status,
     headers: DASHBOARD_PRIVATE_HEADERS,
   });
-}
-
-/**
- * 400 de validação com mensagens em PT-BR que apontam o campo (treino › exercício › campo).
- * `input` é o corpo/conteúdo validado: dele saem os nomes reais no lugar dos índices.
- */
-export function validationErrorResponse(
-  summary: string,
-  issues: readonly FriendlyIssueInput[],
-  input?: unknown,
-): NextResponse {
-  return NextResponse.json(
-    {
-      error: 'request_failed_400',
-      message: summary,
-      code: 'INVALID_INPUT',
-      issues: friendlyIssueMessages(issues, input).map((message) => ({ message })),
-    },
-    { status: 400, headers: DASHBOARD_PRIVATE_HEADERS },
-  );
 }
 
 export function errorResponse(error: unknown): NextResponse {

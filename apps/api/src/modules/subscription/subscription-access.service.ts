@@ -14,10 +14,7 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AccessLinkService } from '../../core/database/access-link.service';
-import {
-  SUBSCRIPTION_INBOUND_EVENT,
-  type SubscriptionInboundEvent,
-} from '../../core/event-bus/events';
+import { SUBSCRIPTION_INBOUND_EVENT, type InboundTextEvent } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { QUEUE } from '../jobs/jobs.config';
@@ -60,7 +57,7 @@ export class SubscriptionAccessService implements OnModuleInit, OnModuleDestroy 
 
   onModuleInit(): void {
     // O WhatsApp só conhece o evento: o pedido de cancelamento é interceptado antes da IA.
-    this.unregister = this.events.register<SubscriptionInboundEvent, boolean>(
+    this.unregister = this.events.register<InboundTextEvent, boolean>(
       SUBSCRIPTION_INBOUND_EVENT,
       ({ userId, text, messageKey }) => this.handleInbound(userId, text, messageKey),
     );
@@ -144,7 +141,7 @@ export class SubscriptionAccessService implements OnModuleInit, OnModuleDestroy 
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'subscription-access-link',
-      { userId, type: 'COACH_MESSAGE', text, dedupeId } satisfies WhatsappOutboundJob,
+      { userId, type: 'CONVERSATION_MESSAGE', text, dedupeId } satisfies WhatsappOutboundJob,
       { jobId: `wa-${dedupeId}` },
     );
   }

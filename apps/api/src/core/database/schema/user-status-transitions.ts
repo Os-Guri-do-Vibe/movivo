@@ -8,7 +8,7 @@
  * pausou, voltou e trocou de plano, quando a inferência erra em silêncio.
  *
  * ## Append-only imposto no banco
- * Mesma dupla barreira já provada em `audit_logs` e `agent_config` (Sprint 7):
+ * Mesma dupla barreira já provada em `audit_logs` (Sprint 7):
  * trigger que rejeita UPDATE/DELETE/TRUNCATE com SQLSTATE 55000 + REVOKE do privilégio na
  * role de runtime. Ver `buildStatusTransitionsImmutabilitySql` em `security-policies.ts` e o
  * teste `test/user-status-transitions-immutability.int-spec.ts`.
