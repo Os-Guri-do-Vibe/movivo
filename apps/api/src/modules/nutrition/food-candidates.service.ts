@@ -21,6 +21,42 @@ import { fold, healthRecords } from '../planning/tasks/common';
 const LIKED = /alimentos que gosta:\s*([^|]+)/i;
 const DISLIKED = /alimentos que evita:\s*([^|]+)/i;
 
+/** Gostos e aversões de comida que o aluno declarou depois da anamnese (pelo WhatsApp). */
+export function declaredFoodPreferences(slice: unknown): { liked: string[]; disliked: string[] } {
+  const rows = Array.isArray(slice)
+    ? (slice as { domain?: string; key?: string; value?: unknown }[])
+    : [];
+  const foods = (value: 'LIKES' | 'DISLIKES') =>
+    rows
+      .filter((row) => row.domain === 'FOOD' && row.value === value && row.key?.startsWith('food:'))
+      .map((row) => (row.key as string).slice('food:'.length).replaceAll('_', ' '));
+  return { liked: foods('LIKES'), disliked: foods('DISLIKES') };
+}
+
+/**
+ * Junta a anamnese com o que o aluno declarou depois. O mais recente vence: se ele disse na
+ * anamnese que evita peixe e depois contou que passou a gostar, o peixe sai da lista do que evita
+ * (e o contrário).
+ */
+export function mergeFoodPreferences(
+  anamnesis: { liked: string | null; disliked: string | null },
+  declared: { liked: readonly string[]; disliked: readonly string[] },
+): { likedFoods: string | null; dislikedFoods: string | null } {
+  const pieces = (text: string | null) =>
+    (text ?? '')
+      .split(/[,;/]|\s+e\s+/i)
+      .map((piece) => piece.trim())
+      .filter(Boolean);
+  const without = (list: string[], overridden: readonly string[]) =>
+    list.filter((piece) => !overridden.some((food) => fold(piece).includes(fold(food))));
+  const liked = [...without(pieces(anamnesis.liked), declared.disliked), ...declared.liked];
+  const disliked = [...without(pieces(anamnesis.disliked), declared.liked), ...declared.disliked];
+  return {
+    likedFoods: liked.length > 0 ? liked.join(', ') : null,
+    dislikedFoods: disliked.length > 0 ? disliked.join(', ') : null,
+  };
+}
+
 export interface StudentFoodPreferences {
   allergenTerms: string[];
   likedFoods: string | null;
@@ -36,18 +72,18 @@ export class FoodCandidatesService {
 
   /** Alergias e gostos do aluno, lidos do Estado (vazio sem consentimento de saúde). */
   async preferencesOf(userId: string): Promise<StudentFoodPreferences> {
-    const read = await this.state.read(userId, ['safety']);
+    const read = await this.state.read(userId, ['safety', 'preferences']);
     const records = healthRecords(read.slices as Record<string, unknown>);
     const notes = records.filter((r) => r.kind === 'NOTES').map((r) => r.summary);
     const find = (pattern: RegExp) =>
       notes.map((note) => pattern.exec(note)?.[1]?.trim()).find((value) => Boolean(value)) ?? null;
+    const declared = declaredFoodPreferences(read.slices.preferences);
     return {
       allergenTerms: records
         .filter((r) => r.kind === 'FOOD_ALLERGY')
         .map((r) => fold(r.summary.replace(/\s*\(.*\)\s*$/, '').trim()))
         .filter((term) => term.length >= 3),
-      likedFoods: find(LIKED),
-      dislikedFoods: find(DISLIKED),
+      ...mergeFoodPreferences({ liked: find(LIKED), disliked: find(DISLIKED) }, declared),
     };
   }
 

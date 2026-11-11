@@ -18,7 +18,8 @@ export function staffQueueAlertMessage(kindLabel: string, priorityLabel: string)
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = WHATSAPP_BUBBLE_SEPARATOR;
 
-const bubbles = (...parts: string[]) => parts.join(BUBBLE_SEPARATOR);
+/** Parágrafos de UMA bolha só: separados por linha em branco, sem o separador de bolhas. */
+const paragraphs = (...parts: string[]) => parts.join('\n\n');
 
 /**
  * Confirmação imediata no submit (PAR-Q liberado), sem prometer prazo. Fluxo v2 (copy do Bruno,
@@ -26,10 +27,12 @@ const bubbles = (...parts: string[]) => parts.join(BUBBLE_SEPARATOR);
  * os profissionais de Educação Física e Nutrição. Nenhuma mensagem do fluxo leva link.
  */
 export function confirmationMessage(firstName: string | null): string {
-  return bubbles(
-    firstName ? `Oi, ${firstName}! Recebemos suas respostas 💚` : 'Oi! Recebemos suas respostas 💚',
-    'Agora nossos agentes de IA e os profissionais de Educação Física e Nutrição vão montar seus dois protocolos: o de *treino* e o *alimentar*, a partir do que você contou.',
-    'Quando estiverem prontos, eles chegam aqui mesmo, nesta conversa.',
+  return paragraphs(
+    firstName
+      ? `Olá, ${firstName}! Suas respostas foram recebidas com sucesso. 💚`
+      : 'Olá! Suas respostas foram recebidas com sucesso. 💚',
+    'Agora, vamos preparar seu protocolo de treino e seu plano alimentar, ambos individualizados e personalizados de acordo com seus objetivos, necessidades e preferências.',
+    'Em breve, você receberá tudo por aqui.',
   );
 }
 
@@ -39,11 +42,11 @@ export function confirmationMessage(firstName: string | null): string {
  * feminina e a forma verbal não trava o gênero.
  */
 export function confirmationCareMessage(firstName: string | null = null): string {
-  return bubbles(
+  return paragraphs(
     firstName
       ? `${firstName}, recebemos suas respostas. Agradecemos a confiança.`
       : 'Recebemos suas respostas. Agradecemos a confiança.',
-    'Por segurança, um profissional de Educação Física registrado no CREF vai revisar algumas informações antes de liberar seus protocolos de treino e alimentar. É um cuidado que a gente tem sempre que algumas respostas pedem um olhar mais próximo.',
+    'Por segurança, um profissional vai revisar algumas informações antes de liberar seus protocolos. É um cuidado que a gente tem sempre que algumas respostas pedem um olhar mais próximo.',
     'Assim que estiver tudo certo, avisamos por aqui. Se surgir alguma dúvida nesse meio-tempo, é só responder esta conversa.',
   );
 }

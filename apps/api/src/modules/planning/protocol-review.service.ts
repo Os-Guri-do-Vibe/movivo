@@ -16,7 +16,6 @@ import type {
   PlanStatus,
   ProtocolReview,
   TrainingPlanStructure,
-  Weekday,
 } from '@movivo/shared';
 
 import type { Violation } from '../../core/agents/agent-task';
@@ -43,6 +42,7 @@ import { PLAN_STATE_SLICES, todayIn } from './plan-generation.service';
 import {
   goalStrategyOf,
   insertPlanSessions,
+  baseWeekOf,
   latestTrainingSessions,
   scheduleWeek,
 } from './plan-publisher.service';
@@ -73,11 +73,6 @@ export function protocolKindOf(action: PublishPlanAction): 'TRAINING' | 'NUTRITI
 export type ValidatedProtocol =
   | { kind: 'TRAINING'; structure: TrainingPlanStructure }
   | { kind: 'NUTRITION'; structure: NutritionPlanStructure };
-
-const WEEKDAY_BY_OFFSET: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-
-const daysBetween = (from: string, to: string) =>
-  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 @Injectable()
 export class ProtocolReviewService {
@@ -184,18 +179,19 @@ export class ProtocolReviewService {
     const weekStart = mondayOf(today);
     const week = scheduleWeek(structure.sessions, schedule, weekStart, today);
     const byKey = new Map(structure.sessions.map((s) => [s.key, s]));
-    // Semana inteira (sem o corte do dia de início): o desenho que as semanas seguintes repetem.
-    const model = scheduleWeek(structure.sessions, schedule, weekStart, weekStart);
+    // Semana-base (sem o corte do dia de início): o desenho que as semanas seguintes repetem e que
+    // o PDF do aluno mostra — a mesma conta (`baseWeekOf`).
+    const model = baseWeekOf(structure.sessions, schedule, weekStart);
     return {
       kind,
       ...base,
       structure,
       weekModel: {
-        sessions: model.assignments.map((a) => ({
-          weekday: WEEKDAY_BY_OFFSET[daysBetween(weekStart, a.date)] ?? 'MON',
-          slot: a.slot,
-          sessionKey: a.planSessionKey,
-          occurrence: a.occurrence,
+        sessions: model.sessions.map((s) => ({
+          weekday: s.weekday,
+          slot: s.slot,
+          sessionKey: s.planSessionKey,
+          occurrence: s.occurrence,
         })),
         dropped: model.dropped.map((d) => ({
           sessionKey: d.planSessionKey,

@@ -194,6 +194,11 @@ export type ImageKindInput = z.infer<typeof imageKindInputSchema>;
 export const imageKindOutputSchema = z.object({
   kind: z.enum(IMAGE_KINDS),
   confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+  /**
+   * Só para MEAL: LOG = registrar (padrão, inclusive sem legenda); QUERY = a legenda só pergunta
+   * sobre o alimento, sem dizer que comeu.
+   */
+  mealIntent: z.enum(['LOG', 'QUERY']).nullish(),
 });
 export type ImageKindOutput = z.infer<typeof imageKindOutputSchema>;
 
@@ -207,7 +212,9 @@ export const imageKindTask = defineAgentTask<ImageKindInput, ImageKindOutput>({
 - BODY: foto do corpo (avaliação física).
 - OTHER: qualquer outra coisa.
 
-"expectingMeal" indica que a MOVIVO acabou de lembrar o aluno de registrar uma refeição: em caso de dúvida entre MEAL e OTHER, prefira MEAL. A legenda ("caption") ajuda, mas o que vale é o que se vê. Não descreva a imagem nem faça análise: só o tipo e a confiança.`,
+"expectingMeal" indica que a MOVIVO acabou de lembrar o aluno de registrar uma refeição: em caso de dúvida entre MEAL e OTHER, prefira MEAL. A legenda ("caption") ajuda, mas o que vale é o que se vê. Não descreva a imagem nem faça análise: só o tipo e a confiança.
+
+Para MEAL, preencha "mealIntent": QUERY somente quando a legenda apenas PERGUNTA sobre o alimento ("quantas calorias tem isso?", "quanto de proteína tem?", "isso tem muito açúcar?") sem dizer que comeu, que vai comer agora ou que é para registrar. Em todos os outros casos (sem legenda, "meu almoço", "comi isso", "registra", "comi isso, quantas calorias?") use LOG. Para os outros tipos, deixe nulo.`,
   tier: 'VISION',
   methodology: [],
   state: [],

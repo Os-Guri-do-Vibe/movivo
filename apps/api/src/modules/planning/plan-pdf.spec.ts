@@ -100,6 +100,7 @@ const plan: PlanRead = {
         minutes: 50,
       },
     ],
+    baseWeek: [{ weekday: 'TUE', slot: 'EVENING', planSessionKey: 'FORCA_A' }],
   },
   nutrition: {
     version: 1,
@@ -193,14 +194,37 @@ describe('plan-pdf', () => {
     expect(compact.indexOf('SEGUNDA')).toBeLessThan(compact.indexOf('QUINTA'));
   });
 
-  it('sem dia marcado pelo profissional, usa os dias da agenda', async () => {
+  it('sem dia marcado pelo profissional, usa a semana-base', async () => {
     const { extractText, getDocumentProxy } = await import('unpdf');
     const buffer = await trainingPlanPdf(plan);
     const pdf = await getDocumentProxy(new Uint8Array(buffer));
     const { text } = await extractText(pdf, { mergePages: true });
     const compact = text.replace(/\s+/g, '');
-    expect(compact).toContain('TERÇA'); // 2026-11-03 é terça
+    expect(compact).toContain('TERÇA');
     expect(compact).toContain('DIAADEFINIR'); // a corrida ainda não tem dia
+  });
+
+  it('mostra a distribuição fixa da semana-base, não a agenda da primeira semana', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    // Liberado numa quarta: a primeira semana pôs Força A na quarta; a semana-base, na segunda.
+    const midweek = structuredClone(plan);
+    if (!midweek.training) throw new Error('fixture');
+    midweek.training.upcoming = midweek.training.upcoming.map((s) => ({
+      ...s,
+      date: '2026-11-11',
+    }));
+    midweek.training.baseWeek = [
+      { weekday: 'MON', slot: 'ANY', planSessionKey: 'FORCA_A' },
+      { weekday: 'FRI', slot: 'ANY', planSessionKey: 'CORRIDA_LEVE' },
+    ];
+    const buffer = await trainingPlanPdf(midweek);
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    const compact = text.replace(/\s+/g, '');
+    expect(compact).toContain('SEGUNDA');
+    expect(compact).toContain('SEXTA');
+    expect(compact).not.toContain('QUARTA');
+    expect(compact).not.toContain('DIAADEFINIR');
   });
 
   it('o PDF alimentar diz "Caloria" (não "Energia") e traz o nome do alimento como se fala', async () => {

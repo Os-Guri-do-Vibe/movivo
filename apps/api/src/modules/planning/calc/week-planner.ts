@@ -1,6 +1,7 @@
 /**
  * Agenda de uma semana (sem LLM): atribui as sessões do plano aos dias respeitando a
- * disponibilidade do aluno e as regras de interferência da metodologia HYBRID.
+ * disponibilidade do aluno e, só quando a semana combina modalidades, as regras de interferência
+ * da metodologia HYBRID. Regra de uma metodologia nunca vale para quem não treina a modalidade.
  *
  * Busca exaustiva com poda (poucas variáveis: no máximo ~14 ocorrências em 7 dias), maximizando
  * o peso das sessões encaixadas — a sessão-chave nunca perde para uma complementar — e, no
@@ -9,7 +10,7 @@
  */
 import type { DaySlot, SessionPriority, Weekday } from '@movivo/shared';
 
-import type { HybridRules } from './params';
+import { hybridRulesFor, type HybridRules } from './params';
 import { at } from './util';
 
 export interface WeekOccurrence {
@@ -43,9 +44,15 @@ export interface WeekInput {
   notBefore: string;
   windows: Readonly<Partial<Record<Weekday, readonly WindowOfDay[]>>>;
   occurrences: readonly WeekOccurrence[];
+  /** Regras da metodologia HYBRID publicada (só valem se `modalities` combinar 2+). */
   rules: HybridRules;
-  /** Dias leves exigidos entre duas sessões intensas (0 = só não no mesmo dia). */
+  /**
+   * Dias leves entre duas sessões intensas, da metodologia de CORRIDA: só valem se o plano tem
+   * corrida (0 = só não no mesmo dia).
+   */
   minEasyDaysBetweenIntense: number;
+  /** Modalidades do plano inteiro (não só das sessões desta semana), com o esporte externo. */
+  modalities: readonly string[];
 }
 
 export interface Assignment {
@@ -114,7 +121,10 @@ function fitSlots(windows: readonly WindowOfDay[], minutes: readonly number[]): 
 }
 
 export function planWeek(input: WeekInput): WeekPlan {
-  const { rules } = input;
+  const rules = hybridRulesFor(input.rules, input.modalities);
+  const minEasyDaysBetweenIntense = input.modalities.includes('RUNNING')
+    ? input.minEasyDaysBetweenIntense
+    : 0;
   const firstDay = Math.max(
     0,
     Math.round(
@@ -164,7 +174,7 @@ export function planWeek(input: WeekInput): WeekPlan {
         other.occurrence.intense &&
         !occ.strength &&
         !other.occurrence.strength &&
-        gap <= input.minEasyDaysBetweenIntense
+        gap <= minEasyDaysBetweenIntense
       ) {
         return false;
       }
@@ -174,12 +184,6 @@ export function planWeek(input: WeekInput): WeekPlan {
         (occ.heavyLower && other.occurrence.intenseRun) ||
         (occ.intenseRun && other.occurrence.heavyLower);
       if (lowerVsRun && gap < minGapDaysIntenseLower) return false;
-    }
-    if (occ.intense) {
-      const intense = placed.filter((p) => p.occurrence.intense).length + 1;
-      if (rules.maxIntenseSessionsPerWeek !== null && intense > rules.maxIntenseSessionsPerWeek) {
-        return false;
-      }
     }
     return true;
   }

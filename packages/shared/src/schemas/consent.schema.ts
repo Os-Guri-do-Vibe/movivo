@@ -43,7 +43,7 @@ export const CONSENT_VERSIONS = {
   TERMS_OF_SERVICE: 'terms-2026-10-v2',
   AI_DISCLOSURE: 'ai-disclosure-2026-10-v2',
   BODY_PHOTOS: 'consent-body-photos-2026-10-v1',
-  MENSTRUAL_CYCLE: 'consent-menstrual-cycle-2026-10-v1',
+  MENSTRUAL_CYCLE: 'consent-menstrual-cycle-2026-11-v2',
 } as const;
 
 export type ConsentTypeWithText = keyof typeof CONSENT_VERSIONS;
@@ -184,16 +184,17 @@ export const CONSENT_TEXTS = {
    */
   MENSTRUAL_CYCLE: {
     version: CONSENT_VERSIONS.MENSTRUAL_CYCLE,
-    title: 'Sobre o registro do seu ciclo menstrual',
+    title: 'Sobre o acompanhamento do seu ciclo menstrual',
     body: [
-      'O registro do ciclo menstrual é opcional. Quando você conta pelo WhatsApp que a sua menstruação começou, guardamos a data para entender como você se sente ao longo do ciclo e adaptar intensidade, recuperação e alimentação ao que você relatar.',
-      '**Quem acessa:** você e os profissionais da MOVIVO responsáveis pelo seu acompanhamento. A inteligência artificial usa essa informação como ferramenta de apoio, dentro das regras publicadas pelos profissionais. A fase do ciclo é uma estimativa pelo calendário, não uma avaliação médica.',
+      'O acompanhamento do ciclo menstrual é opcional. Quando você conta pelo WhatsApp que a sua menstruação começou, guardamos a data para entender como você se sente ao longo do ciclo e adaptar intensidade, recuperação e alimentação ao que você relatar.',
+      '**Lembretes de autocuidado:** com as datas registradas, estimamos pelo calendário as fases do seu ciclo e enviamos, pelo WhatsApp, lembretes e recomendações de autocuidado: quando a menstruação está perto de chegar, o período em que a tensão pré-menstrual é mais comum, a janela fértil estimada e quando a menstruação parece atrasada. São estimativas pelo calendário, não uma avaliação médica, e a janela fértil estimada não serve como método para evitar nem para planejar gravidez.',
+      '**Quem acessa:** você e os profissionais da MOVIVO responsáveis pelo seu acompanhamento. A inteligência artificial usa essa informação como ferramenta de apoio, dentro das regras publicadas pelos profissionais.',
       '**Como protegemos:** as datas são criptografadas e nunca são compartilhadas com terceiros nem usadas em divulgação.',
       '**Por quanto tempo:** enquanto você for cliente e mantiver esta autorização.',
-      '**Você no controle:** pode revogar quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CICLO”. A revogação apaga as datas registradas e interrompe novos registros.',
+      '**Você no controle:** pode revogar quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CICLO”. A revogação apaga as datas registradas e interrompe novos registros e os lembretes.',
     ],
     label:
-      'Autorizo a MOVIVO a registrar as datas do meu ciclo menstrual para adaptar o meu acompanhamento, conforme descrito acima e na Política de Privacidade.',
+      'Autorizo a MOVIVO a registrar as datas do meu ciclo menstrual para adaptar o meu acompanhamento e me enviar lembretes de autocuidado, conforme descrito acima e na Política de Privacidade.',
     /** Opcional: só existe para quem decide registrar o ciclo. */
     required: false,
   },

@@ -77,6 +77,7 @@ const PLAN: PlanRead = {
         minutes: 50,
       },
     ],
+    baseWeek: [{ weekday: 'THU', slot: 'EVENING', planSessionKey: 'FORCA_A' }],
   },
   nutrition: {
     version: 1,

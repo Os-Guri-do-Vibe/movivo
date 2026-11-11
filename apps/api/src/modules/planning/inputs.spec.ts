@@ -67,7 +67,6 @@ describe('local por modalidade', () => {
 
 const rules = (over: Partial<HybridRules> = {}): HybridRules => ({
   hoursBetweenHeavyLowerAndIntenseRun: 24,
-  maxIntenseSessionsPerWeek: 3,
   allowTwoSessionsSameDay: true,
   minRestDaysPerWeek: 1,
   acuteChronicMax: null,

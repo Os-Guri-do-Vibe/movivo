@@ -9,9 +9,12 @@ import { WHATSAPP_BUBBLE_SEPARATOR } from '../jobs/whatsapp-outbound.contract';
 export const EMERGENCY_MESSAGE =
   'O que você descreveu pode ser sério. Pare qualquer atividade agora e procure atendimento médico imediatamente (SAMU 192 ou o pronto-socorro mais próximo). Já avisei a equipe de profissionais da MOVIVO e vamos falar com você assim que possível.';
 
-/** Tema que o profissional responsável marcou como fora do que o atendimento automático trata. */
+/**
+ * Tema que o profissional responsável marcou como fora do atendimento: a conversa sobre ele se
+ * encerra e o aluno é convidado, com educação, a voltar ao foco da MOVIVO e aos objetivos dele.
+ */
 export const FORBIDDEN_TOPIC_MESSAGE =
-  'Esse assunto eu prefiro não tratar por aqui. Vou pedir para um profissional da equipe te orientar.';
+  'Esse é um assunto que eu não trato por aqui, tudo bem? O meu foco é cuidar do seu treino, da sua alimentação, dos seus hábitos e dos seus objetivos. Me conta: como posso te ajudar com isso hoje?';
 
 export const ESCALATED_MESSAGE =
   'Isso eu prefiro deixar com a equipe de profissionais da MOVIVO. Já encaminhei o seu caso com tudo que você contou, e eles retornam por aqui. Enquanto isso, vá com calma e priorize como você se sente.';
@@ -23,7 +26,7 @@ export const PAIN_MESSAGE =
   'Obrigado por contar. Por segurança, vamos com calma: evite o movimento que provoca a dor até a equipe avaliar. Avisei os profissionais da MOVIVO e eles retornam por aqui. Se a dor piorar ou aparecer outro sintoma, procure atendimento.';
 
 export const OUT_OF_SCOPE_MESSAGE =
-  'Esse assunto foge do que eu consigo ajudar por aqui: treino, alimentação e o seu plano. Se quiser, me conta como estão os treinos ou o que precisa ajustar na semana.';
+  'Esse assunto foge do que eu acompanho por aqui. Posso te ajudar com treino (de qualquer modalidade), alimentação, hábitos, sono, recuperação e bem-estar. Me conta como estão os treinos ou o que você quer ajustar na sua rotina.';
 
 /** Apresenta a persona como IA (transparência): nunca como pessoa. */
 export const greetingMessage = ({ name, article }: { name: string; article: 'a' | 'o' }) =>
@@ -143,6 +146,9 @@ export function foodDraftMessage(
 
 export const FOOD_CLARIFICATION_FALLBACK =
   'Não entendi bem o que você comeu. Pode me dizer os alimentos e, se souber, a quantidade?';
+
+export const FOOD_QUERY_CLARIFICATION =
+  'De qual alimento ou refeição você quer saber? Me diga o que é e, se souber, a quantidade.';
 
 export const NO_SESSION_TODAY_MESSAGE =
   'Hoje você não tem treino marcado no plano, então não há o que encurtar.';

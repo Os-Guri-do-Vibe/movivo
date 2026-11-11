@@ -202,14 +202,12 @@ describe('PlanDelivery — chave de idempotência da mensagem', () => {
   const sentDocs = (queues: { enqueue: ReturnType<typeof vi.fn> }, call = 0) =>
     (queues.enqueue.mock.calls[call]?.[2] as WhatsappOutboundJob).documents ?? [];
 
-  it('primeira entrega: três mensagens e os dois PDFs (treino e alimentar) como arquivo, sem nenhum link', async () => {
+  it('primeira entrega: uma bolha de texto e os dois PDFs (treino e alimentar) como arquivo, sem nenhum link', async () => {
     const { service, queues } = delivery(1);
     await service.sendAfterPublish(USER, 'NUTRITION', PLAN);
     const text = sentText(queues);
-    expect(text.split('\n---\n')).toHaveLength(3);
-    expect(text).toMatch(/protocolos de treino e alimentar estão prontos/);
-    expect(text).toMatch(/CREF/);
-    expect(text).toMatch(/CRN/);
+    expect(text.split('\n---\n')).toHaveLength(1);
+    expect(text).toMatch(/protocolo de treino e dieta estão prontos\./);
     expect(text).not.toMatch(/https?:\/\/|www\.|\.com\b|chat\.whatsapp/i);
     expect(
       sentDocs(queues).map((d) => [

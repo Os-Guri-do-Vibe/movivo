@@ -14,7 +14,13 @@ import { z } from 'zod';
 
 import type { PersonaKey } from '@movivo/shared';
 
-import type { GatewayMessage, MessagePart, TierRoute } from '../ai/ai.types';
+import type {
+  GatewayMessage,
+  MessagePart,
+  ModelVendor,
+  ReasoningEffort,
+  TierRoute,
+} from '../ai/ai.types';
 import { ModelGateway } from '../ai/model-gateway';
 import type { ScrubUser } from '../ai/pii-scrubber';
 import type { AgentContextSources, MethodologyContext } from './agent-context';
@@ -34,6 +40,11 @@ export interface AgentRunOptions {
   sources: AgentContextSources;
   /** Só avaliação: força o modelo (comparação antes de trocar a configuração do tier). */
   routeOverride?: TierRoute;
+  /**
+   * Operação: roda a tarefa só neste modelo, sem reserva de outro fornecedor, com os limites
+   * (tokens, timeout, temperatura) que ele tem no tier da tarefa (ou no REASONING).
+   */
+  pinnedModel?: PinnedModel;
   /** Imagens ou PDFs da tarefa de visão (base64): vão junto do texto, nunca dentro do JSON de dados. */
   images?: readonly Extract<MessagePart, { type: 'image' | 'document' }>[];
   /** Só avaliação: a ficha do agente em teste (rascunho) no lugar da publicada. */
@@ -54,12 +65,25 @@ export interface AgentRunResult<O> {
   promptVersion: string;
 }
 
+export interface PinnedModel {
+  vendor: ModelVendor;
+  model: string;
+  /** Liga o raciocínio (thinking) com este esforço. */
+  reasoningEffort?: ReasoningEffort;
+  /** Teto de saída desta execução (o raciocínio conta nele); ausente = o da rota do tier. */
+  maxOutputTokens?: number;
+  /** Timeout de cada chamada desta execução; ausente = o da rota do tier. */
+  timeoutMs?: number;
+}
+
 /** A tarefa não produziu saída válida dentro das rodadas de correção. */
 export class AgentTaskError extends Error {
   constructor(
     readonly taskId: string,
     readonly violations: Violation[],
     readonly modelRunIds: string[],
+    /** Texto da última resposta reprovada (a das `violations`), para diagnosticar o caso. */
+    readonly rejectedOutput: string | null = null,
   ) {
     super(`${taskId}: saída inválida após as rodadas de correção`);
     this.name = 'AgentTaskError';
@@ -161,6 +185,7 @@ export class AgentRunner {
     const modelRunIds: string[] = [];
     let costBrl = 0;
     let violations: Violation[] = [];
+    let rejectedOutput: string | null = null;
 
     /** As rodadas de correção numa rota (a do tier, ou uma rota fixa). */
     const attempt = async (route?: TierRoute): Promise<AgentRunResult<O> | null> => {
@@ -188,6 +213,7 @@ export class AgentRunner {
           state.slices,
           methodology.parameters ?? {},
         );
+        if (violations.length > 0) rejectedOutput = result.text;
         if (violations.length === 0) {
           return {
             output: task.output.parse(parseOutput(task, result.text)),
@@ -208,13 +234,16 @@ export class AgentRunner {
       return null;
     };
 
-    const first = await attempt(options.routeOverride);
+    const fixedRoute =
+      options.routeOverride ??
+      (options.pinnedModel ? await this.pinnedRoute(task.tier, options.pinnedModel) : undefined);
+    const first = await attempt(fixedRoute);
     if (first) return first;
     // O modelo principal não convergiu nas rodadas de correção: uma nova tentativa, do zero, com o
     // modelo reserva do tier (outro fornecedor erra de outro jeito). Rota fixa (avaliação) não troca.
     // Cada reserva de outro fornecedor, na ordem do tier: fornecedor fora do ar ou sem crédito
     // (erro na chamada) passa para o próximo.
-    if (!options.routeOverride) {
+    if (!fixedRoute) {
       const routes = await this.gateway.routesFor(task.tier);
       const primary = routes[0]?.vendor;
       for (const fallback of routes.slice(1).filter((route) => route.vendor !== primary)) {
@@ -222,7 +251,30 @@ export class AgentRunner {
         if (next) return next;
       }
     }
-    throw new AgentTaskError(task.id, violations, modelRunIds);
+    throw new AgentTaskError(task.id, violations, modelRunIds, rejectedOutput);
+  }
+
+  /** A rota configurada do modelo fixado: no tier da tarefa e, se ele não estiver lá, no REASONING. */
+  private async pinnedRoute(
+    tier: AgentTask<unknown, unknown>['tier'],
+    pinned: PinnedModel,
+  ): Promise<TierRoute> {
+    for (const candidate of [tier, 'REASONING'] as const) {
+      const route = (await this.gateway.routesFor(candidate)).find(
+        (r) => r.vendor === pinned.vendor && r.model === pinned.model,
+      );
+      if (route) {
+        return {
+          ...route,
+          ...(pinned.reasoningEffort ? { reasoningEffort: pinned.reasoningEffort } : {}),
+          ...(pinned.maxOutputTokens ? { maxOutputTokens: pinned.maxOutputTokens } : {}),
+          ...(pinned.timeoutMs ? { timeoutMs: pinned.timeoutMs } : {}),
+        };
+      }
+    }
+    throw new Error(
+      `modelo fixado ${pinned.vendor}/${pinned.model} não está habilitado no tier ${tier} nem no REASONING`,
+    );
   }
 
   private async validate<I, O>(

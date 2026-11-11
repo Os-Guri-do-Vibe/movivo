@@ -13,6 +13,7 @@ import { StudentStateModule } from '../student-state/student-state.module';
 import { AgentMessenger } from './agent-messenger';
 import { CareScheduler } from './care.scheduler';
 import { CareService } from './care.service';
+import { CycleCareService } from './cycle-care.service';
 import { DayDigestService } from './day-digest.service';
 import { MessageQualityController } from './message-quality.controller';
 import { MessageQualityService } from './message-quality.service';
@@ -54,6 +55,7 @@ import { WeeklyReviewService } from './weekly-review.service';
     AuditService,
     CareScheduler,
     CareService,
+    CycleCareService,
     DayDigestService,
     MessageQualityService,
     SessionSnapshotService,

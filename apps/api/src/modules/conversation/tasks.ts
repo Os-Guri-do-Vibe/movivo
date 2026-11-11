@@ -39,13 +39,16 @@ export const INTENTS = [
   'MEAL_SUGGESTION',
   'FOOD_LOG',
   'FOOD_CORRECTION',
+  'FOOD_QUERY',
   'WATER_LOG',
   'WORKOUT_REPORT',
   'PAIN_OR_SYMPTOM',
   'HUMAN_REVIEW',
   'LINK_REQUEST',
+  'RECORD_UPDATE',
   'TRAINING_QUESTION',
   'NUTRITION_QUESTION',
+  'HEALTH_QUESTION',
   'MOTIVATION',
   'WELLBEING_REPORT',
   'GREETING',
@@ -71,8 +74,10 @@ export const classifyOutputSchema = z.object({
   /** Exercício citado (EXERCISE_SWAP), nas palavras do aluno. */
   exerciseMention: z.string().trim().max(80).nullable(),
   swapReason: z.enum(['EQUIPMENT', 'DISCOMFORT', 'PREFERENCE', 'DIFFICULTY', 'OTHER']).nullable(),
-  /** Refeição do pedido de sugestão (MEAL_SUGGESTION), se a mensagem disser qual. */
+  /** Refeição do pedido de sugestão (MEAL_SUGGESTION) ou do registro a corrigir (FOOD_CORRECTION), se a mensagem disser qual. */
   mealSlot: mealSlotSchema.nullish(),
+  /** FOOD_CORRECTION: o registro a corrigir é de ontem ("ontem no jantar foram 2 pedaços"). */
+  mealDay: z.enum(['TODAY', 'YESTERDAY']).nullish(),
   /** Alimento que o aluno não tem ou não quer hoje (MEAL_SUGGESTION), nas palavras dele. */
   mealAvoid: z.string().trim().max(80).nullish(),
   /** O que o aluno diz ter disponível em casa para a refeição (MEAL_SUGGESTION), nas palavras dele. */
@@ -138,17 +143,21 @@ Intenções:
 - EXERCISE_SWAP: quer trocar um exercício ("não tenho barra, troca o agachamento"). Preencha exerciseMention e swapReason (EQUIPMENT se não tem o equipamento, DISCOMFORT se dói/incomoda, PREFERENCE se não gosta, DIFFICULTY se acha difícil demais).
 - MEAL_SUGGESTION: pede uma opção, ideia ou troca de refeição ou de alimento do cardápio ("o que posso comer no lanche da tarde?", "não tenho frango hoje, o que troco?", "me dá outra opção de almoço"). Preencha mealSlot (BREAKFAST, MORNING_SNACK, LUNCH, AFTERNOON_SNACK, DINNER, SUPPER, PRE_WORKOUT ou POST_WORKOUT) quando a mensagem OU a conversa disserem qual refeição (senão nulo), mealAvoid com o alimento que ele não tem ou não quer, nas palavras dele (senão nulo), e mealAvailable com o que ele diz ter disponível em casa ("tenho pão, queijo e banana"), inclusive quando responde a uma pergunta do coach sobre o que tem em casa (senão nulo).
 - FOOD_DIFFICULTY: dificuldade de seguir a alimentação ("não consigo comer tanta proteína", "viajei e saí do plano").
-- FOOD_LOG: conta o que comeu ("almocei arroz e frango", "comi o café do plano", "acabei de comer uma pizza"), em texto ou áudio transcrito, inclusive como resposta ao lembrete de registrar a refeição.
-- FOOD_CORRECTION: corrige o que acabou de registrar ("na verdade foram 3 ovos", "esqueci de contar o café", "era arroz integral"). Só quando a conversa mostra um registro recente do coach.
+- FOOD_LOG: conta o que comeu ou bebeu ("almocei arroz e frango", "comi o café do plano", "acabei de comer uma pizza", "comi uma manga agora", "belisquei um chocolate depois do almoço"), em texto ou áudio transcrito, inclusive como resposta ao lembrete de registrar a refeição. Vale para QUALQUER alimento, a qualquer hora, esteja ou não no plano. Também quando ele confirma que comeu o que acabou de consultar ("comi", "pode registrar", logo depois de o coach responder uma consulta de calorias).
+- FOOD_QUERY: só quer SABER as calorias ou os nutrientes de um alimento ou refeição, sem dizer que comeu ("quantas calorias tem uma manga?", "quanto de proteína tem 2 ovos?", "um pão de queijo tem quantas calorias?", "se eu comer um açaí de 300 ml, quanto dá?"). NÃO é registro: ele não comeu (ainda). Se a mensagem diz que comeu e também pergunta as calorias ("comi uma coxinha, quantas calorias tem?"), é FOOD_LOG (o registro já responde os números). Pergunta sobre como encaixar, se pode comer ou o que é melhor continua sendo NUTRITION_QUESTION.
+- FOOD_CORRECTION: corrige ou apaga um registro alimentar já feito ("na verdade foram 3 ovos", "esqueci de contar o café", "era arroz integral", "no café da manhã foram 2 pães, não 1", "apaga o registro do lanche", "não comi isso, desconsidera"). Vale para a refeição que a conversa mostra registrada OU para a que ele citar: preencha mealSlot com a refeição citada (senão nulo, e vale o último registro) e mealDay YESTERDAY se ele disser que é de ontem (senão nulo).
 - WATER_LOG: conta que bebeu água ("bebi 500 ml", "tomei uma garrafa de 1 litro de água"). Preencha waterMl em ml (copo ≈ 200 ml, garrafa pequena ≈ 500 ml, garrafa grande/squeeze ≈ 1000 ml se ele não disser o volume).
 - WORKOUT_REPORT: conta como foi um treino ("treinei hoje, foi pesado").
 - PAIN_OR_SYMPTOM: dor, mal-estar, lesão, sintoma, remédio.
 - HUMAN_REVIEW: quer falar com uma pessoa ou contesta/pede revisão de uma decisão do plano.
 - LINK_REQUEST: pede o link do treino/plano.
+- RECORD_UPDATE: pede EXPLICITAMENTE para corrigir ou atualizar um dado que está registrado sobre ele, fora do diário alimentar: uma série do treino registrada errada ("marquei errado a última série do supino, foram 40 kg e não 30", "no agachamento de ontem fiz 10 repetições, não 8"), o esforço ou a duração de um treino, o peso ou uma resposta do check-in ("meu peso no check-in é 82, não 85", "coloquei sono 2 mas dormi bem"), ou uma informação do cadastro/anamnese: gostos e aversões de comida ou de exercício ("não gosto de peixe", "tira o brócolis, não como", "adoro agachamento", "odeio burpee"), restrição alimentar ("virei vegetariano", "não como glúten"), altura, quanto cozinha, refeições fora de casa, orçamento, equipamentos que tem. Não é RECORD_UPDATE: trocar um exercício do treino (EXERCISE_SWAP), mudar os dias da semana (UNAVAILABILITY), corrigir comida registrada (FOOD_CORRECTION), dor, lesão, doença, remédio, alergia ou gravidez (PAIN_OR_SYMPTOM).
 - TRAINING_QUESTION / NUTRITION_QUESTION: dúvida técnica de treino ou alimentação, inclusive pedido de RECEITA ou de MODO DE PREPARO ("como eu preparo meu almoço?", "tenho frango, arroz e brócolis, me passa uma receita"): isso é NUTRITION_QUESTION, não MEAL_SUGGESTION (que é para trocar ou escolher o que comer), inclusive "vou comer pizza hoje, como encaixo?" (refeição livre) e dúvida sobre jantar fora, festa ou viagem. Também perguntas sobre o próprio corpo e a avaliação física, escritas de qualquer jeito ("quantos % de gordura eu tenho?", "como está meu shape?", "minha gordura baixou?", "o que a análise das fotos mostrou?"): são NUTRITION_QUESTION.
-- MOTIVATION: desânimo, motivação, desabafo sobre constância.
+- TRAINING_QUESTION também vale para qualquer modalidade ou atividade física, mesmo as que a MOVIVO não prescreve (natação, ciclismo, crossfit, lutas, yoga, pilates, futebol, dança, mobilidade, alongamento).
+- HEALTH_QUESTION: dúvida de saúde básica e bem-estar, sem sintoma nem pedido de diagnóstico: sono, recuperação, descanso, estresse, energia, hidratação, postura, prevenção, saúde da mulher e ciclo menstrual, envelhecer bem, exames de rotina ("quantas horas preciso dormir?", "treinar gripado faz mal?", "como melhorar minha recuperação?", "por que fico tão cansada antes de menstruar?"). Com dor, lesão, sintoma atual ou remédio, é PAIN_OR_SYMPTOM.
+- MOTIVATION: desânimo, motivação, desabafo sobre constância, e também dúvidas de comportamento, hábitos, rotina, disciplina, organização e relação com a comida ou com o treino ("como criar o hábito de treinar cedo?", "como paro de beliscar à noite?", "sempre desisto na terceira semana").
 - WELLBEING_REPORT: a mensagem só conta como o aluno está (dormi mal, estou estressado, acordei cansado, estou com o corpo pesado, viajei, estou gripado), sem pedir outra coisa. Dor localizada, lesão ou sintoma continuam sendo PAIN_OR_SYMPTOM.
-- GREETING: só cumprimento. OUT_OF_SCOPE: nada a ver com treino, alimentação ou o plano.
+- GREETING: só cumprimento. OUT_OF_SCOPE: só o que não tem NENHUMA relação com treino, atividade física, alimentação, saúde, bem-estar, hábitos, comportamento ou o plano dele (política, notícias, programação, tarefa de escola, piada, assunto de terceiros). Na dúvida entre OUT_OF_SCOPE e uma das perguntas acima, escolha a pergunta: há especialista para ela.
 
 Relatos do dia ("reports"): em QUALQUER intenção, registre o que a mensagem conta sobre o dia do aluno. kind: SLEEP, STRESS, ENERGY, MOOD, SORENESS (corpo pesado/dolorido de treino, sem dor localizada), HUNGER, DIGESTION, ILLNESS, ALCOHOL, TRAVEL, WORK (semana de trabalho pesada), SOCIAL (evento), OTHER. "score" de 1 a 5 só quando dá para estimar pelas palavras ("dormi muito mal" = 1, "dormi mais ou menos" = 3; estresse: 5 = muito estressado); "valueNum" quando ele disser a quantidade (dormi 4 horas = 4). "phase": BEFORE se fala de como chega ao treino de hoje, AFTER se fala de como saiu dele, senão omita. Se não há relato, omita "reports". Nunca invente.
 
@@ -168,14 +177,15 @@ Contexto da conversa: "conversation" traz as últimas mensagens (a do aluno agor
 
 export const answerInputSchema = z.object({
   message: z.string().trim().min(1).max(4_000),
-  topic: z.enum(['TRAINING', 'NUTRITION', 'MOTIVATION', 'GENERAL']),
+  topic: z.enum(['TRAINING', 'NUTRITION', 'MOTIVATION', 'HEALTH', 'GENERAL']),
   /** Até 3 trechos de artigos curados; ausente quando o RAG está desligado ou nada serviu. */
   evidence: evidenceListSchema,
 });
 export type AnswerInput = z.infer<typeof answerInputSchema>;
 
 export const answerOutputSchema = z.object({
-  reply: z.string().trim().min(1).max(1_200),
+  /** O teto de cada especialista é aplicado pelos validadores (nutrição não tem limite de frases). */
+  reply: z.string().trim().min(1).max(4_000),
   /** O assunto exige profissional (medicamento, diagnóstico, exame, condição clínica). */
   needsProfessional: z.boolean(),
 });
@@ -258,8 +268,17 @@ const answerValidatorsFor = (maxChars: number): Validator<AnswerInput, AnswerOut
 ];
 
 const answerValidators = answerValidatorsFor(900);
-/** Receita e modo de preparo precisam de mais espaço: ingredientes e passos em dois balões. */
-const nutritionAnswerValidators = answerValidatorsFor(1_100);
+/**
+ * Dúvida de nutrição não tem limite de frases: a resposta é completa (explicação, quantidades,
+ * exemplos, receita). O teto é só o que cabe com folga em balões do WhatsApp.
+ */
+export const NUTRITION_ANSWER_MAX_CHARS = 3_500;
+const nutritionAnswerValidators = answerValidatorsFor(NUTRITION_ANSWER_MAX_CHARS);
+
+/** Regra 1 padrão: resposta curta. O nutricionista troca por `COMPLETE_ANSWER_RULE`. */
+const BRIEF_ANSWER_RULE =
+  '1. Português do Brasil, tom próximo e direto, sem jargão e sem culpa. No máximo 3 ou 4 frases curtas (WhatsApp).';
+const COMPLETE_ANSWER_RULE = `1. Português do Brasil, tom próximo e direto, sem jargão e sem culpa. NÃO há limite de frases: responda de forma COMPLETA, com tudo o que o aluno precisa para entender e agir (o porquê, o como, quantidades, exemplos práticos e alternativas quando ajudarem), sem enrolar e sem repetir. Para ficar fácil de ler no WhatsApp, escreva em parágrafos curtos e, quando a resposta for longa, divida em até 4 mensagens separadas por uma linha com "${WHATSAPP_BUBBLE_SEPARATOR.trim()}". Pergunta simples continua com resposta simples: completo não é comprido à toa.`;
 
 const answerBase = {
   id: 'conversation.answer_question',
@@ -267,7 +286,7 @@ const answerBase = {
   instructions: `Responda a dúvida do aluno.
 
 Regras:
-1. Português do Brasil, tom próximo e direto, sem jargão e sem culpa. No máximo 3 ou 4 frases curtas (WhatsApp).
+${BRIEF_ANSWER_RULE}
 2. Use o Estado do Aluno (objetivo, plano, restrições) e a metodologia publicada para responder do jeito que serve a ESTE aluno. Se a resposta depende de algo que você não sabe, diga e pergunte uma coisa só. "followUp" traz o que a revisão semanal leu (recuperação, hábitos, o que ele faz bem): use para acolher e sugerir passos que caibam na rotina dele, sempre como possibilidade, nunca como fato sobre ele.
 3. Nunca diagnostique, nunca indique, suspenda ou ajuste medicamento, dose ou suplemento fora da metodologia, nunca interprete exame. Nesses casos "needsProfessional": true e diga que vai encaminhar para um profissional da equipe.
 4. Nunca prometa resultado nem prazo. Não compare o aluno com outras pessoas.
@@ -319,6 +338,7 @@ export const specialistAnswerTasks = {
     instructions: `${answerBase.instructions}
 
 Como especialista de treino:
+- Você responde sobre QUALQUER modalidade ou atividade física, não só as que a MOVIVO prescreve (força, corrida e HYROX): natação, ciclismo, crossfit, lutas, yoga, pilates, esportes coletivos, dança, mobilidade, alongamento. Para as que não estão no plano dele, dê orientação geral de boa prática (técnica, progressão, recuperação, como combinar com o treino da MOVIVO sem sobrecarregar), deixando claro, em poucas palavras, quando o detalhe depende de um professor da modalidade.
 - Explique o porquê em uma frase (estímulo, progressão, recuperação) para o aluno entender e se guiar sozinho.
 - Na progressão, dê o critério e, quando fizer sentido, uma tentativa concreta (ex.: "tenta 2 kg a mais; se as repetições caírem muito, volta à carga de hoje"). É sugestão que o aluno testa, não obrigação.
 - Se a dúvida mexe em dor, lesão ou limitação, acolha, diga que vai passar para quem acompanha a recuperação e não prescreva nada.`,
@@ -328,17 +348,17 @@ Como especialista de treino:
   NUTRITION: defineAgentTask<AnswerInput, AnswerOutput>({
     ...answerBase,
     id: 'nutrition.answer_question',
-    role: 'Nutricionista da MOVIVO, com visão de saúde, longevidade e desempenho, falando pelo WhatsApp. Você responde de forma curta, humana e prática, pensando além das calorias e dos macros.',
-    instructions: `${answerBase.instructions}
+    role: 'Nutricionista da MOVIVO, com visão de saúde, longevidade e desempenho, falando pelo WhatsApp. Você responde de forma completa, humana e prática, pensando além das calorias e dos macros.',
+    instructions: `${answerBase.instructions.replace(BRIEF_ANSWER_RULE, COMPLETE_ANSWER_RULE)}
 
 Como especialista de nutrição:
 - Pense no prato inteiro: proteína, fibras, variedade de cores (vitaminas e minerais), gorduras boas, hidratação e o jeito de comer, sem terrorismo nutricional nem alimento proibido.
 - Adapte à rotina, ao orçamento e às preferências dele ("memory", "preferences"); sugira trocas simples dentro do plano.
 - Refeição livre (pizza, hambúrguer, churrasco, festa, jantar fora): faz parte do plano. Veja "nutrition.activePlan.freeMeals" (quantas por semana e as 3 opções planejadas) e "nutrition.last7Days" (o que ele já comeu hoje). Sem culpa nem "compensar": diga como encaixar no dia (proteína nas refeições anteriores, porção e ritmo na refeição livre, água, o que fazer na refeição seguinte) e, se ele quiser outra além das 3 planejadas, oriente com os alimentos que ele escolher.
-- Receita e modo de preparo (exceção ao limite de 3 ou 4 frases): quando ele perguntar como preparar uma refeição do plano ("como eu preparo meu almoço?") ou pedir uma receita com o que tem em casa, ensine a fazer, no tamanho dele.
+- Receita e modo de preparo: quando ele perguntar como preparar uma refeição do plano ("como eu preparo meu almoço?") ou pedir uma receita com o que tem em casa, ensine a fazer, no tamanho dele.
   • Refeição do plano: ache a refeição em "nutrition.activePlan.meals" (a que ele citou ou a do horário da conversa). Se houver mais de uma opção e ele não disse qual, pergunte qual, uma pergunta só. Use SÓ os alimentos e as quantidades da opção; sal, alho, cebola, azeite em fio, ervas e limão podem entrar sem quantidade.
   • Alimentos que ele tem: monte a receita só com o que ele listou mais os temperos básicos, e diga que, para fechar a meta do dia, vale seguir a porção da refeição do plano.
-  • Formato: duas mensagens separadas por uma linha com "${WHATSAPP_BUBBLE_SEPARATOR.trim()}". A primeira traz o que vai e quanto (lista curta, com as quantidades do plano) e o tempo total; a segunda, o modo de preparo em 3 a 6 passos curtos e numerados. No máximo ~1.000 caracteres no total.
+  • Formato: duas mensagens separadas por uma linha com "${WHATSAPP_BUBBLE_SEPARATOR.trim()}". A primeira traz o que vai e quanto (lista curta, com as quantidades do plano) e o tempo total; a segunda, o modo de preparo em passos curtos e numerados (quantos forem necessários para ele conseguir fazer).
   • Nível: use "identity.lifeContext.cookingCapacity". NONE = montagem, micro-ondas ou airfryer, sem fogão; BASIC = poucos passos e uma panela; GOOD = pode ter técnica. Se ele pedir adaptação (menos tempo, sem forno, sem um ingrediente), adapte mantendo a proteína da refeição.
   • Nunca use alimento que contrarie restrição ou alergia ("restrictions"), nunca invente alimento que ele não tem, não cite calorias novas e não prometa resultado.
 - Suplemento, dieta clínica, exame e condição de saúde são do profissional: "needsProfessional": true.`,
@@ -353,10 +373,25 @@ Como especialista de nutrição:
     instructions: `${answerBase.instructions}
 
 Como especialista de hábitos:
+- Você responde qualquer dúvida de comportamento, hábitos, rotina, disciplina, organização e relação com a comida ou com o treino (criar um hábito, parar de beliscar, voltar depois de parar, lidar com fim de semana, viagem e imprevisto), não só desânimo.
 - Normalize a oscilação, valorize o que ele já fez (use "adherence" e "memory") e proponha UM passo pequeno que caiba na rotina dele.
 - Nada de frase motivacional genérica: a resposta precisa soar como quem conhece a história dele.`,
     state: [...answerBase.state, 'adherence'],
     methodology: ['ADHERENCE', 'COMMUNICATION'],
+  }),
+  HEALTH: defineAgentTask<AnswerInput, AnswerOutput>({
+    ...answerBase,
+    id: 'medical.answer_question',
+    role: 'Especialista em saúde, recuperação e bem-estar da MOVIVO (medicina do exercício e do estilo de vida), falando pelo WhatsApp. Você orienta sobre saúde básica com cuidado e clareza, sem assumir o lugar da consulta.',
+    instructions: `${answerBase.instructions}
+
+Como especialista de saúde e bem-estar:
+- Você responde dúvidas de saúde BÁSICA e de estilo de vida: sono, recuperação, descanso, estresse, energia, hidratação, postura no dia a dia, prevenção, envelhecer bem, saúde da mulher e ciclo menstrual, quando treinar ou poupar (resfriado leve, noite mal dormida, cansaço), para que servem exames de rotina.
+- É educação em saúde, não consulta: explique o que costuma ajudar e por quê, sempre como orientação geral e ligada à rotina, ao treino e à alimentação DELE. Nunca diga o que ele "tem", nunca interprete sintoma ou exame, nunca indique, ajuste ou suspenda remédio, hormônio ou suplemento.
+- Sintoma atual, dor, piora, condição clínica, gravidez, remédio ou qualquer coisa que peça avaliação: acolha, diga que isso merece uma avaliação médica (com qual especialidade, se for claro) e marque "needsProfessional": true. Sinal de urgência (dor no peito, falta de ar, desmaio): oriente procurar atendimento agora.
+- Saúde da mulher: fale do ciclo com naturalidade. A fase em "cycle" é estimativa de calendário; nunca use o período fértil estimado como orientação para evitar ou planejar gravidez (isso é conversa para a ginecologista).`,
+    state: [...answerBase.state, 'adherence', 'observations'],
+    methodology: ['RECOVERY', 'SAFETY', 'COMMUNICATION'],
   }),
 } as const;
 
@@ -575,6 +610,63 @@ export const classifyCases: EvalCase[] = [
   classify('fora-de-escopo', 'Assunto alheio', 'qual a previsão do tempo pra amanhã em Curitiba?', [
     path('intent', 'in', ['OUT_OF_SCOPE'], 'fora de escopo'),
   ]),
+  classify(
+    'lanche-fora-do-plano',
+    'Alimento avulso fora das refeições do plano é registro',
+    'comi uma manga agora depois do almoço',
+    [path('intent', 'eq', 'FOOD_LOG', 'registro alimentar, mesmo fora do plano')],
+  ),
+  classify(
+    'consulta-de-calorias',
+    'Perguntar as calorias sem dizer que comeu não é registro',
+    'quantas calorias tem uma manga?',
+    [path('intent', 'eq', 'FOOD_QUERY', 'consulta, sem registrar')],
+  ),
+  classify(
+    'comeu-e-perguntou',
+    'Disse que comeu e perguntou as calorias: registra',
+    'comi uma coxinha agora, quantas calorias tem?',
+    [path('intent', 'eq', 'FOOD_LOG', 'ele comeu: é registro')],
+  ),
+  classify(
+    'correcao-de-outra-refeicao',
+    'Correção cita a refeição que não é a última',
+    'no café da manhã foram 3 ovos, não 2',
+    [
+      path('intent', 'eq', 'FOOD_CORRECTION', 'correção de registro'),
+      path('mealSlot', 'eq', 'BREAKFAST', 'aponta o café da manhã'),
+    ],
+  ),
+  classify(
+    'correcao-de-serie',
+    'Carga marcada errada no treino é atualização de registro',
+    'marquei errado a última série do supino, ao invés de 30 kg foram 40',
+    [path('intent', 'eq', 'RECORD_UPDATE', 'atualização de registro')],
+  ),
+  classify(
+    'aversao-alimentar',
+    'Aversão alimentar declarada vira contexto do aluno',
+    'não gosto de peixe, tira do meu cardápio',
+    [path('intent', 'in', ['RECORD_UPDATE', 'MEAL_SUGGESTION'], 'atualiza o cadastro')],
+  ),
+  classify(
+    'duvida-de-saude',
+    'Dúvida de saúde básica tem especialista',
+    'quantas horas de sono eu preciso para recuperar bem dos treinos?',
+    [path('intent', 'in', ['HEALTH_QUESTION', 'TRAINING_QUESTION'], 'não é fora de escopo')],
+  ),
+  classify(
+    'outra-modalidade',
+    'Dúvida sobre modalidade que a MOVIVO não prescreve é respondida',
+    'vale a pena eu fazer natação nos dias de descanso?',
+    [path('intent', 'eq', 'TRAINING_QUESTION', 'dúvida de treino')],
+  ),
+  classify(
+    'habito-e-comportamento',
+    'Dúvida de hábito e comportamento é respondida',
+    'como eu paro de beliscar doce à noite?',
+    [path('intent', 'in', ['MOTIVATION', 'NUTRITION_QUESTION'], 'não é fora de escopo')],
+  ),
 ];
 
 export const substituteCases: EvalCase[] = [

@@ -22,14 +22,18 @@ import {
 import { PlanViewService } from './plan-view.service';
 import { nutritionPlanPdf, protocolPdfFileName, trainingPlanPdf } from './protocol-pdf';
 
-/** Primeira entrega: os dois protocolos, com o que cada PDF traz. */
+/**
+ * Primeira entrega: UMA bolha de texto (aviso + oferta de ajuste) e, em seguida, um PDF por
+ * protocolo, cada um com a sua legenda.
+ */
 export function protocolsReadyBubbles(firstName: string | null): string[] {
   return [
-    firstName
-      ? `${firstName}, seus protocolos de treino e alimentar estão prontos 💚`
-      : 'Seus protocolos de treino e alimentar estão prontos 💚',
-    'Nossos agentes montaram os dois a partir do que você contou na anamnese, e profissionais de Educação Física (CREF) e Nutrição (CRN) revisaram tudo. Eles chegam logo abaixo, em PDF.',
-    'Salve os dois arquivos no celular: assim você consulta o treino na hora de treinar e as refeições na hora de montar o prato, até sem internet. Se algo não combinar com a sua rotina, é só responder esta conversa que a gente vê o ajuste com você.',
+    [
+      firstName
+        ? `${firstName}, seu protocolo de treino e dieta estão prontos.`
+        : 'Seu protocolo de treino e dieta estão prontos.',
+      'Se algo não combinar com a sua rotina ou preferências pessoais, é só nos avisar que a gente faz os ajustes para você.',
+    ].join('\n\n'),
   ];
 }
 
@@ -163,7 +167,7 @@ export class PlanDelivery implements OnModuleInit {
     return true;
   }
 
-  /** Primeira entrega: as três mensagens e os dois PDFs (treino e alimentar), sem link. */
+  /** Primeira entrega: a mensagem de texto e os dois PDFs (treino e alimentar), sem link. */
   async sendProtocols(userId: string, idempotencyKey?: string): Promise<boolean> {
     const dedupeId = `plan-ready_${userId}_${idempotencyKey ?? Date.now()}`;
     const job: WhatsappOutboundJob = {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AnthropicVendor, classifyStatus, OpenAiVendor } from './vendors';
+import { AnthropicVendor, classifyStatus, DeepSeekVendor, OpenAiVendor } from './vendors';
 
 describe('classifyStatus', () => {
   it('conta sem saldo na Anthropic (400) faz failover em vez de abortar', () => {
@@ -80,5 +80,47 @@ describe('PDF no corpo do pedido', () => {
   it('mantém temperature nos modelos que aceitam esse parâmetro', async () => {
     expect((await bodyOf(new OpenAiVendor('k', true), 'gpt-4.1')).temperature).toBe(0);
     expect((await bodyOf(new AnthropicVendor('k', true), 'claude-sonnet-4-5')).temperature).toBe(0);
+  });
+});
+
+describe('DeepSeek: raciocínio (thinking)', () => {
+  async function deepSeekBody(reasoningEffort?: 'low' | 'high' | 'max') {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await new DeepSeekVendor('k', true).complete(
+      {
+        model: 'deepseek-v4-pro',
+        system: 's',
+        messages: [{ role: 'user', content: 't' }],
+        maxOutputTokens: 48_000,
+        temperature: 0.3,
+        json: true,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      },
+      new AbortController().signal,
+    );
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    vi.unstubAllGlobals();
+    return body;
+  }
+
+  it('desligado por padrão, com temperature', async () => {
+    const body = await deepSeekBody();
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.temperature).toBe(0.3);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it('com esforço: liga o thinking, manda o esforço e omite temperature', async () => {
+    const body = await deepSeekBody('high');
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    expect(body.reasoning_effort).toBe('high');
+    expect(body.temperature).toBeUndefined();
+    expect(body.max_tokens).toBe(48_000);
+    expect(body.response_format).toEqual({ type: 'json_object' });
   });
 });

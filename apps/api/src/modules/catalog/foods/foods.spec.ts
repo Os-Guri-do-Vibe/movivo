@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeTotals, searchName } from './food-totals';
+import { aiFoodCode, aiFoodName, computeTotals, searchName, searchTerms } from './food-totals';
 import { parseTacoCsv } from './taco-csv';
 
 const ARROZ = '11111111-1111-4111-8111-111111111111';
@@ -48,6 +48,65 @@ describe('totais de refeição', () => {
       foods,
     );
     expect(totals).toMatchObject({ energyKcal: 0, unmatchedItems: 1 });
+  });
+
+  it('alimento fora da base entra nos totais pela composição estimada e é contado como estimado', () => {
+    const totals = computeTotals(
+      [
+        { foodItemId: ARROZ, label: 'arroz', grams: 100, portionSource: 'DECLARED' },
+        {
+          foodItemId: null,
+          label: 'pizza de calabresa',
+          grams: 200,
+          portionSource: 'ESTIMATED',
+          estimatedPer100g: { energyKcal: 270, proteinG: 11, carbsG: 30, fatG: 11, fiberG: 2 },
+        },
+      ],
+      foods,
+    );
+    expect(totals).toMatchObject({
+      energyKcal: 668,
+      proteinG: 24.5,
+      unmatchedItems: 0,
+      estimatedItems: 1,
+    });
+  });
+
+  it('sem nenhum item estimado, o total não carrega o contador', () => {
+    const totals = computeTotals(
+      [{ foodItemId: ARROZ, label: 'arroz', grams: 100, portionSource: 'DECLARED' }],
+      foods,
+    );
+    expect(totals).not.toHaveProperty('estimatedItems');
+  });
+
+  it('os termos de busca ignoram palavras de ligação, mas mantêm "sem" e "com"', () => {
+    expect(searchTerms('Peito de frango cozido sem pele')).toEqual([
+      'peito',
+      'frango',
+      'cozido',
+      'sem',
+      'pele',
+    ]);
+    expect(searchTerms('um pão de queijo')).toEqual(['pao', 'queijo']);
+  });
+
+  it('o nome do alimento que o agente inclui na base é limpo, curto e sem dado pessoal', () => {
+    expect(aiFoodName('  pizza de calabresa ')).toBe('Pizza de calabresa');
+    expect(aiFoodName('açaí (300 ml) c/ granola')).toBe('Açaí (300 ml) c/ granola');
+    expect(aiFoodName('whey <script>alert(1)</script>')).toBe('Whey script alert(1) /script');
+    expect(aiFoodName('x'.repeat(200))?.length).toBe(80);
+    expect(aiFoodName('ab')).toBeNull();
+    expect(aiFoodName('123 456')).toBeNull();
+    expect(aiFoodName('ligue para 11987654321')).toBeNull();
+    expect(aiFoodName('meu cpf 123.456.789-09')).toBeNull();
+  });
+
+  it('o código do alimento estimado é estável e cabe na coluna', () => {
+    const code = aiFoodCode(searchName('Pizza de calabresa'));
+    expect(code).toBe(aiFoodCode('pizza de calabresa'));
+    expect(code).not.toBe(aiFoodCode('pizza de mussarela'));
+    expect(`IA-${code}`.length).toBeLessThanOrEqual(32);
   });
 
   it('normaliza nomes para busca', () => {

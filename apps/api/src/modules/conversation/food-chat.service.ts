@@ -1,10 +1,12 @@
 /**
  * Registro alimentar pelo WhatsApp: o aluno escreve, manda áudio (já transcrito) ou foto; a MOVIVO
- * interpreta, conta (totais pela base de alimentos, nunca pelo modelo) e responde com a lista, os
- * números do dia e a leitura curta do nutricionista. Corrigir também é conversa.
+ * interpreta, conta (totais pela base de alimentos; o que a base não tem entra por estimativa
+ * declarada) e responde com a lista, os números da refeição e do dia e a leitura curta do
+ * nutricionista. Qualquer coisa que ele coma conta, esteja ou não no plano.
  *
  * O registro conta na hora: a foto e a estimativa podem errar, então a resposta sempre mostra o
- * que foi anotado e aceita correção ("na verdade foram 3 ovos").
+ * que foi anotado e aceita correção de qualquer refeição ("no café foram 3 ovos") ou apagar o
+ * registro. Perguntar "quantas calorias tem isso?" é consulta: responde e NÃO registra.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { Redis } from 'ioredis';
@@ -26,9 +28,15 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { foodLogAckTask, type FoodLogAckInput } from '../nutrition/food-chat-tasks';
-import { foodLogMessage, waterMessage } from '../nutrition/food-chat';
-import { FoodLogService, type PhotoInput } from '../nutrition/food-log.service';
+import {
+  foodLogMessage,
+  foodLogRemovedMessage,
+  foodQueryMessage,
+  waterMessage,
+} from '../nutrition/food-chat';
+import { FoodLogService, type FoodReading, type PhotoInput } from '../nutrition/food-log.service';
 import { targetKcal, trackedSlots } from '../nutrition/meal-routine';
+import { addDays } from '../planning/calc/week-planner';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { addWaterToDay } from '../training/daily-check-in';
 import * as msg from './messages';
@@ -36,6 +44,8 @@ import * as msg from './messages';
 /** O aluno costuma responder ao lembrete em até 3 horas; depois disso a dica deixa de valer. */
 export const PENDING_MEAL_TTL_SECONDS = 3 * 3_600;
 const LAST_LOG_TTL_SECONDS = 2 * 3_600;
+/** "Comi" depois de uma consulta só vale enquanto a consulta ainda é o assunto. */
+const QUERY_TTL_SECONDS = 30 * 60;
 
 /** Refeição guardada no Redis (texto) como `MealSlot`, ou `null` se não for uma. */
 export function asMealSlot(raw: string | null): MealSlot | null {
@@ -45,8 +55,15 @@ export function asMealSlot(raw: string | null): MealSlot | null {
 }
 
 export interface FoodChatReply {
-  status: 'LOGGED' | 'ASKED';
+  /** LOGGED = o diário mudou; ANSWERED = só consulta; ASKED = faltou informação. */
+  status: 'LOGGED' | 'ASKED' | 'ANSWERED';
   messages: string[];
+}
+
+/** Qual registro o aluno quer corrigir: a refeição que ele citou e se é de ontem. */
+export interface CorrectionTarget {
+  meal?: MealSlot | null;
+  yesterday?: boolean;
 }
 
 const planForPrompt = (plan: NutritionPlanStructure | null) =>
@@ -64,6 +81,22 @@ const planForPrompt = (plan: NutritionPlanStructure | null) =>
 
 const asLogItems = (items: readonly FoodDraftItem[]): FoodLogItem[] =>
   items.map(({ matchedName: _matched, ...rest }) => rest);
+
+/**
+ * Itens que não vieram da TACO: os de composição estimada pelo agente (mesmo os que ele acabou de
+ * incluir na base) e os que ficaram sem número nenhum.
+ */
+export function outsideTable(items: readonly FoodLogItem[]): {
+  estimatedLabels: string[];
+  unmatchedLabels: string[];
+} {
+  return {
+    estimatedLabels: items.filter((item) => item.estimatedPer100g).map((item) => item.label),
+    unmatchedLabels: items
+      .filter((item) => item.foodItemId === null && !item.estimatedPer100g)
+      .map((item) => item.label),
+  };
+}
 
 @Injectable()
 export class FoodChatService {
@@ -86,15 +119,19 @@ export class FoodChatService {
   }
 
   async logText(userId: string, text: string, now: Date = new Date()): Promise<FoodChatReply> {
-    const [pendingMeal, plan] = await Promise.all([
+    const [pendingMeal, plan, queried] = await Promise.all([
       this.pendingMeal(userId),
       this.foods.activePlan(userId),
+      this.queried(userId),
     ]);
     const draft = await this.foods.draftFromText(userId, { text }, now, {
       ...(pendingMeal ? { pendingMeal } : {}),
+      ...(queried ? { queried } : {}),
       plan: planForPrompt(plan),
     });
     if (draft.items.length === 0) {
+      // O rascunho vazio não serve para nada: não fica pendurado no dia do aluno.
+      await this.foods.remove(userId, draft.logId);
       return {
         status: 'ASKED',
         messages: [draft.needsClarification ?? msg.FOOD_CLARIFICATION_FALLBACK],
@@ -117,37 +154,104 @@ export class FoodChatService {
       now,
     );
     if (draft.items.length === 0) {
+      await this.foods.remove(userId, draft.logId);
       return { status: 'ASKED', messages: [msg.FOOD_CLARIFICATION_FALLBACK] };
     }
     return this.finish(userId, draft.logId, draft.meal, asLogItems(draft.items), 'PHOTO', now);
   }
 
-  /** Correção do último registro feito pelo chat ("na verdade foram 3 ovos"). */
-  async correctLast(
+  /**
+   * Consulta por texto ou áudio ("quantas calorias tem uma manga?"): responde os números e NÃO
+   * registra. O que foi consultado fica guardado por alguns minutos: se ele disser "comi", vira
+   * registro sem precisar repetir.
+   */
+  async queryText(userId: string, text: string, now: Date = new Date()): Promise<FoodChatReply> {
+    const plan = await this.foods.activePlan(userId);
+    const reading = await this.foods.readText(userId, { text }, now, { plan: planForPrompt(plan) });
+    if (reading.items.length === 0) {
+      return {
+        status: 'ASKED',
+        messages: [reading.needsClarification ?? msg.FOOD_QUERY_CLARIFICATION],
+      };
+    }
+    return this.answerQuery(userId, reading, false);
+  }
+
+  /** Consulta por foto com legenda de pergunta ("quantas calorias tem isso?"): não registra. */
+  async queryPhoto(
+    userId: string,
+    photo: PhotoInput,
+    caption: string | null,
+    now: Date = new Date(),
+  ): Promise<FoodChatReply> {
+    const reading = await this.foods.readPhoto(userId, photo, caption ? { caption } : {}, now);
+    if (!reading || reading.items.length === 0) {
+      return { status: 'ASKED', messages: [msg.FOOD_QUERY_CLARIFICATION] };
+    }
+    return this.answerQuery(userId, reading, true);
+  }
+
+  /**
+   * Correção de um registro pelo chat. O alvo é a refeição que o aluno citou ("no café da manhã
+   * foram 3 ovos", inclusive de ontem); sem citar, o último registro feito pelo chat e, na falta
+   * dele, o mais recente de hoje. Também apaga o registro inteiro ("não comi isso, apaga").
+   * `null` = não há registro para corrigir (quem chama trata como registro novo).
+   */
+  async correct(
     userId: string,
     text: string,
+    target: CorrectionTarget = {},
     now: Date = new Date(),
   ): Promise<FoodChatReply | null> {
+    const today = (await this.foods.day(userId, undefined, now)).today;
+    const date = target.yesterday ? addDays(today, -1) : today;
     const lastId = await this.redis.get(this.lastKey(userId));
-    const previous = lastId ? await this.foods.find(userId, lastId) : null;
-    if (!lastId || !previous) return null;
-    const draft = await this.foods.draftFromText(userId, { text }, now, {
+    const previous =
+      target.meal || target.yesterday
+        ? await this.foods.latestLog(userId, date, target.meal ?? undefined)
+        : ((lastId ? await this.foods.find(userId, lastId) : null) ??
+          (await this.foods.latestLog(userId, today)));
+    if (!previous) return null;
+
+    const reading = await this.foods.readText(userId, { text }, now, {
       previous: {
         meal: previous.meal,
         items: previous.items.map((i) => ({ label: i.label, grams: i.grams })),
       },
     });
-    // O rascunho de correção só serviu para interpretar: o registro original é que muda.
-    await this.foods.remove(userId, draft.logId);
-    if (draft.items.length === 0) {
+    if (reading.discard) {
+      await this.foods.remove(userId, previous.id);
+      if (lastId === previous.id) await this.redis.del(this.lastKey(userId));
+      const day = await this.foods.day(userId, undefined, now);
       return {
-        status: 'ASKED',
-        messages: [draft.needsClarification ?? msg.FOOD_CLARIFICATION_FALLBACK],
+        status: 'LOGGED',
+        messages: [
+          foodLogRemovedMessage({
+            meal: previous.meal,
+            day: {
+              totals: day.totals,
+              targetKcal: day.targets ? targetKcal(day.targets) : null,
+              targetProteinG: day.targets?.proteinG ?? null,
+            },
+            otherDay: previous.loggedOn !== today,
+          }),
+        ],
       };
     }
-    const items = asLogItems(draft.items);
-    await this.foods.replaceItems(userId, lastId, draft.meal, items);
-    return this.reply(userId, lastId, draft.meal, items, 'TEXT', now, true);
+    if (reading.items.length === 0) {
+      return {
+        status: 'ASKED',
+        messages: [reading.needsClarification ?? msg.FOOD_CLARIFICATION_FALLBACK],
+      };
+    }
+    const items = asLogItems(reading.items);
+    await this.foods.replaceItems(userId, previous.id, reading.meal, items);
+    await this.redis.set(this.lastKey(userId), previous.id, 'EX', LAST_LOG_TTL_SECONDS);
+    // O dia mostrado é o do registro corrigido (o último do chat pode ser de antes da meia-noite).
+    return this.reply(userId, previous.id, reading.meal, items, 'TEXT', now, {
+      corrected: true,
+      date: previous.loggedOn,
+    });
   }
 
   async addWater(userId: string, ml: number, now: Date = new Date()): Promise<FoodChatReply> {
@@ -160,6 +264,31 @@ export class FoodChatService {
 
   // --- Internos ---------------------------------------------------------------------------
 
+  private async answerQuery(
+    userId: string,
+    reading: FoodReading,
+    fromPhoto: boolean,
+  ): Promise<FoodChatReply> {
+    const items = asLogItems(reading.items);
+    await this.redis.set(
+      this.queryKey(userId),
+      JSON.stringify(items.map((item) => ({ label: item.label, grams: item.grams }))),
+      'EX',
+      QUERY_TTL_SECONDS,
+    );
+    return {
+      status: 'ANSWERED',
+      messages: [
+        foodQueryMessage({
+          items,
+          totals: reading.totals,
+          portionsEstimated: fromPhoto,
+          ...outsideTable(items),
+        }),
+      ],
+    };
+  }
+
   private async finish(
     userId: string,
     logId: string,
@@ -170,8 +299,8 @@ export class FoodChatService {
   ): Promise<FoodChatReply> {
     await this.foods.confirm(userId, logId, { meal, items });
     await this.redis.set(this.lastKey(userId), logId, 'EX', LAST_LOG_TTL_SECONDS);
-    await this.redis.del(this.pendingKey(userId));
-    return this.reply(userId, logId, meal, items, source, now, false);
+    await this.redis.del(this.pendingKey(userId), this.queryKey(userId));
+    return this.reply(userId, logId, meal, items, source, now, { corrected: false });
   }
 
   private async reply(
@@ -181,20 +310,22 @@ export class FoodChatService {
     items: FoodLogItem[],
     source: 'TEXT' | 'PHOTO',
     now: Date,
-    corrected: boolean,
+    options: { corrected: boolean; date?: string },
   ): Promise<FoodChatReply> {
     const [day, plan] = await Promise.all([
-      this.foods.day(userId, undefined, now),
+      this.foods.day(userId, options.date, now),
       this.foods.activePlan(userId),
     ]);
+    const otherDay = day.date !== day.today;
     const confirmed = day.logs.filter((log) => log.confirmed);
     const own = confirmed.find((log) => log.id === logId);
     const mealTotals = own?.totals ?? { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0 };
     const mid = day.targets ? targetKcal(day.targets) : null;
     const plannedMeal = plan?.meals.find((m) => m.slot === meal);
     const loggedSlots = new Set(confirmed.map((log) => log.meal));
-    const remaining = plan ? trackedSlots(plan).filter((slot) => !loggedSlots.has(slot)) : [];
-    const unmatched = own?.totals.unmatchedItems ?? 0;
+    const remaining =
+      plan && !otherDay ? trackedSlots(plan).filter((slot) => !loggedSlots.has(slot)) : [];
+    const outside = outsideTable(items);
 
     const comment = await this.comment(userId, now, {
       firstName: day.firstName,
@@ -222,7 +353,7 @@ export class FoodChatService {
           }
         : null,
       remainingMeals: remaining.map((slot) => MEAL_SLOT_LABELS[slot]),
-      unmatchedItems: unmatched,
+      unmatchedItems: outside.unmatchedLabels.length,
       source,
     });
     const text = foodLogMessage({
@@ -240,11 +371,13 @@ export class FoodChatService {
         targetProteinG: day.targets?.proteinG ?? null,
       },
       comment,
-      estimated: source === 'PHOTO' || unmatched > 0,
+      portionsEstimated: source === 'PHOTO',
+      ...outside,
+      otherDay,
     });
     return {
       status: 'LOGGED',
-      messages: [corrected ? `Corrigido! ${text}` : text],
+      messages: [options.corrected ? `Corrigido! ${text}` : text],
     };
   }
 
@@ -286,11 +419,27 @@ export class FoodChatService {
     return asMealSlot(raw);
   }
 
+  /** Itens da última consulta sem registro, se ainda for recente. */
+  private async queried(userId: string): Promise<{ label: string; grams: number }[] | null> {
+    const raw = await this.redis.get(this.queryKey(userId));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as { label: string; grams: number }[];
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed.slice(0, 20) : null;
+    } catch {
+      return null;
+    }
+  }
+
   private pendingKey(userId: string) {
     return this.keys.forUser(userId, 'meal-log', 'pending');
   }
 
   private lastKey(userId: string) {
     return this.keys.forUser(userId, 'meal-log', 'last');
+  }
+
+  private queryKey(userId: string) {
+    return this.keys.forUser(userId, 'meal-log', 'query');
   }
 }

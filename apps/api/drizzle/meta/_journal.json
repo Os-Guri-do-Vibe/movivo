@@ -778,6 +778,20 @@
       "when": 1793651100000,
       "tag": "0110_acompanhamento_premium",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1793651200000,
+      "tag": "0111_diagnostico_de_falha",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1793651300000,
+      "tag": "0112_cuidado_do_ciclo",
+      "breakpoints": true
     }
   ]
 }

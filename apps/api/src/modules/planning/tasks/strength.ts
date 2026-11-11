@@ -109,8 +109,42 @@ const MIN_OPTIONS_TO_REQUIRE = 3;
 const WARMUP_MINUTES = 5;
 const SECONDS_UNDER_TENSION_PER_SET = 45;
 
-function isIsolation(pattern: string): boolean {
-  return pattern === 'ISOLATION';
+type RestKind = 'COMPOUND' | 'ISOLATION' | 'CORE';
+
+/**
+ * Tipo de descanso pelo `pattern` do catálogo. CORE (abdominal, prancha, lombar) descansa como
+ * isolado: tratá-lo como multiarticular exigia 120 s+ numa prancha e reprovava o bloco inteiro.
+ * Exercício fora dos candidatos (já recusado por outro validador) conta como multiarticular.
+ */
+function restKindOf(candidate: StrengthCandidate | undefined): RestKind {
+  if (candidate?.pattern === 'ISOLATION') return 'ISOLATION';
+  if (candidate?.pattern === 'CORE') return 'CORE';
+  return 'COMPOUND';
+}
+
+const REST_KIND_LABEL: Record<RestKind, string> = {
+  COMPOUND: 'multiarticular',
+  ISOLATION: 'isolado',
+  CORE: 'core',
+};
+
+/**
+ * Faixa de descanso aceita para o tipo: a da metodologia (CORE sem linha própria usa a de
+ * isolado) e, no teto, até o descanso dos multiarticulares-chave de força.
+ */
+function restRangeFor(
+  rules: ReturnType<typeof strengthRules>,
+  kind: RestKind,
+): { min: number; max: number; label: string } | null {
+  const own = rules.restByKind[kind];
+  const range = own ?? (kind === 'CORE' ? rules.restByKind['ISOLATION'] : undefined);
+  if (!range) return null;
+  const label = kind === 'CORE' && !own ? 'core (descansa como isolado)' : REST_KIND_LABEL[kind];
+  return {
+    min: range.min,
+    max: Math.max(range.max, rules.restByKind['STRENGTH_MAIN']?.max ?? range.max),
+    label,
+  };
 }
 
 function cardioIdsOf(input: StrengthInput): Set<string> {
@@ -416,17 +450,14 @@ export const strengthValidators: Validator<StrengthInput, BlockOutput>[] = [
           }
         }
         const candidate = byId.get(exercise.exerciseId);
-        const kind = candidate && isIsolation(candidate.pattern) ? 'ISOLATION' : 'COMPOUND';
-        const rest = rules.restByKind[kind];
-        if (
-          rest &&
-          (exercise.restSeconds < rest.min ||
-            exercise.restSeconds >
-              Math.max(rest.max, rules.restByKind['STRENGTH_MAIN']?.max ?? rest.max))
-        ) {
+        const rest = restRangeFor(rules, restKindOf(candidate));
+        if (rest && (exercise.restSeconds < rest.min || exercise.restSeconds > rest.max)) {
+          // A mensagem diz como o exercício foi classificado: sem isso o modelo não sabe por que
+          // a faixa é aquela e insiste no valor que considera certo.
+          const name = candidate?.name ?? exercise.exerciseId;
           violations.push({
             path: `${path}.restSeconds`,
-            message: `descanso de ${exercise.restSeconds}s fora da faixa (${rest.min}–${rest.max}s)`,
+            message: `descanso de ${exercise.restSeconds}s em "${name}" fora da faixa de ${rest.label} (${rest.min}–${rest.max}s); use um valor dentro dela`,
           });
         }
       });
@@ -463,7 +494,7 @@ export const strengthValidators: Validator<StrengthInput, BlockOutput>[] = [
         const { compound, isolation } = budget.restSeconds;
         violations.push({
           path: `sessions.${si}.content.exercises`,
-          message: `séries, descansos e cardio somam ~${Math.round(minutes)} min; o aluno tem ${input.minutesPerSession} min. Antes de cortar séries, use o descanso mínimo da metodologia (${compound} s nos multiarticulares, ${isolation} s nos isolados): assim cabem até ${budget.maxSetsPerSession} séries de musculação nesta sessão (hoje ${sets}). Só corte séries de grupos acima de ${budget.minWeeklySetsPerMajorGroup} séries/semana, o mínimo de cada grupo principal.`,
+          message: `séries, descansos e cardio somam ~${Math.round(minutes)} min; o aluno tem ${input.minutesPerSession} min. Antes de cortar séries, use o descanso mínimo da metodologia (${compound} s nos multiarticulares, ${isolation} s nos isolados e no core): assim cabem até ${budget.maxSetsPerSession} séries de musculação nesta sessão (hoje ${sets}). Só corte séries de grupos acima de ${budget.minWeeklySetsPerMajorGroup} séries/semana, o mínimo de cada grupo principal.`,
         });
       }
       if (session.estimatedMinutes < minutes * 0.7) {
@@ -564,7 +595,7 @@ Regras de montagem:
 2. A soma de weeklyFrequency das sessões deve ser exatamente "sessionsPerWeek". Respeite a divisão ("split"); com NO_PREFERENCE, escolha a que melhor distribui o volume e a recuperação entre os dias.
 3. Volume, frequência por grupo, esforço (RIR da fase), repetições do objetivo e descanso devem estar DENTRO das faixas da metodologia. O grupo muscular de uma série é o primeiro da lista "muscleGroups". Todo grupo principal com opções em "candidates" (peito, costas, ombro, quadríceps, posterior de coxa, glúteo) precisa de volume direto e da frequência mínima por grupo. Quando o tempo não comporta o piso semanal cheio em todos, distribua primeiro: cada grupo principal com ao menos ${Math.round(FLOOR_TOLERANCE * 100)}% do piso do nível, e só depois dê volume extra (inclusive à ênfase). Nunca zere um grupo principal para caber no tempo.
 4. Cada sessão tem de caber em "minutesPerSession": séries × (execução + descanso) + aquecimento. Estime estimatedMinutes honestamente; estimatedRpe (CR-10) coerente com o esforço.
-5. Ordem: multiarticulares primeiro, isolados depois. Ofereça progressão clara em "notes" (como e quando subir carga) em linguagem simples. Limites de texto: no máximo 5 notas do bloco, cada uma com até 250 caracteres e uma ideia só; "notes" de cada exercício com até 300 caracteres.
+5. Ordem: multiarticulares primeiro, isolados depois. O tipo de cada exercício para o descanso vem do "pattern" do candidato: ISOLATION e CORE (abdominal, prancha, lombar) descansam na faixa de isolado; todos os outros padrões, na de multiarticular.Ofereça progressão clara em "notes" (como e quando subir carga) em linguagem simples. Limites de texto: no máximo 5 notas do bloco, cada uma com até 250 caracteres e uma ideia só; "notes" de cada exercício com até 300 caracteres.
 6. priority: marque como KEY as sessões que não podem faltar na semana (as de maior volume do foco principal). Exercício por tempo usa durationSeconds, nunca reps.
 7. Se "emphasisMuscleGroups" vier preenchida, é a ênfase que o ALUNO escolheu e ela vem SEMPRE em primeiro lugar: dê a esses grupos mais volume e frequência (ao menos a média dos demais grupos principais), sempre DENTRO das faixas da metodologia e sem sacrificar os demais grupos principais. Os grupos "TO_DEVELOP" da avaliação por foto ("bodyComposition") vêm depois: complementam a ênfase sem tirar volume dela; se o aluno não escolheu ênfase (corpo todo), eles passam a orientar onde dar mais volume.
 8. "phase" é o mesociclo deste bloco e "weeksInBlock" a duração dele, ambos já decididos: prescreva repetições, RIR, séries e descanso pelas faixas da metodologia para essa fase (Adaptação: prioridade à execução e menor volume; Força: menos séries e mais descanso nos multiarticulares-chave; Recuperação: volume reduzido mantendo frequência e exercícios). phases: UMA fase, com o foco do bloco em uma frase e endsWithDeload quando a metodologia ou a orientação pedirem recuperação no fim; o nome e as semanas são fixados pelo sistema. summary: 2 a 3 frases claras para o aluno, sem prometer resultado e sem citar dias da semana (a agenda é calculada pelo sistema).

@@ -217,6 +217,97 @@ describe('AgentRunner', () => {
     expect(lastUserMessage).toContain('sessoes');
   });
 
+  it('o erro final carrega a última resposta reprovada (a das violações)', async () => {
+    const { gateway } = gatewayReplying(
+      '{"sessoes":9,"motivo":"a"}',
+      '{"sessoes":8,"motivo":"b"}',
+      '{"sessoes":7,"motivo":"c"}',
+    );
+    const error = await new AgentRunner(gateway)
+      .run(task, { diasDisponiveis: 3 }, { userId: null, sources })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AgentTaskError);
+    expect((error as AgentTaskError).rejectedOutput).toBe('{"sessoes":7,"motivo":"c"}');
+    expect((error as AgentTaskError).violations.map((v) => v.message).join(' ')).toContain(
+      'mais sessões que dias disponíveis',
+    );
+  });
+
+  it('modelo fixado: usa a rota configurada dele e não troca de fornecedor', async () => {
+    const { gateway, requests, routesFor } = gatewayReplying('{"sessoes":9,"motivo":"x"}');
+    const configured: TierRoute = {
+      vendor: 'DEEPSEEK',
+      model: 'deepseek-v4-pro',
+      maxOutputTokens: 4_000,
+      timeoutMs: 45_000,
+      temperature: 0.4,
+      vision: false,
+    };
+    routesFor.mockImplementation(async (tier?: unknown) =>
+      tier === 'STANDARD'
+        ? [{ ...configured, vendor: 'ANTHROPIC', model: 'claude-sonnet-5-5' }, configured]
+        : [],
+    );
+    await expect(
+      new AgentRunner(gateway).run(
+        task,
+        { diasDisponiveis: 3 },
+        { userId: null, sources, pinnedModel: { vendor: 'DEEPSEEK', model: 'deepseek-v4-pro' } },
+      ),
+    ).rejects.toBeInstanceOf(AgentTaskError);
+    // Todas as rodadas no DeepSeek configurado; a resposta repetida encerra sem ir à reserva.
+    expect(requests.every((r) => r.routeOverride?.model === 'deepseek-v4-pro')).toBe(true);
+    expect(requests[0]?.routeOverride).toEqual(configured);
+    expect(routesFor).toHaveBeenCalledTimes(1);
+  });
+
+  it('modelo fixado com thinking: esforço, teto e timeout da operação sobre a rota do tier', async () => {
+    const { gateway, requests, routesFor } = gatewayReplying('{"sessoes":3,"motivo":"x"}');
+    routesFor.mockResolvedValue([
+      {
+        vendor: 'DEEPSEEK',
+        model: 'deepseek-v4-pro',
+        maxOutputTokens: 12_000,
+        timeoutMs: 180_000,
+        temperature: 0.3,
+        vision: false,
+      },
+    ]);
+    await new AgentRunner(gateway).run(
+      task,
+      { diasDisponiveis: 3 },
+      {
+        userId: null,
+        sources,
+        pinnedModel: {
+          vendor: 'DEEPSEEK',
+          model: 'deepseek-v4-pro',
+          reasoningEffort: 'high',
+          maxOutputTokens: 48_000,
+          timeoutMs: 1_200_000,
+        },
+      },
+    );
+    expect(requests[0]?.routeOverride).toMatchObject({
+      model: 'deepseek-v4-pro',
+      reasoningEffort: 'high',
+      maxOutputTokens: 48_000,
+      timeoutMs: 1_200_000,
+    });
+  });
+
+  it('modelo fixado fora dos tiers: erro claro, sem chamar o modelo', async () => {
+    const { gateway, requests } = gatewayReplying('{"sessoes":3,"motivo":"x"}');
+    await expect(
+      new AgentRunner(gateway).run(
+        task,
+        { diasDisponiveis: 3 },
+        { userId: null, sources, pinnedModel: { vendor: 'OPENAI', model: 'inexistente' } },
+      ),
+    ).rejects.toThrow('não está habilitado');
+    expect(requests).toHaveLength(0);
+  });
+
   it('corrige violação de validador de domínio na rodada seguinte', async () => {
     const { gateway, requests } = gatewayReplying(
       '{"sessoes":5,"motivo":"quero muito"}',

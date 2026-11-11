@@ -487,14 +487,11 @@ const WEEKDAY_NAMES: Readonly<Record<Weekday, string>> = {
   SUN: 'Domingo',
 };
 
-function weekdayOf(isoDate: string): Weekday {
-  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay(); // 0 = domingo
-  return WEEK[(day + 6) % 7] as Weekday;
-}
-
 /**
- * Dias da semana de um treino: os que o profissional marcou na revisão; sem marcação, os dias em
- * que a agenda o colocou na primeira semana. Vazio = o dia ainda não foi definido.
+ * Dias da semana de um treino na distribuição FIXA do protocolo: os que o profissional marcou e,
+ * sem marcação, os da semana-base (segunda a domingo, a que se repete). Nunca a agenda de uma
+ * semana específica: a primeira começa no dia da liberação e misturá-la à seguinte deixava dias
+ * vazios e dois treinos no mesmo dia. Vazio = o dia ainda não foi definido.
  */
 function sessionWeekdays(
   training: NonNullable<PlanRead['training']>,
@@ -502,12 +499,9 @@ function sessionWeekdays(
 ): Weekday[] {
   const days = new Set<Weekday>(session.weekdays ?? []);
   if (days.size === 0) {
-    // A agenda pode mudar de dia entre semanas: só as primeiras ocorrências (uma semana) valem.
-    const first = training.upcoming
-      .filter((occurrence) => occurrence.planSessionKey === session.key)
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, session.weeklyFrequency);
-    first.forEach((occurrence) => days.add(weekdayOf(occurrence.date)));
+    training.baseWeek
+      .filter((entry) => entry.planSessionKey === session.key)
+      .forEach((entry) => days.add(entry.weekday));
   }
   return WEEK.filter((day) => days.has(day));
 }

@@ -42,6 +42,14 @@ export const foodLogInputSchema = z.object({
       items: z.array(z.object({ label: z.string().max(80), grams: z.number() })).max(20),
     })
     .nullish(),
+  /**
+   * O que o aluno acabou de CONSULTAR sem registrar ("quantas calorias tem uma manga?"). Se agora
+   * ele diz que comeu ("comi", "pode registrar"), são estes os itens.
+   */
+  queried: z
+    .array(z.object({ label: z.string().max(120), grams: z.number() }))
+    .max(20)
+    .nullish(),
 });
 export type FoodLogInput = z.infer<typeof foodLogInputSchema>;
 
@@ -59,13 +67,21 @@ export const foodLogOutputSchema = z.object({
     .max(20),
   /** Pergunta curta, só quando faltou algo essencial para interpretar. */
   needsClarification: z.string().trim().max(160).nullable(),
+  /** Só em correção ("previous"): o aluno pediu para APAGAR o registro inteiro. */
+  discard: z.boolean().nullish(),
 });
 export type FoodLogOutput = z.infer<typeof foodLogOutputSchema>;
 
 const validators: Validator<FoodLogInput, FoodLogOutput>[] = [
-  (_input, output) => {
+  (input, output) => {
     const violations: Violation[] = [];
-    if (output.items.length === 0 && !output.needsClarification) {
+    if (output.discard && !input.previous) {
+      violations.push({ path: 'discard', message: 'só se apaga um registro que já existe' });
+    }
+    if (output.discard && output.items.length > 0) {
+      violations.push({ path: 'items', message: 'registro apagado não tem itens' });
+    }
+    if (output.items.length === 0 && !output.needsClarification && !output.discard) {
       violations.push({
         path: 'items',
         message: 'sem itens, faça uma pergunta curta em needsClarification',
@@ -88,11 +104,12 @@ export const foodLogTask = defineAgentTask<FoodLogInput, FoodLogOutput>({
 Regras:
 1. Um item por alimento, com nome em português no padrão de tabela de composição ("arroz branco cozido", "feijão carioca cozido", "bife de patinho grelhado", "ovo de galinha mexido", "pão francês", "manteiga").
 2. Porção em gramas. Medida declarada ("200 g") → DECLARED. Medida caseira → HOUSEHOLD_MEASURE e converta (referências: colher de sopa de arroz cozido ≈ 25 g; concha de feijão ≈ 90 g; fatia de pão de forma ≈ 25 g; pão francês ≈ 50 g; ovo ≈ 50 g; copo de leite ≈ 200 g; banana média ≈ 100 g; filé de frango médio ≈ 120 g; bife médio ≈ 100 g; colher de chá de azeite ≈ 4 g). Sem medida nenhuma → ESTIMATED com uma porção típica de adulto.
-3. "meal": use "mealHint" se vier; senão, o que o texto diz ("almocei", "no café"); senão, "pendingMeal" (a refeição do lembrete que o aluno está respondendo); senão, o horário local (até 10h café da manhã, 10–12h lanche da manhã, 12–15h almoço, 15–18h lanche da tarde, 18–22h jantar, depois ceia).
+3. "meal": use "mealHint" se vier; senão, o que o texto diz ("almocei", "no café"); senão, a hora ou o momento que ele citar ("às 16h", "depois do almoço" = lanche da tarde, "antes de dormir" = ceia, "antes do treino" = pré-treino); senão, "pendingMeal" (a refeição do lembrete que o aluno está respondendo); senão, o horário local (até 10h café da manhã, 10–12h lanche da manhã, 12–15h almoço, 15–18h lanche da tarde, 18–22h jantar, depois ceia). O aluno pode registrar QUALQUER coisa que comeu ou bebeu, a qualquer hora, mesmo fora das refeições do plano (uma fruta, um doce, um café com leite, um beliscado): registre do mesmo jeito, no lanche ou na refeição do momento, sem exigir que esteja no cardápio. Um lanche avulso claramente fora da refeição do lembrete ("comi uma manga agora há pouco" com lembrete de almoço pendente) vai para o lanche do horário, não para a refeição do lembrete.
 4. Se o relato for vago demais para qualquer item ("comi bem"), items vazio e uma pergunta curta em "needsClarification". Não invente alimentos.
 5. Não comente se a refeição é boa ou ruim, não diga calorias.
 6. "Comi o que estava no plano" / "segui o cardápio" / "a opção B": use "plan" (a refeição do passo 3) e copie os itens e gramas daquela opção (a primeira, se ele não disser qual). Se disser que trocou algo ("sem o ovo", "com pão integral"), aplique a troca. Mesmo que o aluno só descreva em medidas caseiras, converta como no passo 2.
-7. Com "previous", o texto é uma CORREÇÃO do que já foi registrado ("na verdade foram 3 ovos", "esqueci o café", "era arroz integral"): devolva a lista COMPLETA já corrigida (os itens de "previous" mais/menos/trocados), com a mesma refeição, sem duplicar nada.`,
+7. Com "previous", o texto é uma CORREÇÃO do que já foi registrado ("na verdade foram 3 ovos", "esqueci o café", "era arroz integral", "tira o pão"): devolva a lista COMPLETA já corrigida (os itens de "previous" mais/menos/trocados), com a mesma refeição (ou a nova, se ele disser que era outra refeição), sem duplicar nada. Se ele pedir para APAGAR o registro inteiro ou disser que não comeu aquilo ("apaga esse registro", "não comi isso", "registrei errado, desconsidera"), devolva "items" vazio, "discard": true e "needsClarification" nulo.
+8. Com "queried", o aluno acabou de consultar esses alimentos sem registrar. Se agora ele diz que comeu ou pede para registrar sem repetir os alimentos ("comi", "pode registrar", "acabei comendo"), use os itens de "queried" (ajustando a quantidade se ele disser outra). Se ele descrever outros alimentos, ignore "queried".`,
   tier: 'STANDARD',
   methodology: [],
   state: [],

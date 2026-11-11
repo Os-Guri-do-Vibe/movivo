@@ -41,6 +41,7 @@ import { dayBounds, estimateExpenditure, type BodyInputs } from './calc/energy';
 import type { PlanCheckContext } from './calc/plan-check';
 import {
   hybridRules,
+  hybridRulesFor,
   nutritionRules,
   rulesLevel,
   runningRules,
@@ -89,7 +90,17 @@ export function distinctAvailableDays(view: StateView): number {
  * abaixo deste teto. Respeita o descanso mínimo da metodologia e só conta sessão dupla (mais de
  * uma no mesmo dia) quando a metodologia a permite: no máximo uma dupla a cada dois dias de treino.
  */
-export function sessionLimitsOf(view: StateView, rules: HybridRules): SessionLimits {
+/** Modalidades da semana do aluno: as que ele treina e o esporte externo, se houver. */
+export function modalitiesOfView(view: StateView): string[] {
+  return [
+    ...view.training.modalities.map((m) => m.modality),
+    ...(view.training.externalSports.length > 0 ? ['EXTERNAL_SPORT'] : []),
+  ];
+}
+
+export function sessionLimitsOf(view: StateView, hybrid: HybridRules): SessionLimits {
+  // Descanso e sessão dupla da HYBRID só valem para quem combina modalidades.
+  const rules = hybridRulesFor(hybrid, modalitiesOfView(view));
   const stored = view.availability?.maxSessionsPerWeek ?? 3;
   const availableDays = distinctAvailableDays(view) || Math.min(7, stored);
   const minRestDays = Math.max(0, rules.minRestDaysPerWeek ?? 1);

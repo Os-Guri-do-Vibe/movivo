@@ -1,7 +1,8 @@
 /**
  * Roteador das fotos e PDFs que chegam no WhatsApp. Antes toda imagem era tratada como exame;
- * agora a foto do prato vira registro alimentar, o exame segue para a leitura da medicina e o
- * resto recebe uma resposta honesta do que dá para fazer por aqui.
+ * agora a foto do prato vira registro alimentar (ou só consulta, se a legenda pergunta as
+ * calorias), o exame segue para a leitura da medicina e o resto recebe uma resposta honesta do
+ * que dá para fazer por aqui.
  *
  * PDF é sempre exame. Para imagem, um classificador visual barato decide o destino (com a legenda
  * e o lembrete de refeição mais recente como pistas).
@@ -73,6 +74,7 @@ export class MediaRouterService implements OnModuleInit, OnModuleDestroy {
 
     const pending = await this.redis.get(this.keys.forUser(event.userId, 'meal-log', 'pending'));
     let kind: 'MEAL' | 'EXAM' | 'WORKOUT_SCREEN' | 'BODY' | 'OTHER';
+    let query: boolean;
     try {
       const run = await this.runner.run(
         imageKindTask,
@@ -86,6 +88,7 @@ export class MediaRouterService implements OnModuleInit, OnModuleDestroy {
         },
       );
       kind = run.output.kind;
+      query = run.output.kind === 'MEAL' && run.output.mealIntent === 'QUERY';
     } catch (error) {
       if (!(error instanceof AgentTaskError)) throw error;
       // Sem classificação, o comportamento antigo (exame) segue: nunca perder um exame.
@@ -95,7 +98,7 @@ export class MediaRouterService implements OnModuleInit, OnModuleDestroy {
 
     switch (kind) {
       case 'MEAL':
-        return this.meal(event);
+        return this.meal(event, query);
       case 'EXAM':
         return this.toExam(event);
       case 'WORKOUT_SCREEN':
@@ -116,15 +119,22 @@ export class MediaRouterService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async meal(event: InboundMediaEvent): Promise<boolean> {
+  /**
+   * Foto de comida: registra no dia (padrão) ou, se a legenda só pergunta ("quantas calorias tem
+   * isso?"), responde os números sem registrar nada.
+   */
+  private async meal(event: InboundMediaEvent, query: boolean): Promise<boolean> {
     if (event.mediaType === 'application/pdf') return false;
     try {
-      const reply = await this.foodChat.logPhoto(
-        event.userId,
-        { mediaType: event.mediaType, base64: event.bytes.toString('base64') },
-        event.caption ?? null,
+      const photo = { mediaType: event.mediaType, base64: event.bytes.toString('base64') };
+      const reply = query
+        ? await this.foodChat.queryPhoto(event.userId, photo, event.caption ?? null)
+        : await this.foodChat.logPhoto(event.userId, photo, event.caption ?? null);
+      await this.reply(
+        event,
+        query ? 'meal-query' : 'meal-photo',
+        reply.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
       );
-      await this.reply(event, 'meal-photo', reply.messages.join(WHATSAPP_BUBBLE_SEPARATOR));
       return true;
     } catch (error) {
       this.logger.warn(

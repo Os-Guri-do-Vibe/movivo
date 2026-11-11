@@ -156,7 +156,6 @@ export function hyroxRules(
 
 export interface HybridRules {
   hoursBetweenHeavyLowerAndIntenseRun: number | null;
-  maxIntenseSessionsPerWeek: number | null;
   allowTwoSessionsSameDay: boolean;
   minRestDaysPerWeek: number | null;
   acuteChronicMax: number | null;
@@ -168,12 +167,34 @@ export function hybridRules(params: Params): HybridRules {
     hoursBetweenHeavyLowerAndIntenseRun: asNumber(
       field(params, 'interference', 'hoursBetweenHeavyLowerAndIntenseRun'),
     ),
-    maxIntenseSessionsPerWeek: asNumber(field(params, 'interference', 'maxIntenseSessionsPerWeek')),
     allowTwoSessionsSameDay: field(params, 'interference', 'allowTwoSessionsSameDay') === true,
     minRestDaysPerWeek: asNumber(field(params, 'interference', 'minRestDaysPerWeek')),
     acuteChronicMax: asNumber(field(params, 'load', 'acuteChronicMax')),
     weeklyLoadIncreaseMaxPct: asNumber(field(params, 'load', 'weeklyLoadIncreaseMaxPct')),
   };
+}
+
+/**
+ * Regras da metodologia HYBRID quando a semana NÃO combina modalidades: nenhuma. Plano de uma
+ * modalidade só segue apenas a metodologia dela — sem interferência, carga combinada, sessão dupla
+ * nem descanso da semana híbrida. Uma sessão por dia é o natural de quem treina uma coisa só.
+ */
+export const SINGLE_MODALITY_RULES: HybridRules = {
+  hoursBetweenHeavyLowerAndIntenseRun: null,
+  allowTwoSessionsSameDay: false,
+  minRestDaysPerWeek: null,
+  acuteChronicMax: null,
+  weeklyLoadIncreaseMaxPct: null,
+};
+
+/** A semana combina modalidades (2+, contando o esporte externo como uma delas)? */
+export function combinesModalities(modalities: Iterable<string>): boolean {
+  return new Set(modalities).size >= 2;
+}
+
+/** As regras HYBRID só valem quando a semana combina modalidades. */
+export function hybridRulesFor(rules: HybridRules, modalities: Iterable<string>): HybridRules {
+  return combinesModalities(modalities) ? rules : SINGLE_MODALITY_RULES;
 }
 
 // --- Nutrição -----------------------------------------------------------------------------

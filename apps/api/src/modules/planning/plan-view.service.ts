@@ -5,7 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, gte } from 'drizzle-orm';
 
-import { ageInYears, type PlanRead } from '@movivo/shared';
+import { ageInYears, type PlanRead, type TrainingPlanStructure } from '@movivo/shared';
 
 import {
   bodyMeasurements,
@@ -20,15 +20,47 @@ import {
   users,
 } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { todayIn } from './plan-generation.service';
+import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
+import { StudentStateReader } from '../student-state/student-state.reader';
+import { mondayOf } from './calc/week-planner';
+import { scheduleContextOf } from './inputs';
+import { PLAN_STATE_SLICES, todayIn } from './plan-generation.service';
+import { baseWeekOf } from './plan-publisher.service';
 import type { PdfStudent } from './protocol-pdf';
+import { parseStateView } from './state-view';
 
 const UPCOMING_DAYS = 14;
 const DAY_MS = 86_400_000;
 
 @Injectable()
 export class PlanViewService {
-  constructor(private readonly db: TenantDatabase) {}
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly stateReader: StudentStateReader,
+    private readonly methodology: PublishedMethodologyReader,
+  ) {}
+
+  /**
+   * Semana-base do protocolo: a distribuição fixa de segunda a domingo (a mesma da revisão), com a
+   * disponibilidade e as regras de hoje. Os dias marcados pelo profissional já entram fixados.
+   */
+  private async baseWeek(
+    userId: string,
+    structure: TrainingPlanStructure,
+    today: string,
+    now: Date,
+  ): Promise<NonNullable<PlanRead['training']>['baseWeek']> {
+    const state = await this.stateReader.read(userId, PLAN_STATE_SLICES, now);
+    const view = parseStateView(state.slices as Record<string, unknown>);
+    const schedule = scheduleContextOf(
+      view,
+      (await this.methodology.publishedOf('HYBRID'))?.parameters,
+      (await this.methodology.publishedOf('RUNNING'))?.parameters,
+    );
+    return baseWeekOf(structure.sessions, schedule, mondayOf(today)).sessions.map(
+      ({ weekday, slot, planSessionKey }) => ({ weekday, slot, planSessionKey }),
+    );
+  }
 
   /**
    * Dados do cabeçalho do PDF do protocolo. Ficam fora de `PlanRead` (a página pública por token
@@ -62,12 +94,13 @@ export class PlanViewService {
   }
 
   async read(userId: string, now: Date = new Date()): Promise<PlanRead | null> {
-    return this.db.runAsUser(userId, 'USER', async (tx) => {
+    let today = '';
+    const plan = await this.db.runAsUser(userId, 'USER', async (tx): Promise<PlanRead | null> => {
       const [user] = await tx
         .select({ name: users.name, timezone: users.timezone })
         .from(users)
         .where(eq(users.id, userId));
-      const today = todayIn(user?.timezone ?? null, now);
+      today = todayIn(user?.timezone ?? null, now);
       const [training] = await tx
         .select()
         .from(trainingPlans)
@@ -157,6 +190,8 @@ export class PlanViewService {
                   status: s.status as never,
                   modality: s.modality as never,
                 })),
+              // Preenchida abaixo, fora da transação (lê o Estado do Aluno e a metodologia).
+              baseWeek: [],
             }
           : null,
         nutrition: nutrition
@@ -168,5 +203,9 @@ export class PlanViewService {
           : null,
       };
     });
+    if (plan?.training) {
+      plan.training.baseWeek = await this.baseWeek(userId, plan.training.structure, today, now);
+    }
+    return plan;
   }
 }

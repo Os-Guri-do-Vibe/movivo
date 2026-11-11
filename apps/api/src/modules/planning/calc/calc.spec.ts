@@ -9,7 +9,7 @@ import {
   estimateExpenditure,
   weeklyLossPct,
 } from './energy';
-import { intenseSessionsPerWeek, isHeavyLower, isIntense, srpe, weeklyLoad } from './load';
+import { isHeavyLower, isIntense, srpe, weeklyLoad } from './load';
 import {
   hybridRules,
   nutritionRules,
@@ -164,7 +164,6 @@ describe('carga', () => {
     expect(weeklyLoad([lower, run])).toBe(360 * 2 + 360);
     expect(isIntense(run)).toBe(true);
     expect(isIntense(lower)).toBe(false);
-    expect(intenseSessionsPerWeek([lower, run])).toBe(1);
     expect(isHeavyLower(lower)).toBe(true);
   });
 });
@@ -172,7 +171,6 @@ describe('carga', () => {
 describe('agenda da semana', () => {
   const rules: HybridRules = {
     hoursBetweenHeavyLowerAndIntenseRun: 48,
-    maxIntenseSessionsPerWeek: 3,
     allowTwoSessionsSameDay: false,
     minRestDaysPerWeek: 1,
     acuteChronicMax: 1.3,
@@ -201,6 +199,8 @@ describe('agenda da semana', () => {
     windows,
     rules,
     minEasyDaysBetweenIntense: 1,
+    // Semana híbrida: as regras da HYBRID valem.
+    modalities: ['STRENGTH', 'RUNNING'],
   };
 
   it('mondayOf devolve a segunda-feira da semana', () => {
@@ -242,16 +242,17 @@ describe('agenda da semana', () => {
     expect(plan.dropped).toHaveLength(1);
   });
 
-  it('respeita o teto de sessões intensas', () => {
+  it('não há teto de sessões intensas: todas entram se a agenda comporta', () => {
     const plan = planWeek({
       ...base,
-      rules: { ...rules, maxIntenseSessionsPerWeek: 1 },
       occurrences: [
         occ({ planSessionKey: 'I1', intense: true, priority: 'KEY' }),
         occ({ planSessionKey: 'I2', intense: true, priority: 'IMPORTANT' }),
+        occ({ planSessionKey: 'I3', intense: true, priority: 'IMPORTANT' }),
+        occ({ planSessionKey: 'I4', intense: true, priority: 'IMPORTANT' }),
       ],
     });
-    expect(plan.assignments).toHaveLength(1);
+    expect(plan.assignments).toHaveLength(4);
   });
 
   it('mantém o descanso mínimo da semana', () => {

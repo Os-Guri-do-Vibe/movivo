@@ -50,6 +50,7 @@ import { OutboxRelay } from '../domain-events/outbox-relay';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { FoodChatService } from './food-chat.service';
 import { MealCoachService } from './meal-coach.service';
+import { RecordUpdateService } from './record-update.service';
 import type { FollowUpJob } from '../jobs/follow-up.contract';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
@@ -151,6 +152,7 @@ export class ConversationOrchestrator {
     private readonly catalog: ExerciseCatalogProvider,
     private readonly foodChat: FoodChatService,
     private readonly mealCoach: MealCoachService,
+    private readonly records: RecordUpdateService,
     private readonly links: TrainingLinkService,
     private readonly outbox: OutboxRelay,
     private readonly observations: ObservationService,
@@ -249,10 +251,23 @@ export class ConversationOrchestrator {
           intent: intent.intent,
         };
       }
+      case 'FOOD_QUERY': {
+        // Consulta ("quantas calorias tem isso?"): responde os números e não registra nada.
+        const queried = await this.foodChat.queryText(userId, text, now);
+        return {
+          status: queried.status === 'ANSWERED' ? 'ANSWERED' : 'ASKED',
+          reply: queried.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
+          intent: intent.intent,
+        };
+      }
       case 'FOOD_CORRECTION': {
         const corrected =
-          (await this.foodChat.correctLast(userId, text, now)) ??
-          (await this.foodChat.logText(userId, text, now));
+          (await this.foodChat.correct(
+            userId,
+            text,
+            { meal: intent.mealSlot ?? null, yesterday: intent.mealDay === 'YESTERDAY' },
+            now,
+          )) ?? (await this.foodChat.logText(userId, text, now));
         return {
           status: corrected.status === 'LOGGED' ? 'INFORMED' : 'ASKED',
           reply: corrected.messages.join(WHATSAPP_BUBBLE_SEPARATOR),
@@ -302,8 +317,11 @@ export class ConversationOrchestrator {
         };
       case 'OUT_OF_SCOPE':
         return { status: 'INFORMED', reply: msg.OUT_OF_SCOPE_MESSAGE, intent: intent.intent };
+      case 'RECORD_UPDATE':
+        return this.recordUpdate(userId, text, now, intent.intent);
       case 'TRAINING_QUESTION':
       case 'NUTRITION_QUESTION':
+      case 'HEALTH_QUESTION':
       case 'FOOD_DIFFICULTY':
       case 'MOTIVATION':
         return this.answer(userId, text, intent, sources, persona);
@@ -670,6 +688,34 @@ export class ConversationOrchestrator {
   }
 
   /**
+   * O aluno pediu, com clareza, para corrigir ou atualizar um dado dele (série do treino,
+   * check-in, peso, gosto, cadastro): o agente aponta o registro, o código confere e grava. O que
+   * o chat não altera (objetivo, agenda-base, saúde) vai para a equipe.
+   */
+  private async recordUpdate(
+    userId: string,
+    text: string,
+    now: Date,
+    intent: string,
+  ): Promise<HandleResult> {
+    const result = await this.records.handle(userId, text, now);
+    if (result.unsupported) {
+      await this.openCase(
+        userId,
+        'NO_APPLICABLE_POLICY',
+        'GENERAL',
+        `O aluno pediu pelo WhatsApp uma atualização de cadastro que o chat não altera: ${result.unsupported}.`,
+        'NORMAL',
+      );
+    }
+    return {
+      status: result.unsupported && result.status !== 'EXECUTED' ? 'ESCALATED' : result.status,
+      reply: result.reply,
+      intent,
+    };
+  }
+
+  /**
    * Sugestão de refeição dentro do planejamento: o aluno pede uma opção que o cardápio não
    * trouxe. O agente escolhe alimentos da lista permitida; o código ajusta as porções à meta da
    * refeição, calcula os nutrientes e o custo. É só orientação: o plano não muda.
@@ -714,12 +760,16 @@ export class ConversationOrchestrator {
     sources: AgentContextSources,
     persona: PersonaKey,
   ): Promise<HandleResult> {
-    const topic: 'TRAINING' | 'NUTRITION' | 'MOTIVATION' =
+    const topic: 'TRAINING' | 'NUTRITION' | 'MOTIVATION' | 'HEALTH' =
       intent.intent === 'TRAINING_QUESTION'
         ? 'TRAINING'
         : intent.intent === 'NUTRITION_QUESTION' || intent.intent === 'FOOD_DIFFICULTY'
           ? 'NUTRITION'
-          : 'MOTIVATION';
+          : intent.intent === 'HEALTH_QUESTION'
+            ? 'HEALTH'
+            : 'MOTIVATION';
+    const caseDomain =
+      topic === 'NUTRITION' ? 'NUTRITION' : topic === 'HEALTH' ? 'GENERAL' : 'TRAINING';
     // Guardrail L1 de entrada: pergunta que cai numa regra dos profissionais nem chega ao modelo.
     const inputFlags = await this.guardrails.evaluate(text, '');
     // Evidência dos artigos curados (RAG) para dúvida de treino, de nutrição e também de motivação
@@ -746,7 +796,7 @@ export class ConversationOrchestrator {
       await this.openCase(
         userId,
         'NO_APPLICABLE_POLICY',
-        topic === 'NUTRITION' ? 'NUTRITION' : 'TRAINING',
+        caseDomain,
         `Resposta retida por regra de segurança dos profissionais (${[...inputFlags, ...outputFlags].map((f) => f.label).join(', ')}).`,
         'NORMAL',
       );
@@ -756,7 +806,7 @@ export class ConversationOrchestrator {
       await this.openCase(
         userId,
         'NO_APPLICABLE_POLICY',
-        topic === 'NUTRITION' ? 'NUTRITION' : 'TRAINING',
+        caseDomain,
         'Pergunta que exige profissional (medicamento, diagnóstico ou condição clínica).',
         'NORMAL',
       );
@@ -770,14 +820,16 @@ export class ConversationOrchestrator {
     try {
       const hit = await this.forbiddenTopics.evaluate(text);
       if (hit) {
-        await this.openCase(
-          userId,
-          'NO_APPLICABLE_POLICY',
-          'GENERAL',
-          `Mensagem sobre tema marcado como fora do atendimento automático (${hit.label}).`,
-          'NORMAL',
+        // O assunto se encerra aqui: nada é prometido ao aluno e nada vai para a fila da equipe.
+        this.logger.info(
+          { userId, topic: hit.label, event: 'forbidden_topic_redirected' },
+          'tema fora do atendimento: aluno redirecionado ao foco da MOVIVO',
         );
-        return { status: 'ESCALATED', reply: msg.FORBIDDEN_TOPIC_MESSAGE };
+        return {
+          status: 'INFORMED',
+          reply: msg.FORBIDDEN_TOPIC_MESSAGE,
+          intent: 'FORBIDDEN_TOPIC',
+        };
       }
     } catch (err: unknown) {
       if (!(err instanceof ForbiddenTopicsUnavailableError)) throw err;

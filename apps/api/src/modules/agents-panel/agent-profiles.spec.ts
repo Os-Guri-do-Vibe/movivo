@@ -7,7 +7,7 @@ import {
 } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { answerTask, substituteTask } from '../conversation/tasks';
+import { answerTask, specialistAnswerTasks, substituteTask } from '../conversation/tasks';
 import { AgentProfilesService } from './agent-profiles.service';
 import { foodLogTask } from '../nutrition/food-log-task';
 import { coordinatorTask } from '../planning/tasks/coordinator';
@@ -18,6 +18,7 @@ import { runningTask } from '../planning/tasks/running';
 import { strategyTask } from '../planning/tasks/strategy';
 import { strengthTask } from '../planning/tasks/strength';
 import { habitsTask, recoveryTask } from '../progress/analyst-tasks';
+import { cycleCareTask } from '../progress/cycle-care-tasks';
 import { reviewTask } from '../progress/tasks';
 import { commentExamTask, readExamTask } from '../medical/exam-tasks';
 
@@ -38,6 +39,8 @@ const TASK_IDS = new Set(
     habitsTask,
     readExamTask,
     commentExamTask,
+    specialistAnswerTasks.HEALTH,
+    cycleCareTask,
   ].map((t) => t.id),
 );
 

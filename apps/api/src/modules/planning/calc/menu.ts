@@ -8,6 +8,7 @@
 import { z } from 'zod';
 
 import {
+  FOOD_AI_CATEGORY,
   mealSlotSchema,
   mealUnitSchema,
   normalizeFoodName,
@@ -51,6 +52,8 @@ export interface FoodRow {
 }
 
 const EXCLUDED_CATEGORIES = new Set([
+  // Valores estimados pelo agente, ainda sem revisão da equipe: não montam planos.
+  FOOD_AI_CATEGORY,
   'Bebidas (alcoólicas e não alcoólicas)',
   'Produtos açucarados',
   'Miscelâneas',

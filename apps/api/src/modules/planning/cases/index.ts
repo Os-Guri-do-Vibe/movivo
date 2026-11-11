@@ -44,7 +44,6 @@ const NUTRITION_RULES = nutritionRules(NUTRITION_PARAMS);
 /** Regras do híbrido da metodologia padrão publicada (sessão dupla permitida, 1 dia de descanso). */
 const HYBRID_RULES: HybridRules = {
   hoursBetweenHeavyLowerAndIntenseRun: 24,
-  maxIntenseSessionsPerWeek: 3,
   allowTwoSessionsSameDay: true,
   minRestDaysPerWeek: 1,
   acuteChronicMax: null,

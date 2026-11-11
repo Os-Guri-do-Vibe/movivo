@@ -87,10 +87,7 @@ export const studentReports = pgTable(
     checkOneOf('ck_student_reports_kind', t.kind, OBSERVATION_KINDS),
     checkOneOf('ck_student_reports_phase', t.phase, OBSERVATION_PHASES),
     checkOneOf('ck_student_reports_source', t.source, OBSERVATION_SOURCES),
-    check(
-      'ck_student_reports_score',
-      sql`${t.score} is null or ${t.score} between 1 and 5`,
-    ),
+    check('ck_student_reports_score', sql`${t.score} is null or ${t.score} between 1 and 5`),
   ],
 );
 
@@ -185,6 +182,8 @@ export const OUTREACH_KINDS = [
   'SILENCE',
   'COMMITMENT_NUDGE',
   'SPECIALIST_DAILY',
+  /** Lembrete de autocuidado do ciclo menstrual (só com a autorização do ciclo). */
+  'CYCLE_CARE',
 ] as const;
 export type OutreachKind = (typeof OUTREACH_KINDS)[number];
 

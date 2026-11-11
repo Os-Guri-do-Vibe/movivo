@@ -167,6 +167,10 @@ export class ScheduleService {
         0,
         runningRules(running?.parameters, 'INTERMEDIATE').minEasyDaysBetweenQuality ?? 1,
       ),
+      // O plano inteiro decide se é híbrido, não só o que sobrou desta semana.
+      modalities: [
+        ...new Set(remaining.flatMap((r) => r.structure.sessions.map((s) => s.content.modality))),
+      ],
     });
     const unchanged =
       result.dropped.length === 0 &&

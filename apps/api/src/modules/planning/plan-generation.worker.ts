@@ -12,6 +12,7 @@ import { DomainEventHandlers, type DomainEvent } from '../domain-events/domain-e
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import type { PinnedModel } from '../../core/agents/agent-runner';
 import { PlanGenerationService } from './plan-generation.service';
 
 // Sinal de segurança encerrado: a geração inicial volta a valer (a falha tem caminho próprio, `retry`).
@@ -25,6 +26,8 @@ export interface PlanGenerationJob {
    * no banco) ou a regeneração do zero.
    */
   exceptionCaseId?: string;
+  /** Operação (`regenerate-plan`): todos os agentes desta geração num só modelo, sem reserva. */
+  pinnedModel?: PinnedModel;
 }
 
 @Injectable()
@@ -63,18 +66,22 @@ export class PlanGenerationWorker implements OnModuleInit {
       },
     });
     this.workers.create<PlanGenerationJob>(QUEUE.planGeneration, async (job) => {
-      const { userId, triggerEventId, exceptionCaseId } = job.data;
-      const result =
+      const { userId, triggerEventId, exceptionCaseId, pinnedModel } = job.data;
+      const result = await this.service.withPinnedModel(pinnedModel, () =>
         job.name === 'adjust' && exceptionCaseId
-          ? await this.service.adjustFromCase(userId, exceptionCaseId, { triggerEventId })
+          ? this.service.adjustFromCase(userId, exceptionCaseId, { triggerEventId })
           : job.name === 'regenerate' && exceptionCaseId
-            ? await this.service.regenerateFromCase(userId, exceptionCaseId, { triggerEventId })
+            ? this.service.regenerateFromCase(userId, exceptionCaseId, { triggerEventId })
             : job.name === 'retry' && exceptionCaseId
-              ? await this.service.retryFromFailureCase(userId, exceptionCaseId, {
+              ? this.service.retryFromFailureCase(userId, exceptionCaseId, {
                   triggerEventId,
                 })
-              : await this.service.generate(userId, { triggerEventId });
-      this.logger.info({ userId, job: job.name, status: result.status }, 'plano gerado');
+              : this.service.generate(userId, { triggerEventId }),
+      );
+      this.logger.info(
+        { userId, job: job.name, status: result.status, pinnedModel },
+        'plano gerado',
+      );
       return result;
     });
   }

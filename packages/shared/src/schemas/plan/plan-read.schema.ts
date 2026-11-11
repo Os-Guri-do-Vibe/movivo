@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { weekdaySchema } from '../anamnesis.schema';
 import { goalMilestoneSchema, goalStrategySchema } from '../student/goal.schema';
 import { nutritionPlanStructureSchema } from '../nutrition/nutrition.schema';
 import {
@@ -49,6 +50,19 @@ export const planReadSchema = z.object({
           title: z.string(),
           modality: sessionModalitySchema,
           minutes: z.number().int(),
+        }),
+      ),
+      /**
+       * Semana-base: a distribuição fixa dos treinos de segunda a domingo, que se repete toda
+       * semana (dias marcados pelo profissional já incluídos). É o que o PDF mostra; a agenda de
+       * uma semana específica (`upcoming`) pode sair dela, como na primeira semana, que começa no
+       * dia da liberação.
+       */
+      baseWeek: z.array(
+        z.object({
+          weekday: weekdaySchema,
+          slot: daySlotSchema,
+          planSessionKey: z.string(),
         }),
       ),
     })

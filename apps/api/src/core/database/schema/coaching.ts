@@ -179,6 +179,11 @@ export const exceptionCases = pgTable(
     reviewUrgency: varchar('review_urgency', { length: 9 }),
     autoReleaseAt: eventTimestamp('auto_release_at'),
     resolution: jsonb('resolution').$type<Record<string, unknown>>(),
+    /**
+     * Só nas falhas de geração (`DECISION_FAILURE`): a tarefa, as violações e a última saída
+     * reprovada do agente — o que falta para diagnosticar sem reproduzir a chamada ao modelo.
+     */
+    diagnostics: jsonb('diagnostics').$type<Record<string, unknown>>(),
     resolvedAt: eventTimestamp('resolved_at'),
     ...timestampColumns,
   },

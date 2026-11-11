@@ -16,6 +16,7 @@ function setup() {
     adjustFromCase: vi.fn(() => done),
     regenerateFromCase: vi.fn(() => done),
     retryFromFailureCase: vi.fn(() => done),
+    withPinnedModel: vi.fn((_model: unknown, work: () => Promise<unknown>) => work()),
   };
   const worker = new PlanGenerationWorker(
     handlers,
@@ -136,5 +137,20 @@ describe('PlanGenerationWorker', () => {
       triggerEventId: 'evt-1',
     });
     expect(service.generate).not.toHaveBeenCalled();
+  });
+
+  it('job com modelo fixado (operação) roda o retry dentro dele', async () => {
+    const { process, service } = setup();
+    const pinnedModel = { vendor: 'DEEPSEEK' as const, model: 'deepseek-v4-pro' };
+    await process('retry', {
+      userId: 'aluno-1',
+      triggerEventId: null,
+      exceptionCaseId: 'caso-1',
+      pinnedModel,
+    });
+    expect(service.withPinnedModel).toHaveBeenCalledWith(pinnedModel, expect.any(Function));
+    expect(service.retryFromFailureCase).toHaveBeenCalledWith('aluno-1', 'caso-1', {
+      triggerEventId: null,
+    });
   });
 });

@@ -63,12 +63,25 @@ export type ExamCommentInput = z.infer<typeof examCommentInputSchema>;
 
 /** Orientação de remédio, dose ou suspensão nunca sai daqui. */
 const MEDICATION_ADVICE = /\b(dose|dosagem|posologia|suspend|interromp|parar de tomar)/;
+/** A mensagem manda procurar um médico; nunca promete que alguém da MOVIVO vai analisar o exame. */
+const INTERNAL_REVIEW_PROMISE =
+  /\b(medic[oa]|equipe|profissional|profissionais|time)\b[^.]{0,40}\b(movivo|nosso|nossa|daqui)\b[^.]{0,40}\b(vai|vao|ira|irao)\b[^.]{0,20}\b(olhar|analisar|avaliar|ler|revisar|ver)\b|\b(vou|vamos) (encaminhar|passar|mandar)\b[^.]{0,30}\b(equipe|medic[oa]|profissional)/;
 
 export const examCommentValidators: Validator<ExamCommentInput, ExamComment>[] = [
   (_input, output) => outputLanguageViolations(output),
   (_input, output) =>
     MEDICATION_ADVICE.test(fold(output.message))
       ? [{ path: 'message', message: 'não oriente remédio, dose ou suspensão: isso é do médico' }]
+      : [],
+  (_input, output) =>
+    INTERNAL_REVIEW_PROMISE.test(fold(output.message))
+      ? [
+          {
+            path: 'message',
+            message:
+              'não diga que alguém da MOVIVO vai analisar o exame: recomende que o aluno procure uma avaliação médica',
+          },
+        ]
       : [],
   (input, output) => {
     const names = new Set(input.values.map((v) => fold(v.name)));
@@ -111,7 +124,7 @@ export const commentExamTask = defineAgentTask<ExamCommentInput, ExamComment>({
 
 Regras:
 1. "message": português do Brasil, tom próximo e calmo, até 8 frases curtas. Diga o que está dentro da referência do laudo e o que está fora (acima ou abaixo), em linguagem simples. Nunca afirme doença nem diga o que o aluno "tem"; fale do valor ("o TSH veio acima da referência do laboratório").
-2. Para valores fora da referência, recomende levar o exame a uma consulta médica e diga com qual especialidade (ex.: Endocrinologia, Cardiologia, Clínica Médica). Nunca indique, ajuste ou suspenda remédio, dose ou suplemento.
+2. Para valores fora da referência, recomende que o aluno procure uma avaliação médica, leve o exame à consulta e diga com qual especialidade (ex.: Endocrinologia, Cardiologia, Clínica Médica). Nunca diga que um médico ou alguém da equipe da MOVIVO vai olhar, analisar ou avaliar o exame: quem avalia é o médico que o aluno procurar. Nunca indique, ajuste ou suspenda remédio, dose ou suplemento.
 3. Use o Estado do Aluno (idade, sexo, condições e medicamentos que ele já informou) só para dar contexto com cautela, sem tirar conclusões.
 4. "attentionPoints": cada valor fora da referência ou que mereça conversa com o médico, com o nome EXATO do laudo em "marker" e uma nota curta.
 5. "urgency": ROUTINE se tudo está na referência; SOON se há valor fora; URGENT só se algum valor está muito longe da referência a ponto de pedir avaliação no mesmo dia (nesse caso diga na mensagem para procurar atendimento médico hoje).

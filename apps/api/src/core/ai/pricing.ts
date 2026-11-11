@@ -12,7 +12,9 @@ interface Pricing {
 }
 const DEFAULT_PRICING: Pricing = { input: 2.0, cached: 0.5, output: 8.0 };
 const PRICING: Record<string, Pricing> = {
-  'deepseek-v4-pro': { input: 0.435, cached: 0.003625, output: 0.87 },
+  // Snapshot 2026-11-11 (api-docs.deepseek.com/quick_start/pricing): tarifa de PICO, teto de
+  // propósito (fora do pico é metade). O raciocínio (thinking) é cobrado como saída.
+  'deepseek-v4-pro': { input: 1.32, cached: 0.044, output: 3.96 },
   // Snapshot 2026-09-03 (api-docs.deepseek.com/quick_start/pricing) — tarifa de horário
   // de pico (a fora-de-pico é metade); usar o teto de propósito pra nunca subestimar custo.
   'deepseek-v4-flash': { input: 0.44, cached: 0.014, output: 1.32 },

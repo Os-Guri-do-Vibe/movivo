@@ -22,6 +22,7 @@ import { ConversationWorker } from './conversation.worker';
 import { DomainCommands } from './domain-commands.service';
 import { ConversationOrchestrator } from './orchestrator.service';
 import { PhotoConsentRevocationService } from './photo-consent-revocation.service';
+import { RecordUpdateService } from './record-update.service';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { PhotoConsentRevocationService } from './photo-consent-revocation.servic
     MealCoachService,
     MediaRouterService,
     PhotoConsentRevocationService,
+    RecordUpdateService,
   ],
   exports: [ConversationOrchestrator, ConversationStore, DomainCommands, FoodChatService],
 })

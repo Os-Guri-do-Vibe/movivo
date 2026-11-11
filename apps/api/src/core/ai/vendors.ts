@@ -177,10 +177,13 @@ export class DeepSeekVendor extends BaseVendor {
       {
         model: request.model,
         max_tokens: request.maxOutputTokens,
-        temperature: request.temperature,
-        // O modo de raciocínio do DeepSeek não converge para JSON fechado nos prompts longos
-        // da MOVIVO: fica desligado.
-        thinking: { type: 'disabled' },
+        // O modo de raciocínio do DeepSeek não convergia para JSON fechado nos prompts longos
+        // da MOVIVO: fica desligado, salvo numa rota fixada pela operação com esforço explícito.
+        // Com ele ligado a API ignora `temperature`, e o raciocínio conta como saída
+        // (`completion_tokens`, cobrado e limitado por `max_tokens`).
+        ...(request.reasoningEffort
+          ? { thinking: { type: 'enabled' }, reasoning_effort: request.reasoningEffort }
+          : { temperature: request.temperature, thinking: { type: 'disabled' } }),
         ...(request.json ? { response_format: { type: 'json_object' } } : {}),
         messages: chatCompletionsMessages(request.system, request.messages),
       },

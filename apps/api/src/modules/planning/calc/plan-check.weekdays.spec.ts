@@ -31,7 +31,6 @@ const context = (over: Partial<PlanCheckContext> = {}): PlanCheckContext => ({
   externalFixedDays: {},
   focus: [],
   rules: {
-    maxIntenseSessionsPerWeek: null,
     minRestDaysPerWeek: 1,
     allowTwoSessionsSameDay: false,
     hoursBetweenHeavyLowerAndIntenseRun: null,

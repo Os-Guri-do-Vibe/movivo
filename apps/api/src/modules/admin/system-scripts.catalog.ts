@@ -276,6 +276,17 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: OPERATOR_ONLY,
   },
   {
+    id: 'regenerate-plan',
+    kind: 'TERMINAL',
+    name: 'Regerar protocolo num modelo fixado',
+    description:
+      'Encerra um caso de falha de geração (com auditoria) e regera o protocolo do aluno com todos os agentes de planejamento num único modelo, sem reserva de outro fornecedor, opcionalmente com raciocínio (thinking) ligado. O job roda uma vez só, para um timeout não multiplicar o custo.',
+    file: 'apps/api/src/scripts/regenerate-plan.ts',
+    command:
+      'docker compose exec api node --enable-source-maps dist/scripts/regenerate-plan.js --user <aluno> --case <caso> --actor <staff> --vendor DEEPSEEK --model deepseek-v4-pro [--reasoning-effort high]',
+    notRunnableReason: ARGUMENT_REQUIRED,
+  },
+  {
     id: 'build-default-knowledge',
     kind: 'TERMINAL',
     name: 'Gerar os artigos padrão da Base de Conhecimento',

@@ -700,15 +700,6 @@ const HYBRID: DomainSpec = {
           plausible: [6, 48],
           example: 24,
         },
-        maxIntenseSessionsPerWeek: {
-          kind: 'number',
-          label: 'Máximo de sessões intensas por semana (todas as modalidades)',
-          hint: 'Conta força pesada, corrida de qualidade, HYROX e esporte intenso.',
-          min: 1,
-          max: 8,
-          plausible: [2, 5],
-          example: 4,
-        },
         allowTwoSessionsSameDay: {
           kind: 'boolean',
           label: 'Permitir duas sessões no mesmo dia',

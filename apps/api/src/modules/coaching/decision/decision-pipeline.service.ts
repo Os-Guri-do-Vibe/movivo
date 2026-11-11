@@ -276,6 +276,7 @@ export class DecisionPipeline {
       priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
       /** Caso da Fila do Profissional sem proposta (ex.: troca sem equivalente seguro). */
       mandatoryReview?: boolean;
+      diagnostics?: Record<string, unknown>;
     },
   ): Promise<string> {
     const mandatory = input.kind === 'DECISION_FAILURE' || input.mandatoryReview === true;
@@ -290,6 +291,7 @@ export class DecisionPipeline {
         // Geração que falhou: o aluno não recebe nada até um profissional refazer (revisão obrigatória).
         reviewUrgency: mandatory ? 'MANDATORY' : null,
         summary: input.summary.slice(0, 1_500),
+        diagnostics: input.diagnostics ?? null,
       })
       .returning({ id: exceptionCases.id });
     if (!exception) throw new Error('falha ao abrir o caso de exceção');
@@ -315,6 +317,8 @@ export class DecisionPipeline {
       summary: string;
       subject: Record<string, string>;
       priority?: 'LOW' | 'NORMAL' | 'HIGH';
+      /** Tarefa, violações e saída reprovada do agente (ver `exception_cases.diagnostics`). */
+      diagnostics?: Record<string, unknown>;
     },
   ): Promise<string> {
     return this.openCase(tx, { ...input, kind: 'DECISION_FAILURE' });

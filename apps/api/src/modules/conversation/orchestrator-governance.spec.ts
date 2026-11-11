@@ -13,6 +13,7 @@ function build(overrides: { forbidden?: unknown; faq?: unknown }) {
   };
   orchestrator.faq = overrides.faq ?? { match: vi.fn().mockResolvedValue(null) };
   orchestrator.openCase = openCase;
+  orchestrator.logger = { info: vi.fn() };
   const governance = (text: string) =>
     (
       orchestrator as unknown as {
@@ -23,17 +24,20 @@ function build(overrides: { forbidden?: unknown; faq?: unknown }) {
 }
 
 describe('governança do atendimento', () => {
-  it('tema proibido encerra a conversa e abre caso para a equipe', async () => {
+  it('tema proibido encerra o assunto e redireciona ao foco da MOVIVO, sem caso para a equipe', async () => {
     const { governance, openCase } = build({
       forbidden: {
         evaluate: vi.fn().mockResolvedValue({ topicKey: 't', label: 'Suplementos', version: 1 }),
       },
     });
     expect(await governance('qual creatina comprar?')).toEqual({
-      status: 'ESCALATED',
+      status: 'INFORMED',
       reply: msg.FORBIDDEN_TOPIC_MESSAGE,
+      intent: 'FORBIDDEN_TOPIC',
     });
-    expect(openCase).toHaveBeenCalledOnce();
+    expect(msg.FORBIDDEN_TOPIC_MESSAGE).toMatch(/treino.*alimentação.*objetivos/);
+    expect(msg.FORBIDDEN_TOPIC_MESSAGE).not.toMatch(/profissional|equipe/);
+    expect(openCase).not.toHaveBeenCalled();
   });
 
   it('sem a lista de temas, responde de forma segura e não gera nada', async () => {

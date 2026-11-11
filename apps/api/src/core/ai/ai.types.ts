@@ -36,7 +36,15 @@ export interface TierRoute {
   temperature: number;
   /** Modelo aceita imagem e PDF (obrigatório para o tier VISION). */
   vision: boolean;
+  /**
+   * Raciocínio do modelo (thinking) com este esforço. Ausente = desligado. Só vem de uma rota
+   * fixada pela operação (`PinnedModel`); as rotas dos tiers não ligam.
+   */
+  reasoningEffort?: ReasoningEffort;
 }
+
+export type ReasoningEffort = 'low' | 'high' | 'max';
+export const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'high', 'max'];
 
 export interface GatewayRequest {
   tier: ModelTier;
@@ -86,6 +94,8 @@ export interface VendorRequest {
   maxOutputTokens: number;
   temperature: number;
   json: boolean;
+  /** Liga o raciocínio (thinking) do modelo com este esforço; ausente = desligado. */
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface VendorResult {

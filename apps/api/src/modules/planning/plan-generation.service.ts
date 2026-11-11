@@ -8,6 +8,8 @@
  * só acontece se o motor de políticas autorizar (senão abre um caso para a equipe). O que muda
  * o estado do aluno roda numa transação só, com os eventos no outbox.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -26,7 +28,13 @@ import {
 } from '@movivo/shared';
 
 import type { AgentContextSources } from '../../core/agents/agent-context';
-import { AgentRunner, AgentTaskError, type AgentRunResult } from '../../core/agents/agent-runner';
+import {
+  AgentRunner,
+  AgentTaskError,
+  extractJson,
+  type AgentRunResult,
+  type PinnedModel,
+} from '../../core/agents/agent-runner';
 import type { AgentTask, StateSlice } from '../../core/agents/agent-task';
 import {
   coachingProposals,
@@ -133,6 +141,34 @@ export function physiqueNotesOf(view: StateView): string[] {
     : [`Avaliação postural por foto (leitura da IA, para auditoria): ${lines.join('; ')}.`];
 }
 
+/** Teto da saída reprovada guardada no caso (um bloco de treino completo fica bem abaixo). */
+const MAX_REJECTED_OUTPUT_CHARS = 200_000;
+
+/**
+ * O que o caso de falha guarda para o diagnóstico: tarefa, todas as violações e a última saída
+ * reprovada (como JSON quando der, senão o texto cru, cortado no teto).
+ */
+export function failureDiagnostics(error: AgentTaskError): Record<string, unknown> {
+  const text = error.rejectedOutput;
+  let rejectedOutput: unknown = null;
+  if (text !== null) {
+    try {
+      rejectedOutput = extractJson(text);
+    } catch {
+      rejectedOutput = text.slice(0, MAX_REJECTED_OUTPUT_CHARS);
+    }
+  }
+  if (JSON.stringify(rejectedOutput).length > MAX_REJECTED_OUTPUT_CHARS) {
+    rejectedOutput = (text ?? '').slice(0, MAX_REJECTED_OUTPUT_CHARS);
+  }
+  return {
+    taskId: error.taskId,
+    violations: error.violations,
+    modelRunIds: error.modelRunIds,
+    rejectedOutput,
+  };
+}
+
 /** Data de hoje no fuso do aluno (padrão: São Paulo). */
 export function todayIn(timezone: string | null, now: Date = new Date()): string {
   try {
@@ -164,6 +200,18 @@ export class PlanGenerationService {
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(PlanGenerationService.name);
+  }
+
+  /** Modelo fixado pela operação para os agentes desta geração (ver `withPinnedModel`). */
+  private readonly pinned = new AsyncLocalStorage<PinnedModel>();
+
+  /**
+   * Roda `work` com todos os agentes de planejamento num único modelo, sem reserva de outro
+   * fornecedor (ex.: regerar um protocolo só no DeepSeek). Vale só dentro desta chamada: outros
+   * jobs em paralelo seguem a configuração do tier. A avaliação por foto (visão) não muda.
+   */
+  withPinnedModel<T>(model: PinnedModel | undefined, work: () => Promise<T>): Promise<T> {
+    return model ? this.pinned.run(model, work) : work();
   }
 
   async generate(
@@ -485,6 +533,7 @@ export class PlanGenerationService {
               ...(redo?.sourceCaseId ? { sourceCaseId: redo.sourceCaseId } : {}),
             },
             priority: 'HIGH',
+            ...(error instanceof AgentTaskError ? { diagnostics: failureDiagnostics(error) } : {}),
           }),
         );
         await this.outbox.flushSoon();
@@ -507,7 +556,12 @@ export class PlanGenerationService {
     userId: string,
     input: I,
   ): Promise<AgentRunResult<O>> {
-    return this.runner.run(task, input, { userId, sources: this.sources(userId) });
+    const pinnedModel = this.pinned.getStore();
+    return this.runner.run(task, input, {
+      userId,
+      sources: this.sources(userId),
+      ...(pinnedModel ? { pinnedModel } : {}),
+    });
   }
 
   private async readState(userId: string, now: Date) {

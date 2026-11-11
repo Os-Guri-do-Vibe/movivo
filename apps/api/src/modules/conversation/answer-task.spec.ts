@@ -5,6 +5,7 @@ import {
   answerEvidenceCases,
   answerTask,
   classifyTask,
+  NUTRITION_ANSWER_MAX_CHARS,
   recipeCases,
   specialistAnswerTasks,
   type AnswerOutput,
@@ -63,7 +64,10 @@ describe('conversation.answer_question · entrada com evidência', () => {
     expect(instructions).toMatch(/restrição ou alergia/);
     expect(classifyTask.instructions).toMatch(/RECEITA ou de MODO DE PREPARO/);
     const reply = `${'a'.repeat(1_000)}`;
-    const tooLong = { reply: 'a'.repeat(1_150), needsProfessional: false };
+    const tooLong = {
+      reply: 'a'.repeat(NUTRITION_ANSWER_MAX_CHARS + 50),
+      needsProfessional: false,
+    };
     const fits = { reply, needsProfessional: false };
     const violationsOf = async (output: typeof fits, task = specialistAnswerTasks.NUTRITION) => {
       const found = [];
@@ -79,10 +83,33 @@ describe('conversation.answer_question · entrada com evidência', () => {
       return found;
     };
     expect(validators.length).toBeGreaterThan(0);
-    // Receita cabe em ~1.100 caracteres; as demais respostas continuam em ~900.
+    // Nutrição não tem limite de frases (só o teto do WhatsApp); as demais continuam em ~900.
     expect(await violationsOf(fits)).toEqual([]);
     expect((await violationsOf(tooLong)).length).toBeGreaterThan(0);
     expect((await violationsOf(fits, specialistAnswerTasks.TRAINING)).length).toBeGreaterThan(0);
+  });
+
+  it('dúvida de nutrição não tem limite de frases; os outros especialistas seguem curtos', () => {
+    const { NUTRITION, TRAINING, MOTIVATION, HEALTH } = specialistAnswerTasks;
+    expect(NUTRITION.instructions).toMatch(/NÃO há limite de frases/);
+    expect(NUTRITION.instructions).not.toMatch(/No máximo 3 ou 4 frases curtas/);
+    for (const task of [TRAINING, MOTIVATION, HEALTH]) {
+      expect(task.instructions).toMatch(/No máximo 3 ou 4 frases curtas/);
+    }
+    expect(
+      NUTRITION.output.safeParse({ reply: 'a'.repeat(3_000), needsProfessional: false }).success,
+    ).toBe(true);
+  });
+
+  it('há especialista para saúde, e treino e hábitos cobrem além do plano', () => {
+    const { TRAINING, MOTIVATION, HEALTH } = specialistAnswerTasks;
+    expect(HEALTH.id).toBe('medical.answer_question');
+    expect(HEALTH.instructions).toMatch(/nunca interprete sintoma ou exame/);
+    expect(HEALTH.instructions).toMatch(/evitar ou planejar gravidez/);
+    expect(TRAINING.instructions).toMatch(/QUALQUER modalidade/);
+    expect(MOTIVATION.instructions).toMatch(/comportamento, hábitos, rotina/);
+    expect(classifyTask.instructions).toMatch(/HEALTH_QUESTION/);
+    expect(classifyTask.instructions).toMatch(/há especialista para ela/);
   });
 
   it('os casos de receita têm entrada válida para o nutricionista e um é crítico de segurança', () => {

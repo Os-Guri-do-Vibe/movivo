@@ -16,6 +16,7 @@ import { todayIn } from '../planning/plan-generation.service';
 import { MemoryCuratorService } from './memory-curator.service';
 import { CareScheduler } from './care.scheduler';
 import { CareService } from './care.service';
+import { CycleCareService } from './cycle-care.service';
 import { MealRoutineService } from './meal-routine.service';
 import { MessageQualityService } from './message-quality.service';
 import { SpecialistDailyService } from './specialist-daily.service';
@@ -48,6 +49,7 @@ export class FollowUpWorker implements OnModuleInit {
     private readonly snapshots: SessionSnapshotService,
     private readonly care: CareService,
     private readonly careScan: CareScheduler,
+    private readonly cycleCare: CycleCareService,
     private readonly quality: MessageQualityService,
     private readonly store: ConversationStore,
     private readonly logger: PinoLogger,
@@ -86,7 +88,7 @@ export class FollowUpWorker implements OnModuleInit {
       if (data.kind === 'QUALITY_REVIEW') return this.quality.review(data);
       if (data.kind === 'CARE') {
         return data.task === 'DAILY'
-          ? this.care.daily(data.userId)
+          ? this.dailyCare(data.userId)
           : data.task === 'NIGHTLY'
             ? this.care.nightly(data.userId)
             : this.care.closeDigest(data.userId);
@@ -141,6 +143,22 @@ export class FollowUpWorker implements OnModuleInit {
   }
 
   /** Dor vai para o especialista de recuperação; treino sem queixa recebe o retorno técnico. */
+  /**
+   * Cuidado das 11:00. O lembrete do ciclo vem primeiro porque tem data certa (a janela de cada
+   * marco dura poucos dias); se ele usar o contato do dia, a escada de silêncio e o lembrete do
+   * combinado esperam o dia seguinte, pelo porteiro de sempre. Falha no ciclo não derruba o resto.
+   */
+  private async dailyCare(userId: string) {
+    let cycle: Awaited<ReturnType<CycleCareService['run']>> | { status: 'FAILED' };
+    try {
+      cycle = await this.cycleCare.run(userId);
+    } catch (err: unknown) {
+      this.logger.warn({ userId, err, event: 'cycle_care_failed' }, 'cuidado do ciclo falhou');
+      cycle = { status: 'FAILED' };
+    }
+    return { cycle, care: await this.care.daily(userId) };
+  }
+
   private async onSessionExecuted(event: DomainEvent): Promise<void> {
     const { executionId, painCount, status } = event.payload;
     if (!event.userId || typeof executionId !== 'string') return;

@@ -187,13 +187,39 @@ export type NutrientsPer100g = z.infer<typeof nutrientsPer100gSchema>;
 export const foodLogSourceSchema = z.enum(['TEXT', 'PHOTO', 'MANUAL', 'AUDIO']);
 export type FoodLogSource = z.infer<typeof foodLogSourceSchema>;
 
-/** Item de uma refeição registrada. `foodItemId` nulo = alimento não encontrado na base. */
+/**
+ * Alimentos que o nutricionista de IA incluiu na base quando a TACO não tinha: entram como
+ * complemento (`origin`) "IA", numa categoria própria. Valem para registrar e consultar refeições,
+ * mas não montam planos alimentares enquanto a equipe não revisar o valor.
+ */
+export const FOOD_AI_ORIGIN = 'IA';
+export const FOOD_AI_CATEGORY = 'Estimados pelo agente';
+
+/**
+ * Composição estimada (por 100 g) de um alimento que a base não tem. É estimativa do
+ * nutricionista de IA, validada pelo código (energia coerente com os macros), e sempre aparece
+ * para o aluno como estimativa.
+ */
+export const estimatedNutrientsSchema = z.object({
+  energyKcal: z.number().min(0).max(950),
+  proteinG: z.number().min(0).max(100),
+  carbsG: z.number().min(0).max(100),
+  fatG: z.number().min(0).max(100),
+  fiberG: z.number().min(0).max(100),
+});
+export type EstimatedNutrients = z.infer<typeof estimatedNutrientsSchema>;
+
+/**
+ * Item de uma refeição registrada. `foodItemId` nulo = alimento não encontrado na base; nesse
+ * caso `estimatedPer100g` traz a composição estimada que entra nos totais.
+ */
 export const foodLogItemSchema = z.object({
   foodItemId: z.uuid().nullable(),
   label: z.string().trim().min(1).max(120),
   grams: z.number().min(1).max(3_000),
   /** Como a porção foi obtida: informada, estimada pela foto ou medida caseira convertida. */
   portionSource: z.enum(['DECLARED', 'ESTIMATED', 'HOUSEHOLD_MEASURE']),
+  estimatedPer100g: estimatedNutrientsSchema.optional(),
 });
 export type FoodLogItem = z.infer<typeof foodLogItemSchema>;
 
@@ -205,7 +231,9 @@ export const nutrientTotalsSchema = z.object({
   fatG: z.number().min(0),
   fiberG: z.number().min(0),
   micros: z.record(z.string(), z.number().min(0)),
-  /** Itens sem correspondência na base (os totais ficam subestimados). */
+  /** Itens sem correspondência na base e sem estimativa (os totais ficam subestimados). */
   unmatchedItems: z.number().int().min(0),
+  /** Itens fora da base que entraram nos totais por estimativa. */
+  estimatedItems: z.number().int().min(0).optional(),
 });
 export type NutrientTotals = z.infer<typeof nutrientTotalsSchema>;

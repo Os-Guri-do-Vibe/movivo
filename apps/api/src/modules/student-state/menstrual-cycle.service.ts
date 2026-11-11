@@ -1,7 +1,9 @@
 /**
- * Registro do ciclo menstrual pelo WhatsApp: autorização própria (`AUTORIZO CICLO`), registro do
- * início ("menstruei hoje") e revogação com apagamento (`REVOGAR CICLO`). Tudo determinístico:
- * nenhuma dessas mensagens passa pelo modelo. Datas cifradas em `student_health_records`.
+ * Acompanhamento do ciclo menstrual pelo WhatsApp: a aluna pede para começar ("quero acompanhar
+ * meu ciclo") ou conta que menstruou, autoriza (`AUTORIZO CICLO`), registra cada início
+ * ("menstruei hoje") e para quando quiser, com apagamento (`REVOGAR CICLO`). Tudo determinístico:
+ * nenhuma dessas mensagens passa pelo modelo. Datas cifradas em `student_health_records`. Os
+ * lembretes de autocuidado ao longo do ciclo saem do `CycleCareService`.
  */
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -129,6 +131,28 @@ export class MenstrualCycleService implements OnModuleInit, OnModuleDestroy {
     // Sem consentimento de saúde não há registro: o gate do WhatsApp responde depois.
     if (!(await this.health.hasActiveForUser(userId))) return false;
 
+    if (command.kind === 'STOP_HINT') {
+      // Parar apaga dados: só a frase exata faz isso. Aqui a aluna aprende qual é.
+      const active = await this.db.runAsUser(userId, 'USER', (tx) => hasCycleConsent(tx, userId));
+      await this.reply(
+        userId,
+        messageKey,
+        'CONSENT_STATUS',
+        active ? STOP_HINT_MESSAGE : NOT_ACTIVE_MESSAGE,
+      );
+      return true;
+    }
+    if (command.kind === 'START') {
+      const active = await this.db.runAsUser(userId, 'USER', (tx) => hasCycleConsent(tx, userId));
+      await this.reply(
+        userId,
+        messageKey,
+        'CONSENT_STATUS',
+        active ? ALREADY_ACTIVE_MESSAGE : CONSENT_REQUEST_MESSAGE,
+      );
+      return true;
+    }
+
     if (command.kind === 'AUTHORIZE') {
       await this.db.runAsUser(userId, 'USER', (tx) =>
         tx.execute(
@@ -224,19 +248,28 @@ export class MenstrualCycleService implements OnModuleInit, OnModuleDestroy {
 }
 
 const REVOKED_MESSAGE =
-  'Registro do ciclo desativado. As datas que você tinha registrado foram apagadas e não registramos mais nada sobre o seu ciclo.';
+  'Acompanhamento do ciclo desativado. As datas que você tinha registrado foram apagadas, os lembretes pararam e não registramos mais nada sobre o seu ciclo. Se quiser voltar, é só me dizer "quero acompanhar meu ciclo".';
 
 const CONSENT_REQUEST_MESSAGE = [
-  `Posso registrar o início da sua menstruação para adaptar intensidade, recuperação e alimentação ao que você sentir. Antes, preciso da sua autorização.\n\n*${CONSENT.title}*\n\n${CONSENT.body.map((p) => p.replaceAll('**', '*')).join('\n\n')}`,
+  `Posso acompanhar o seu ciclo menstrual: você me conta quando a menstruação começa, eu adapto intensidade, recuperação e alimentação ao que você sentir e te mando lembretes de autocuidado ao longo do ciclo. Antes, preciso da sua autorização.\n\n*${CONSENT.title}*\n\n${CONSENT.body.map((p) => p.replaceAll('**', '*')).join('\n\n')}`,
   `${CONSENT.label}\n\nSe estiver de acordo, responda exatamente: *${CYCLE_AUTHORIZE_PHRASE}*`,
 ].join('\n---\n');
 
+const ALREADY_ACTIVE_MESSAGE = `O acompanhamento do seu ciclo já está ativo. Sempre que a menstruação começar, é só me contar (por exemplo: "menstruei hoje"). Para parar e apagar os registros, envie *${CYCLE_REVOKE_PHRASE}*.`;
+
+const STOP_HINT_MESSAGE = `Para parar o acompanhamento do ciclo, envie exatamente *${CYCLE_REVOKE_PHRASE}*. Isso apaga as datas registradas e interrompe os lembretes. Se preferir manter, não precisa fazer nada.`;
+
+const NOT_ACTIVE_MESSAGE =
+  'O acompanhamento do ciclo não está ativo na sua conta, então não há lembretes nem registros para parar.';
+
 function authorizedMessage(logged: string | null): string {
   return [
-    'Registro do ciclo ativado.',
-    logged ? `Já anotei o início da menstruação em ${ddmm(logged)}.` : null,
-    'Sempre que a menstruação começar, é só me contar (por exemplo: "menstruei hoje"). Se sentir cólica, cansaço ou outro desconforto, me conta que a gente adapta o treino do dia.',
-    `Para desativar e apagar os registros, envie *${CYCLE_REVOKE_PHRASE}*.`,
+    'Acompanhamento do ciclo ativado. 💚',
+    logged
+      ? `Já anotei o início da menstruação em ${ddmm(logged)}.`
+      : 'Para eu começar, me conta quando veio a sua última menstruação (por exemplo: "menstruei dia 28" ou "menstruei hoje").',
+    'Sempre que a menstruação começar, é só me contar. Com as datas, eu te aviso quando ela estiver perto de chegar, da fase em que a TPM é mais comum e da janela fértil estimada, sempre com dicas de autocuidado. Se sentir cólica, cansaço ou outro desconforto, me conta que a gente adapta o treino do dia.',
+    `Para parar e apagar os registros, envie *${CYCLE_REVOKE_PHRASE}*.`,
   ]
     .filter(Boolean)
     .join('\n\n');

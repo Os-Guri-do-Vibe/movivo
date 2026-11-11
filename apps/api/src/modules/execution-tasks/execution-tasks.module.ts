@@ -15,6 +15,12 @@ import {
   substituteTask,
 } from '../conversation/tasks';
 import { foodLogCases, foodLogChecks, foodLogTask } from '../nutrition/food-log-task';
+import {
+  foodResolveCases,
+  foodResolveChecks,
+  foodResolveTask,
+} from '../nutrition/food-resolve-task';
+import { recordUpdateCases, recordUpdateTask } from '../conversation/record-update-task';
 import { commentExamCases, commentExamTask, readExamTask } from '../medical/exam-tasks';
 import { habitsCases, habitsTask, recoveryCases, recoveryTask } from '../progress/analyst-tasks';
 import { trainingFollowUpTask, trainingTalkTask } from '../progress/training-follow-up-tasks';
@@ -22,6 +28,7 @@ import { nutritionFollowUpTask, nutritionTalkTask } from '../progress/nutrition-
 import { cycleReviewTask, cycleWrapUpTask } from '../reassessment/reassessment-tasks';
 import { photoComparisonTask } from '../reassessment/photo-tasks';
 import { memoryCurationTask } from '../progress/memory-tasks';
+import { cycleCareCases, cycleCareTask } from '../progress/cycle-care-tasks';
 import { followUpCases } from '../progress/follow-up-cases';
 import { qualityReviewTask } from '../progress/message-quality-tasks';
 import {
@@ -78,6 +85,8 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(loggingGapPlanTask, []);
     this.registry.register(loggingGapMessageTask, []);
     this.registry.register(foodLogTask, foodLogCases, foodLogChecks);
+    this.registry.register(foodResolveTask, foodResolveCases, foodResolveChecks);
+    this.registry.register(recordUpdateTask, recordUpdateCases);
     this.registry.register(classifyTask, classifyCases);
     this.registry.register(answerTask, [...answerCases, ...answerEvidenceCases]);
     for (const task of Object.values(specialistAnswerTasks)) {
@@ -116,5 +125,6 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(nutritionTalkTask, []);
     this.registry.register(readExamTask, []);
     this.registry.register(commentExamTask, commentExamCases);
+    this.registry.register(cycleCareTask, cycleCareCases);
   }
 }

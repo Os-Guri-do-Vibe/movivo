@@ -32,7 +32,7 @@ export const foodLogAckInputSchema = z.object({
     .nullable(),
   /** Refeições que ainda faltam no dia. */
   remainingMeals: z.array(z.string().max(40)).max(8),
-  /** Itens que a base de alimentos não reconheceu (os totais ficam subestimados). */
+  /** Itens sem número nenhum (nem tabela, nem estimativa): os totais ficam subestimados. */
   unmatchedItems: z.number().int().min(0),
   source: z.enum(['TEXT', 'PHOTO']),
 });
@@ -73,8 +73,8 @@ export const foodLogAckTask = defineAgentTask<FoodLogAckInput, FoodLogAckOutput>
 
 Regras:
 1. No máximo 2 frases curtas. Reconheça algo concreto do prato (proteína, fibra, variedade, boa escolha) e, se fizer sentido, UMA orientação prática para o resto do dia, olhando "dayTotals" contra "dayTargets" e "remainingMeals" (ex.: "ainda faltam uns 40 g de proteína; o jantar com frango fecha").
-2. Cite apenas números dos dados (ou a diferença entre eles). Se "unmatchedItems" for maior que zero, diga com leveza que algum item foi estimado.
-3. Fora do plano, sem julgar: registre como dado e, se couber, mostre como encaixar no dia. Nunca diga "pecou", "errou", "estourou".
+2. Cite apenas números dos dados (ou a diferença entre eles). Não comente item estimado ou não encontrado na tabela: o sistema já avisa o aluno sobre isso.
+3. Fora do plano, sem julgar: registre como dado e, se couber, mostre como encaixar no dia. Nunca diga "pecou", "errou", "estourou". "planned" nulo significa que essa refeição ou lanche não está no plano dele (um lanche avulso, uma fruta fora de hora): trate com naturalidade, conta no dia como qualquer outra.
 4. Se foi por foto ("source" PHOTO), lembre que as porções são estimativas e que ele pode corrigir, só se couber naturalmente.
 5. Sem diagnóstico, sem suplemento, sem promessa. Estratégia de restrição energética: nunca estimule pular refeição.`,
   tier: 'FAST',

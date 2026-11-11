@@ -94,7 +94,9 @@ function DraftReview({
               {item.matchedName ?? item.label}
               {item.foodItemId === null && (
                 <span className="ml-2 text-label text-muted-foreground">
-                  (sem correspondência na tabela)
+                  {item.estimatedPer100g
+                    ? '(fora da tabela: valores estimados)'
+                    : '(sem correspondência na tabela)'}
                 </span>
               )}
             </span>

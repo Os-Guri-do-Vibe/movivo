@@ -55,7 +55,11 @@ const FAILED_MESSAGE =
   'Não consegui analisar o seu exame agora. Pode mandar de novo daqui a pouco, por favor?';
 const DISCLAIMER =
   'Essa é uma leitura inicial e não substitui a consulta médica: leve o exame ao seu médico.';
-const DOCTOR_WILL_READ = 'O médico da equipe MOVIVO também vai olhar o seu exame.';
+/** Com ponto de atenção, a orientação é procurar um médico de fora: ninguém da equipe é prometido. */
+export function seekDoctorMessage(specialties: readonly string[]): string {
+  const where = specialties.length > 0 ? ` (${specialties.join(' ou ')})` : '';
+  return `Essa é uma leitura inicial e não substitui a consulta médica. Como há pontos que merecem atenção, recomendo marcar uma avaliação médica${where} e levar este exame.`;
+}
 
 const decode = async <T>(
   cipher: HealthCipherService,
@@ -246,10 +250,9 @@ export class MedicalExamService implements OnModuleInit, OnModuleDestroy {
     await this.reply(
       userId,
       `exam-done-${examId}`,
-      [
-        comment.message,
-        [DISCLAIMER, needsDoctor ? DOCTOR_WILL_READ : null].filter(Boolean).join(' '),
-      ].join(WHATSAPP_BUBBLE_SEPARATOR),
+      [comment.message, needsDoctor ? seekDoctorMessage(comment.specialties) : DISCLAIMER].join(
+        WHATSAPP_BUBBLE_SEPARATOR,
+      ),
     );
     this.logger.info(
       { event: 'medical_exam_commented', userId, urgency: comment.urgency },

@@ -246,6 +246,7 @@ export class ModelGateway {
             maxOutputTokens: route.maxOutputTokens,
             temperature: route.temperature,
             json: request.json,
+            ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}),
           },
           controller.signal,
         );

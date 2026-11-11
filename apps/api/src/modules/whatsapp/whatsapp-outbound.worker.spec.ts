@@ -311,30 +311,35 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
-  it('confirmação: três bolhas saudando pelo primeiro nome, citando os dois protocolos, e marca como enviado', async () => {
+  it('confirmação: uma bolha só saudando pelo primeiro nome, citando treino e alimentação, e marca como enviado', async () => {
     const { worker, send, redis } = makeWorker();
 
     const result = await worker.process(job({ type: 'CONFIRMATION' }));
 
     expect(result).toEqual({ status: 'SENT' });
-    expect(send).toHaveBeenCalledTimes(3);
-    expect(send.mock.calls[0]?.[0].text).toMatch(/^Oi, Ana! Recebemos suas respostas 💚/);
-    expect(send.mock.calls[1]?.[0].text).toMatch(/treino.*alimentar/);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0].text).toMatch(
+      /^Olá, Ana! Suas respostas foram recebidas com sucesso\. 💚/,
+    );
+    expect(send.mock.calls[0]?.[0].text).toMatch(/treino.*alimentar/s);
     expect(redis.set).toHaveBeenCalled();
   });
 
   it('confirmação sem nome salvo: saúda genericamente', async () => {
     const { worker, send } = makeWorker({ name: null });
     await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(send.mock.calls[0]?.[0].text).toMatch(/^Oi! Recebemos suas respostas 💚/);
+    expect(send.mock.calls[0]?.[0].text).toMatch(
+      /^Olá! Suas respostas foram recebidas com sucesso\. 💚/,
+    );
   });
 
   it('variante de cuidado é enviada para PAR-Q de risco', async () => {
     const { worker, send } = makeWorker();
     await worker.process(job({ type: 'CONFIRMATION_CARE' }));
+    expect(send).toHaveBeenCalledTimes(1);
     const texts = send.mock.calls.map((call) => call[0].text).join('\n');
-    expect(texts).toMatch(/CREF/);
-    expect(texts).toMatch(/treino e alimentar/);
+    expect(texts).toMatch(/um profissional vai revisar/);
+    expect(texts).toMatch(/liberar seus protocolos\./);
   });
 
   it('CONVERSATION_MESSAGE: envia o texto em bolhas, com botões de feedback só na última', async () => {
@@ -453,8 +458,7 @@ describe('WhatsappOutboundWorker.process', () => {
 
     await worker.process(job({ type: 'CONFIRMATION' }));
 
-    // Uma linha do histórico por bolha enviada (a confirmação tem três).
-    expect(inserted).toHaveLength(3);
+    expect(inserted).toHaveLength(1);
     expect(inserted[0]?.table).toBe(conversations);
     expect(inserted[0]?.values).toMatchObject({
       userId: USER_ID,
@@ -491,7 +495,7 @@ describe('WhatsappOutboundWorker.process', () => {
     const result = await worker.process(job({ type: 'CONFIRMATION' }));
 
     expect(result).toEqual({ status: 'SENT' });
-    expect(send).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalled();
     expect(emitMessage).not.toHaveBeenCalled();
   });

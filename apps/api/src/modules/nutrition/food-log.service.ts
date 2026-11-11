@@ -5,21 +5,24 @@
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { PinoLogger } from 'nestjs-pino';
 
-import type {
-  ConfirmFoodLogRequest,
-  FoodDay,
-  FoodDraftItem,
-  FoodLogDraft,
-  FoodLogItem,
-  InterpretFoodTextRequest,
-  ManualFoodLogRequest,
-  MealSlot,
-  NutrientTotals,
-  NutritionPlanStructure,
+import {
+  FOOD_AI_CATEGORY,
+  type ConfirmFoodLogRequest,
+  type EstimatedNutrients,
+  type FoodDay,
+  type FoodDraftItem,
+  type FoodLogDraft,
+  type FoodLogItem,
+  type InterpretFoodTextRequest,
+  type ManualFoodLogRequest,
+  type MealSlot,
+  type NutrientTotals,
+  type NutritionPlanStructure,
 } from '@movivo/shared';
 
-import { AgentRunner } from '../../core/agents/agent-runner';
+import { AgentRunner, AgentTaskError } from '../../core/agents/agent-runner';
 import {
   foodLogs,
   nutritionPlans,
@@ -28,12 +31,13 @@ import {
   users,
 } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { FoodCatalogService } from '../catalog/foods/food-catalog.service';
+import { FoodCatalogService, type FoodMatch } from '../catalog/foods/food-catalog.service';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { OutboxRelay } from '../domain-events/outbox-relay';
 import { localParts } from '../training/eligibility';
 import { todayIn } from '../planning/plan-generation.service';
-import { foodLogTask, type FoodLogInput } from './food-log-task';
+import { foodLogTask, type FoodLogInput, type FoodLogOutput } from './food-log-task';
+import { foodResolveTask } from './food-resolve-task';
 import { mealPhotoTask } from '../vision/vision-tasks';
 
 const NO_CONTEXT = {
@@ -41,8 +45,26 @@ const NO_CONTEXT = {
   state: async () => ({ slices: {}, version: 0 }),
 };
 
-/** Contexto extra da conversa: refeição do último lembrete, cardápio do plano e registro a corrigir. */
-export type FoodTextContext = Partial<Pick<FoodLogInput, 'pendingMeal' | 'plan' | 'previous'>>;
+/**
+ * Contexto extra da conversa: refeição do último lembrete, cardápio do plano, registro a corrigir
+ * e o que o aluno acabou de consultar (sem registrar).
+ */
+export type FoodTextContext = Partial<
+  Pick<FoodLogInput, 'pendingMeal' | 'plan' | 'previous' | 'queried'>
+>;
+
+/** Item interpretado (texto ou foto), antes de casar com a base de alimentos. */
+export type InterpretedItem = Pick<FoodLogItem, 'label' | 'grams' | 'portionSource'>;
+
+/** O que o aluno disse ou mostrou, já casado com a base, sem nada gravado. */
+export interface FoodReading {
+  meal: MealSlot;
+  items: FoodDraftItem[];
+  totals: NutrientTotals;
+  needsClarification: string | null;
+  /** O aluno pediu para apagar o registro inteiro (só em correção). */
+  discard: boolean;
+}
 
 export interface PhotoInput {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
@@ -57,7 +79,10 @@ export class FoodLogService {
     private readonly foods: FoodCatalogService,
     private readonly events: DomainEventRecorder,
     private readonly outbox: OutboxRelay,
-  ) {}
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(FoodLogService.name);
+  }
 
   /** Texto livre → rascunho (não confirmado). */
   async draftFromText(
@@ -66,6 +91,63 @@ export class FoodLogService {
     now: Date = new Date(),
     context: FoodTextContext = {},
   ): Promise<FoodLogDraft> {
+    const { today, output } = await this.interpretText(userId, request, now, context);
+    return this.saveDraft(
+      userId,
+      output.meal,
+      output.items,
+      'TEXT',
+      today,
+      output.needsClarification,
+    );
+  }
+
+  /**
+   * Texto livre → leitura com totais, SEM gravar nada: é o que responde "quantas calorias tem
+   * isso?" e o que interpreta uma correção antes de mexer no registro.
+   */
+  async readText(
+    userId: string,
+    request: InterpretFoodTextRequest,
+    now: Date = new Date(),
+    context: FoodTextContext = {},
+  ): Promise<FoodReading> {
+    const { output } = await this.interpretText(userId, request, now, context);
+    const items = await this.match(userId, output.items);
+    return {
+      meal: output.meal,
+      items,
+      totals: await this.foods.totals(items),
+      needsClarification: output.needsClarification,
+      discard: output.discard === true,
+    };
+  }
+
+  /** Foto → leitura com totais, SEM gravar nada (consulta). `null` = a foto não mostra comida. */
+  async readPhoto(
+    userId: string,
+    photo: PhotoInput,
+    options: { meal?: MealSlot; caption?: string } = {},
+    now: Date = new Date(),
+  ): Promise<FoodReading | null> {
+    const seen = await this.interpretPhoto(userId, photo, options, now);
+    if (!seen) return null;
+    const items = await this.match(userId, seen.items);
+    return {
+      meal: seen.meal,
+      items,
+      totals: await this.foods.totals(items),
+      needsClarification: null,
+      discard: false,
+    };
+  }
+
+  private async interpretText(
+    userId: string,
+    request: InterpretFoodTextRequest,
+    now: Date,
+    context: FoodTextContext,
+  ): Promise<{ today: string; output: FoodLogOutput }> {
     const { today, localTime } = await this.clock(userId, now);
     const run = await this.runner.run(
       foodLogTask,
@@ -76,22 +158,11 @@ export class FoodLogService {
         ...(context.pendingMeal ? { pendingMeal: context.pendingMeal } : {}),
         ...(context.plan ? { plan: context.plan } : {}),
         ...(context.previous ? { previous: context.previous } : {}),
+        ...(context.queried ? { queried: context.queried } : {}),
       },
       { userId, sources: NO_CONTEXT },
     );
-    const items = run.output.items.map((item) => ({
-      label: item.label,
-      grams: item.grams,
-      portionSource: item.portionSource,
-    }));
-    return this.saveDraft(
-      userId,
-      run.output.meal,
-      items,
-      'TEXT',
-      today,
-      run.output.needsClarification,
-    );
+    return { today, output: run.output };
   }
 
   /** Foto → rascunho (não confirmado). A imagem não é guardada. */
@@ -101,6 +172,22 @@ export class FoodLogService {
     options: { meal?: MealSlot; caption?: string } = {},
     now: Date = new Date(),
   ): Promise<FoodLogDraft> {
+    const seen = await this.interpretPhoto(userId, photo, options, now);
+    if (!seen) {
+      throw new BadRequestException(
+        'Não identificamos comida nesta foto. Tente outra ou descreva a refeição.',
+      );
+    }
+    return this.saveDraft(userId, seen.meal, seen.items, 'PHOTO', seen.today, null);
+  }
+
+  /** Itens e refeição que a foto mostra; `null` se não há comida. */
+  private async interpretPhoto(
+    userId: string,
+    photo: PhotoInput,
+    options: { meal?: MealSlot; caption?: string },
+    now: Date,
+  ): Promise<{ today: string; meal: MealSlot; items: InterpretedItem[] } | null> {
     const { today, localTime } = await this.clock(userId, now);
     const run = await this.runner.run(
       mealPhotoTask,
@@ -111,18 +198,14 @@ export class FoodLogService {
         images: [{ type: 'image', mediaType: photo.mediaType, base64: photo.base64 }],
       },
     );
-    if (run.output.notFood) {
-      throw new BadRequestException(
-        'Não identificamos comida nesta foto. Tente outra ou descreva a refeição.',
-      );
-    }
+    if (run.output.notFood) return null;
     const meal = options.meal ?? run.output.mealSlotGuess ?? mealByTime(localTime);
     const items = run.output.items.map((item) => ({
       label: item.label,
       grams: Math.round(item.estimatedGrams),
       portionSource: 'ESTIMATED' as const,
     }));
-    return this.saveDraft(userId, meal, items, 'PHOTO', today, null);
+    return { today, meal, items };
   }
 
   /** O aluno confirma (e pode ter corrigido) o rascunho: os totais são recalculados na base. */
@@ -219,6 +302,93 @@ export class FoodLogService {
     return { items: matched, totals: await this.foods.totals(matched) };
   }
 
+  /**
+   * Casa cada item com a base de alimentos. O que a busca direta não acha vai ao nutricionista
+   * de IA com os parecidos da tabela: ele aponta o mesmo alimento com outro nome ou, se a tabela
+   * não tem, devolve a composição estimada por 100 g, que passa a contar nos totais (e é dita ao
+   * aluno como estimativa). Se o agente falhar, o item segue sem correspondência.
+   */
+  async match(userId: string, items: readonly InterpretedItem[]): Promise<FoodDraftItem[]> {
+    const matched: FoodDraftItem[] = [];
+    const pending: { position: number; label: string; candidates: FoodMatch[] }[] = [];
+    for (const [position, item] of items.entries()) {
+      const [best] = await this.foods.search(item.label, 1);
+      matched.push({
+        foodItemId: best?.id ?? null,
+        label: item.label,
+        grams: item.grams,
+        portionSource: item.portionSource,
+        matchedName: best?.name ?? null,
+        // Alimento que o agente incluiu antes: o valor continua sendo estimativa e o aluno é avisado.
+        ...(best?.category === FOOD_AI_CATEGORY
+          ? {
+              estimatedPer100g: {
+                energyKcal: best.per100g.energyKcal,
+                proteinG: best.per100g.proteinG,
+                carbsG: best.per100g.carbsG,
+                fatG: best.per100g.fatG,
+                fiberG: best.per100g.fiberG ?? 0,
+              },
+            }
+          : {}),
+      });
+      if (!best) {
+        pending.push({
+          position,
+          label: item.label,
+          candidates: await this.foods.candidates(item.label, 10),
+        });
+      }
+    }
+    if (pending.length === 0) return matched;
+    try {
+      const run = await this.runner.run(
+        foodResolveTask,
+        {
+          items: pending.map((p, index) => ({
+            index,
+            label: p.label,
+            candidates: p.candidates.map((c) => ({
+              id: c.id,
+              name: c.name,
+              energyKcalPer100g: Math.round(c.per100g.energyKcal),
+            })),
+          })),
+        },
+        { userId, sources: NO_CONTEXT },
+      );
+      for (const answer of run.output.items) {
+        const target = pending[answer.index];
+        const current = target ? matched[target.position] : undefined;
+        if (!target || !current) continue;
+        const chosen = target.candidates.find((c) => c.id === answer.foodItemId);
+        if (chosen) {
+          matched[target.position] = {
+            ...current,
+            foodItemId: chosen.id,
+            matchedName: chosen.name,
+          };
+        } else if (answer.estimate) {
+          // A TACO não tem o alimento: a estimativa entra na base e vale para os próximos
+          // registros de todos. Se a inclusão falhar, o registro de agora segue com a estimativa.
+          const added = await this.addToTable(current.label, answer.estimate);
+          matched[target.position] = {
+            ...current,
+            ...(added ? { foodItemId: added.id, matchedName: added.name } : {}),
+            estimatedPer100g: answer.estimate,
+          };
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof AgentTaskError)) throw error;
+      this.logger.warn(
+        { userId, taskId: error.taskId, items: pending.length },
+        'alimentos fora da tabela sem resolução: seguem sem correspondência',
+      );
+    }
+    return matched;
+  }
+
   /** Estrutura do plano alimentar ativo, se houver. */
   async activePlan(userId: string): Promise<NutritionPlanStructure | null> {
     const [plan] = await this.db.runAsUser(userId, 'USER', (tx) =>
@@ -230,15 +400,52 @@ export class FoodLogService {
     return plan?.structure ?? null;
   }
 
+  /**
+   * O registro confirmado mais recente do dia (de uma refeição, se `meal` vier): é o alvo de uma
+   * correção pelo chat quando o aluno cita a refeição ("no café foram 3 ovos").
+   */
+  async latestLog(userId: string, date: string, meal?: MealSlot) {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({
+          id: foodLogs.id,
+          meal: foodLogs.meal,
+          items: foodLogs.items,
+          loggedOn: foodLogs.loggedOn,
+        })
+        .from(foodLogs)
+        .where(
+          and(
+            eq(foodLogs.userId, userId),
+            eq(foodLogs.loggedOn, date),
+            eq(foodLogs.confirmed, true),
+            ...(meal ? [eq(foodLogs.meal, meal)] : []),
+          ),
+        )
+        .orderBy(asc(foodLogs.createdAt)),
+    );
+    const row = rows.at(-1);
+    return row
+      ? { id: row.id, meal: row.meal as MealSlot, items: row.items, loggedOn: row.loggedOn }
+      : null;
+  }
+
   /** Um registro do aluno (para corrigir pelo chat). */
   async find(userId: string, logId: string) {
     const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
-        .select({ id: foodLogs.id, meal: foodLogs.meal, items: foodLogs.items })
+        .select({
+          id: foodLogs.id,
+          meal: foodLogs.meal,
+          items: foodLogs.items,
+          loggedOn: foodLogs.loggedOn,
+        })
         .from(foodLogs)
         .where(and(eq(foodLogs.id, logId), eq(foodLogs.userId, userId))),
     );
-    return row ? { id: row.id, meal: row.meal as MealSlot, items: row.items } : null;
+    return row
+      ? { id: row.id, meal: row.meal as MealSlot, items: row.items, loggedOn: row.loggedOn }
+      : null;
   }
 
   async remove(userId: string, logId: string): Promise<void> {
@@ -344,26 +551,36 @@ export class FoodLogService {
     };
   }
 
+  private async addToTable(label: string, estimate: EstimatedNutrients) {
+    try {
+      const added = await this.foods.addEstimated(label, estimate);
+      if (added) {
+        // Só o nome do alimento (nunca dado do aluno): a equipe revisa o que o agente incluiu.
+        this.logger.info(
+          { event: 'food_added_by_agent', food: added.name },
+          'alimento fora da TACO incluído na base com composição estimada',
+        );
+      }
+      return added;
+    } catch (error) {
+      this.logger.warn(
+        { err: error instanceof Error ? error.message : 'erro' },
+        'alimento estimado não entrou na base',
+      );
+      return null;
+    }
+  }
+
   /** Casa cada item com a base de alimentos e grava o rascunho. */
   private async saveDraft(
     userId: string,
     meal: MealSlot,
-    items: { label: string; grams: number; portionSource: FoodLogItem['portionSource'] }[],
+    items: readonly InterpretedItem[],
     source: 'TEXT' | 'PHOTO',
     loggedOn: string,
     needsClarification: string | null,
   ): Promise<FoodLogDraft> {
-    const matched: FoodDraftItem[] = [];
-    for (const item of items) {
-      const [best] = await this.foods.search(item.label, 1);
-      matched.push({
-        foodItemId: best?.id ?? null,
-        label: item.label,
-        grams: item.grams,
-        portionSource: item.portionSource,
-        matchedName: best?.name ?? null,
-      });
-    }
+    const matched = await this.match(userId, items);
     const logItems: FoodLogItem[] = matched.map(({ matchedName: _name, ...rest }) => rest);
     const totals = await this.foods.totals(logItems);
     const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>

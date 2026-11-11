@@ -11,6 +11,7 @@ import { Injectable } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm';
 
 import type {
+  DaySlot,
   GoalStrategy,
   NutritionPlanStructure,
   PlanSession,
@@ -61,7 +62,46 @@ export function scheduleWeek(
     occurrences: occurrencesOf(sessions, schedule.externalFixedDays, weekStart),
     rules: schedule.rules,
     minEasyDaysBetweenIntense: schedule.minEasyDaysBetweenIntense,
+    modalities: sessions.map((s) => s.content.modality),
   });
+}
+
+const WEEK_ORDER: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+export interface BaseWeek {
+  sessions: { weekday: Weekday; slot: DaySlot; planSessionKey: string; occurrence: number }[];
+  dropped: { planSessionKey: string; occurrence: number; reason: string }[];
+}
+
+/**
+ * Semana-base: a semana cheia (segunda a domingo, sem o corte do dia de início) que se repete.
+ * É a distribuição fixa do protocolo — a da revisão e a do PDF saem desta mesma conta.
+ */
+export function baseWeekOf(
+  sessions: readonly PlanSession[],
+  schedule: ScheduleContext,
+  weekStart: string,
+): BaseWeek {
+  const week = scheduleWeek(sessions, schedule, weekStart, weekStart);
+  const offset = (date: string) =>
+    Math.round(
+      (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${weekStart}T00:00:00Z`)) / 86_400_000,
+    );
+  return {
+    sessions: week.assignments
+      .map((a) => ({
+        weekday: WEEK_ORDER[offset(a.date)] ?? 'MON',
+        slot: a.slot,
+        planSessionKey: a.planSessionKey,
+        occurrence: a.occurrence,
+      }))
+      .sort((a, b) => WEEK_ORDER.indexOf(a.weekday) - WEEK_ORDER.indexOf(b.weekday)),
+    dropped: week.dropped.map((d) => ({
+      planSessionKey: d.planSessionKey,
+      occurrence: d.occurrence,
+      reason: d.reason,
+    })),
+  };
 }
 
 /** Sessões-modelo de um rascunho (cópia normalizada de `structure.sessions`). */

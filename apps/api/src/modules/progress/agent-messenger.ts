@@ -34,8 +34,11 @@ export class AgentMessenger {
       validationPassed: true,
     });
     const job: WhatsappOutboundJob = { userId, type: 'CONVERSATION_MESSAGE', text, dedupeId };
+    // O `jobId` do BullMQ é global à fila: vários `dedupeId` são só "fato do dia" (ex.:
+    // `meal-reminder_<dia>_<slot>`). Sem o titular na chave, o job do 2º aluno era descartado como
+    // duplicado, mas o turno já gravado no painel dele ficava como se tivesse sido enviado.
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-message', job, {
-      jobId: `agent-message_${dedupeId}`,
+      jobId: `agent-message_${userId}_${dedupeId}`,
     });
     await this.audit(userId, dedupeId, text);
   }

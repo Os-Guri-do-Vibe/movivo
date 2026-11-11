@@ -8,7 +8,6 @@ import { planWeek } from './week-planner';
 
 const rules: HybridRules = {
   hoursBetweenHeavyLowerAndIntenseRun: 24,
-  maxIntenseSessionsPerWeek: 3,
   allowTwoSessionsSameDay: true,
   minRestDaysPerWeek: 1,
   acuteChronicMax: 1.3,
@@ -49,6 +48,7 @@ const week = (sessions: PlanSession[], notBefore = '2026-11-09') =>
     rules,
     // A metodologia de corrida pede 2 dias leves entre treinos de qualidade.
     minEasyDaysBetweenIntense: 2,
+    modalities: sessions.map((s) => s.content.modality),
   });
 const dayOf = (plan: ReturnType<typeof week>, key: string) =>
   plan.assignments.find((a) => a.planSessionKey === key)?.date;
@@ -101,11 +101,63 @@ describe('agenda: musculação e corrida na mesma semana', () => {
       maxSessionsPerWeek: 6,
       externalFixedDays: {},
       focus: ['STRENGTH'],
-      rules: { ...rules, maxIntenseSessionsPerWeek: null },
+      rules,
       minEasyDaysBetweenIntense: 2,
       recentWeeklyLoad: null,
       startsOn: '2026-11-09',
     }).map((v) => v.message);
     expect(found.join(' | ')).toContain('nunca entraria na agenda');
+  });
+});
+
+describe('plano de uma modalidade só: nenhuma regra da HYBRID', () => {
+  // O caso do Joaquim: 5 sessões de musculação (PSE 8) de segunda a sexta, só força.
+  const strength = (
+    key: string,
+    focus: string,
+    priority: PlanSession['priority'] = 'KEY',
+  ): PlanSession =>
+    ({
+      ...fullBody(key, priority),
+      estimatedRpe: 8,
+      estimatedMinutes: 40,
+      content: { modality: 'STRENGTH', focus, exercises: [] },
+    }) as unknown as PlanSession;
+  const fiveDays = [
+    strength('PUSH_A', 'Peito, ombros e tríceps'),
+    strength('PULL_A', 'Costas e bíceps'),
+    strength('LOWER_A', 'Quadríceps e glúteo', 'IMPORTANT'),
+    strength('PUSH_B', 'Peito e ombros'),
+    strength('LOWER_B', 'Posterior de coxa e glúteo', 'IMPORTANT'),
+  ];
+  const plan = (sessions: PlanSession[]): TrainingPlanStructure => ({
+    summary: 'x',
+    modalityPriorities: [{ modality: 'STRENGTH', priority: 1 }],
+    phases: [{ name: 'x', focus: 'x', weeks: 4, endsWithDeload: false }],
+    sessions,
+  });
+  // HYBRID exigente: 2 dias de descanso e no máximo +10% de carga sobre uma média recente baixa.
+  const strict = { ...rules, minRestDaysPerWeek: 2, weeklyLoadIncreaseMaxPct: 10 };
+  const context = {
+    windows: windows.slice(0, 5),
+    maxSessionsPerWeek: 6,
+    externalFixedDays: {},
+    focus: ['STRENGTH' as const],
+    rules: strict,
+    minEasyDaysBetweenIntense: 2,
+    recentWeeklyLoad: 100,
+    startsOn: '2026-11-09',
+  };
+
+  it('só força: descanso e carga da HYBRID não se aplicam e as 5 sessões entram', () => {
+    expect(checkTrainingPlan(plan(fiveDays), context)).toEqual([]);
+  });
+
+  it('com corrida no plano a HYBRID volta a valer', () => {
+    const found = checkTrainingPlan(
+      plan([...fiveDays.slice(0, 4), run('EASY', 'EASY', 4)]),
+      context,
+    ).map((v) => v.message);
+    expect(found.join(' | ')).toContain('carga semanal prevista');
   });
 });

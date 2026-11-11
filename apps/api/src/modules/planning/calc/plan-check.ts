@@ -15,8 +15,8 @@ import type {
 } from '@movivo/shared';
 
 import type { Violation } from '../../../core/agents/agent-task';
-import { intenseSessionsPerWeek, isHeavyLower, isIntense, weeklyLoad } from './load';
-import type { HybridRules } from './params';
+import { isHeavyLower, isIntense, weeklyLoad } from './load';
+import { hybridRulesFor, type HybridRules } from './params';
 import { addDays, mondayOf, planWeek, type WeekOccurrence, type WindowOfDay } from './week-planner';
 
 const WEEKDAYS: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -81,6 +81,9 @@ export function checkTrainingPlan(
   context: PlanCheckContext,
 ): Violation[] {
   const violations: Violation[] = [];
+  // Regra de uma metodologia só vale para quem treina a modalidade: a HYBRID, só com 2+.
+  const modalities = plan.sessions.map((s) => s.content.modality);
+  const rules = hybridRulesFor(context.rules, modalities);
   const coached = plan.sessions.filter((s) => s.content.modality !== 'EXTERNAL_SPORT');
   const coachedPerWeek = coached.reduce((sum, s) => sum + s.weeklyFrequency, 0);
 
@@ -103,33 +106,22 @@ export function checkTrainingPlan(
     violations.push({ path: 'sessions', message: 'o plano precisa de ao menos uma sessão-chave' });
   if (keys > 4) violations.push({ path: 'sessions', message: 'sessões-chave demais (máximo 4)' });
 
-  const intense = intenseSessionsPerWeek(plan.sessions);
-  if (
-    context.rules.maxIntenseSessionsPerWeek !== null &&
-    intense > context.rules.maxIntenseSessionsPerWeek
-  ) {
-    violations.push({
-      path: 'sessions',
-      message: `${intense} sessões intensas por semana (máximo ${context.rules.maxIntenseSessionsPerWeek}, contando o esporte externo)`,
-    });
-  }
-
   const load = weeklyLoad(plan.sessions);
   if (
     context.recentWeeklyLoad !== null &&
     context.recentWeeklyLoad > 0 &&
-    context.rules.weeklyLoadIncreaseMaxPct !== null
+    rules.weeklyLoadIncreaseMaxPct !== null
   ) {
-    const ceiling = context.recentWeeklyLoad * (1 + context.rules.weeklyLoadIncreaseMaxPct / 100);
+    const ceiling = context.recentWeeklyLoad * (1 + rules.weeklyLoadIncreaseMaxPct / 100);
     if (load > ceiling) {
       violations.push({
         path: 'sessions',
-        message: `carga semanal prevista (${load}) passa de ${context.rules.weeklyLoadIncreaseMaxPct}% sobre a média recente (${Math.round(context.recentWeeklyLoad)})`,
+        message: `carga semanal prevista (${load}) passa de ${rules.weeklyLoadIncreaseMaxPct}% sobre a média recente (${Math.round(context.recentWeeklyLoad)})`,
       });
     }
   }
 
-  violations.push(...pinnedDaysViolations(plan.sessions, context));
+  violations.push(...pinnedDaysViolations(plan.sessions, { ...context, rules }));
 
   // A semana precisa caber: nenhuma sessão do protocolo pode ficar sem dia toda semana. Se não
   // cabe, ela sai do plano (ou a frequência cai) — nunca fica prescrita sem acontecer.
@@ -141,6 +133,7 @@ export function checkTrainingPlan(
     occurrences: occurrencesOf(plan.sessions, context.externalFixedDays, weekStart),
     rules: context.rules,
     minEasyDaysBetweenIntense: context.minEasyDaysBetweenIntense,
+    modalities,
   });
   const byKey = new Map(plan.sessions.map((s) => [s.key, s]));
   for (const dropped of week.dropped) {

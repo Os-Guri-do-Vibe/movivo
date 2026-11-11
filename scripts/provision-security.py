@@ -93,6 +93,9 @@ def certificates(secrets_dir, custody):
 
 def provision_vault(secrets_dir, custody, snapshot=None):
     context = ssl.create_default_context(cafile=str(secrets_dir / "internal_tls/ca.crt"))
+    # Python 3.13+ liga VERIFY_X509_STRICT, que exige Authority Key Identifier; a CA interna foi
+    # emitida sem ele. A cadeia, a validade e o nome continuam verificados.
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     address = "https://127.0.0.1:8200"
 
     def request(path, data=None, token=None, binary=False):

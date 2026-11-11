@@ -30,10 +30,6 @@ export function isIntense(session: Pick<PlanSession, 'estimatedRpe' | 'content'>
   return session.estimatedRpe >= INTENSE_RPE;
 }
 
-export function intenseSessionsPerWeek(sessions: readonly PlanSession[]): number {
-  return sessions.filter(isIntense).reduce((sum, s) => sum + s.weeklyFrequency, 0);
-}
-
 /** Sessão de membros inferiores pesada: alto impacto no desempenho de corrida intensa. */
 export function isHeavyLower(session: Pick<PlanSession, 'content' | 'estimatedRpe'>): boolean {
   if (session.content.modality !== 'STRENGTH') return false;

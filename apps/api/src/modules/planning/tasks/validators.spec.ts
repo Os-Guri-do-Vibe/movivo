@@ -531,6 +531,64 @@ describe('strength.build_block', () => {
     expect(found).toContain('descanso de 20s');
   });
 
+  describe('descanso por tipo de exercício', () => {
+    const withCore = strengthInput({
+      candidates: [
+        ...strengthInput().candidates,
+        candidate('prancha', 'core', 'CORE'),
+        candidate('abdominal', 'core', 'CORE'),
+      ],
+    });
+    const sessionsWith = (extra: { id: string; sets: number; rest: number }) =>
+      block([
+        strengthSession('A', [...FULL_BODY, extra], { estimatedMinutes: 70 }),
+        strengthSession('B', FULL_BODY, { estimatedMinutes: 65 }),
+      ]);
+
+    it('core descansa como isolado: 60 s numa prancha passa', async () => {
+      const found = await run(
+        strengthValidators,
+        withCore,
+        sessionsWith({ id: 'prancha', sets: 2, rest: 60 }),
+        ctx,
+      );
+      expect(found.join(' | ')).not.toContain('descanso');
+    });
+
+    it('core abaixo do mínimo de isolado é recusado e a mensagem diz a classificação', async () => {
+      const found = (
+        await run(
+          strengthValidators,
+          withCore,
+          sessionsWith({ id: 'abdominal', sets: 2, rest: 30 }),
+          ctx,
+        )
+      ).join(' | ');
+      expect(found).toContain(
+        'descanso de 30s em "abdominal" fora da faixa de core (descansa como isolado) (60–300s)',
+      );
+    });
+
+    it('multiarticular com descanso de isolado é recusado, com nome e faixa efetiva', async () => {
+      const output = block([
+        strengthSession('A', [{ ...at(FULL_BODY, 0), rest: 60 }, ...FULL_BODY.slice(1)], {
+          estimatedMinutes: 65,
+        }),
+        strengthSession('B', FULL_BODY, { estimatedMinutes: 65 }),
+      ]);
+      const found = (await run(strengthValidators, strengthInput(), output, ctx)).join(' | ');
+      expect(found).toContain(
+        'descanso de 60s em "supino" fora da faixa de multiarticular (90–300s)',
+      );
+    });
+
+    it('o prompt diz que CORE descansa na faixa de isolado', () => {
+      expect(strengthTask.instructions).toContain(
+        'ISOLATION e CORE (abdominal, prancha, lombar) descansam na faixa de isolado',
+      );
+    });
+  });
+
   it('recusa sessão que não cabe no tempo do aluno', async () => {
     const output = block([
       strengthSession('A', FULL_BODY, { estimatedMinutes: 90 }),
