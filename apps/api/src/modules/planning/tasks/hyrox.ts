@@ -163,7 +163,7 @@ Regras de montagem:
 2. Siga a fase (BASE, BUILD, PEAK, TAPER, MAINTENANCE) e a mistura da metodologia: na base, técnica das estações e motor aeróbio; na construção, volume de estações e corrida comprometida; na fase específica, simulação parcial e ritmo de prova; no polimento, reduza volume mantendo intensidade.
 3. Tipos de sessão: STATION_SKILL (técnica), STATION_STRENGTH (força nas estações), COMPROMISED_RUNNING (corrida logo após estação), ENGINE (motor aeróbio) e SIMULATION (só se "simulationDue" for verdadeiro, no máximo um por semana, nunca no polimento).
 4. Cargas das estações: nunca acima de 120% da carga oficial da categoria (metodologia); use carga progressiva coerente com o nível. Estação sem equipamento oficial (fora de "stationsWithEquipment") não leva carga oficial — use uma alternativa descrita em "notes".
-5. Cada estação usa UM volume (distância, repetições ou duração). Corridas e estações têm alvo de intensidade claro (zona, ritmo, FC ou PSE).
+5. Cada estação usa UM volume (distância, repetições ou duração). Corridas e estações têm alvo de intensidade claro (zona, ritmo, FC ou PSE). Nas corridas, prefira a zona como alvo. Nunca preencha "paceReference": o ritmo ou a velocidade de referência é calculado pelo sistema a partir do 5 km do aluno.
 6. Marque ao menos uma sessão-chave. notes: como progredir e o que observar. summary: 2 a 3 frases claras, sem prometer tempo de prova e sem citar dias da semana (a agenda é calculada pelo sistema).
 7. ${BODY_COMPOSITION_RULE}
 8. ${PROFESSIONAL_INSTRUCTION_RULE}`,

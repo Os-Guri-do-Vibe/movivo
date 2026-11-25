@@ -106,7 +106,8 @@ export class SessionSnapshotService {
       const readiness: SnapshotReadiness = {
         ...mergeObservationScales(base, reports),
         sleepHours:
-          reports.find((r) => r.kind === 'SLEEP' && r.valueNum !== null)?.valueNum ?? null,
+          reports.find((r) => r.kind === 'SLEEP' && r.valueNum !== null)?.valueNum ??
+          (check?.sleepMinutes ? Math.round((check.sleepMinutes / 60) * 10) / 10 : null),
         reportedBefore: reports.some((r) => r.phase === 'BEFORE'),
         agentAdjusted: adjusted ? adjusted.detail.slice(0, 160) : null,
       };

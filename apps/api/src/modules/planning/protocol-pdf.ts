@@ -23,14 +23,18 @@ import type {
 import {
   externalSportName,
   normalizeFoodName,
+  paceClock,
+  treadmillSpeedLabel,
   HYROX_STATION_LABELS,
   MEAL_SLOT_LABELS,
   SESSION_MODALITY_LABELS,
   type DailyTargets,
+  type EnduranceTarget,
   type FreeMealOption,
   type FreeMeals,
   type MealOption,
   type NutritionPlanStructure,
+  type PaceReference,
   type PlanRead,
   type PlanSession,
   type StrengthExercise,
@@ -371,21 +375,84 @@ function strengthSpec(exercises: readonly StrengthExercise[]): SessionTableSpec 
   };
 }
 
+/** Alvo em destaque: é o critério do trecho, então é o que o olho encontra primeiro. */
+const targetCell = (target: EnduranceTarget): TableCell =>
+  mono(targetLabel(target), { fontSize: 8.5, bold: true, color: COLOR.petroleo });
+
+const dash = (): TableCell => mono('–', { fontSize: 8.5, color: COLOR.musgo, alignment: 'center' });
+
+/**
+ * As duas referências ao lado do alvo: ritmo para correr na rua e velocidade para a esteira. O
+ * aluno usa a do lugar em que for correr. Vêm com "~" e em tom discreto, para ler como
+ * estimativa e nunca como meta; a unidade fica no título da coluna. Quando o alvo já é o ritmo,
+ * a coluna de ritmo não o repete.
+ */
+function referenceCells(
+  reference: PaceReference | undefined,
+  target?: EnduranceTarget,
+): [TableCell, TableCell] {
+  if (!reference) return [dash(), dash()];
+  const range = reference.secondsPerKm;
+  const pace =
+    range.min === range.max
+      ? paceClock(range.min)
+      : `${paceClock(range.min)}–${paceClock(range.max)}`;
+  const speed = treadmillSpeedLabel(range).replace(' km/h', '');
+  const cell = (text: string) =>
+    mono(`~${text}`, { fontSize: 8.5, color: COLOR.grafite, alignment: 'center' });
+  return [target?.by === 'PACE' ? dash() : cell(pace), cell(speed)];
+}
+
+const REFERENCE_HEAD = (): [TableCell, TableCell] => [
+  colHead('Ritmo (min/km)', 'center'),
+  colHead('Esteira (km/h)', 'center'),
+];
+
 function runningSpec(
   content: Extract<PlanSession['content'], { modality: 'RUNNING' }>,
 ): SessionTableSpec {
+  const withReference = content.segments.some((s) => s.paceReference);
+  const stageLabel = (s: (typeof content.segments)[number]) =>
+    // Espaço fixo entre "×" e o número: se a etapa quebrar a linha, o "× 4" desce inteiro.
+    `${SEGMENT_LABELS[s.type] ?? s.type}${s.repeat && s.repeat > 1 ? ` ×\u00A0${s.repeat}` : ''}`;
+  // Sem 5 km informado não há referência: a tabela fica como sempre foi, sem coluna vazia.
+  if (!withReference) {
+    return {
+      widths: ['*', 54, 86, 96],
+      head: [colHead('Etapa'), colHead('Volume'), colHead('Alvo'), colHead('Observação')],
+      rows: content.segments.map((s): Row => [
+        { text: stageLabel(s), fontSize: 9.5, bold: true },
+        mono(volume(s.distanceMeters, s.durationSeconds), { fontSize: 8.5 }),
+        targetCell(s.target),
+        { text: s.notes ? t(s.notes) : '–', fontSize: 8, color: COLOR.musgo },
+      ]),
+    };
+  }
+  // Com as duas referências, a observação desce para baixo do nome da etapa (como nos exercícios
+  // de força) e as colunas ficam para os números.
   return {
-    widths: ['*', 54, 86, 96],
-    head: [colHead('Etapa'), colHead('Volume'), colHead('Alvo'), colHead('Observação')],
+    widths: ['*', 46, 100, 74, 70],
+    head: [colHead('Etapa'), colHead('Volume'), colHead('Alvo'), ...REFERENCE_HEAD()],
     rows: content.segments.map((s): Row => [
       {
-        text: `${SEGMENT_LABELS[s.type] ?? s.type}${s.repeat && s.repeat > 1 ? ` × ${s.repeat}` : ''}`,
-        fontSize: 9.5,
-        bold: true,
+        stack: [
+          { text: stageLabel(s), fontSize: 9.5, bold: true, color: COLOR.grafite },
+          ...(s.notes
+            ? [
+                {
+                  text: t(s.notes),
+                  fontSize: 7.5,
+                  color: COLOR.musgo,
+                  lineHeight: 1.3,
+                  margin: [0, 2, 0, 0] as [number, number, number, number],
+                },
+              ]
+            : []),
+        ],
       },
       mono(volume(s.distanceMeters, s.durationSeconds), { fontSize: 8.5 }),
-      mono(targetLabel(s.target), { fontSize: 8.5 }),
-      { text: s.notes ? t(s.notes) : '–', fontSize: 8, color: COLOR.musgo },
+      targetCell(s.target),
+      ...referenceCells(s.paceReference, s.target),
     ]),
   };
 }
@@ -393,29 +460,46 @@ function runningSpec(
 function hyroxSpec(
   content: Extract<PlanSession['content'], { modality: 'HYROX' }>,
 ): SessionTableSpec {
-  return {
-    widths: ['*', 150],
-    head: [colHead('Bloco'), colHead('Detalhe')],
-    rows: content.blocks.map((b): Row => {
-      if (b.type === 'RUN') {
-        return [
-          { text: 'Corrida', fontSize: 9.5, bold: true },
-          mono(`${volume(b.distanceMeters)} · ${targetLabel(b.target)}`, { fontSize: 8.5 }),
-        ];
-      }
-      if (b.type === 'REST') {
-        return [
-          { text: 'Pausa', fontSize: 9.5, bold: true },
-          mono(volume(undefined, b.durationSeconds), { fontSize: 8.5 }),
-        ];
-      }
-      const detail = b.reps ? `${b.reps} reps` : volume(b.distanceMeters, b.durationSeconds);
+  const withReference = content.blocks.some((b) => b.type === 'RUN' && b.paceReference);
+  const rows = content.blocks.map((b): Row => {
+    if (b.type === 'RUN') {
       return [
-        { text: HYROX_STATION_LABELS[b.station], fontSize: 9.5, bold: true },
-        mono(`${detail}${b.loadKg ? ` · ${b.loadKg} kg` : ''}`, { fontSize: 8.5 }),
+        { text: 'Corrida', fontSize: 9.5, bold: true },
+        mono(`${volume(b.distanceMeters)} · ${targetLabel(b.target)}`, { fontSize: 8.5 }),
+        ...(withReference ? referenceCells(b.paceReference, b.target) : []),
       ];
-    }),
-  };
+    }
+    if (b.type === 'REST') {
+      return [
+        { text: 'Pausa', fontSize: 9.5, bold: true },
+        mono(volume(undefined, b.durationSeconds), { fontSize: 8.5 }),
+        ...(withReference ? referenceCells(undefined) : []),
+      ];
+    }
+    const detail = b.reps ? `${b.reps} reps` : volume(b.distanceMeters, b.durationSeconds);
+    return [
+      { text: HYROX_STATION_LABELS[b.station], fontSize: 9.5, bold: true },
+      mono(`${detail}${b.loadKg ? ` · ${b.loadKg} kg` : ''}`, { fontSize: 8.5 }),
+      ...(withReference ? referenceCells(undefined) : []),
+    ];
+  });
+  // Circuito em voltas: a primeira linha diz quantas vezes repetir os blocos abaixo.
+  if (content.rounds > 1) {
+    rows.unshift([
+      { text: `${content.rounds} voltas`, fontSize: 9.5, bold: true, color: COLOR.petroleo },
+      mono(`repita os ${content.blocks.length} blocos abaixo ${content.rounds} vezes`, {
+        fontSize: 8.5,
+      }),
+      ...(withReference ? referenceCells(undefined) : []),
+    ]);
+  }
+  return withReference
+    ? {
+        widths: ['*', 130, 74, 70],
+        head: [colHead('Bloco'), colHead('Detalhe'), ...REFERENCE_HEAD()],
+        rows,
+      }
+    : { widths: ['*', 150], head: [colHead('Bloco'), colHead('Detalhe')], rows };
 }
 
 function externalSpec(
@@ -614,6 +698,67 @@ function weekSessions(groups: readonly DayGroup[]): Content[] {
 
 const kg = (value: number) => `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg`;
 
+/** Os três passos do cartão "Como o protocolo funciona", conforme o que o plano tem. */
+export function howItWorks(plan: {
+  hasStrength: boolean;
+  hasRuns: boolean;
+  hasReferences: boolean;
+}): [string, string][] {
+  const steps = ['Siga os treinos nos dias da semana indicados no protocolo.'];
+  if (plan.hasStrength) {
+    steps.push('Controle a carga pelo RIR: pare a série com as repetições em reserva indicadas.');
+  }
+  if (plan.hasRuns) {
+    steps.push(
+      plan.hasReferences
+        ? 'Na corrida, quem manda é a zona de frequência cardíaca. O ritmo (rua) e a velocidade (esteira) ao lado são só uma referência visual.'
+        : 'Na corrida, siga o alvo de cada etapa (zona de frequência cardíaca ou esforço), sem se prender ao ritmo.',
+    );
+  }
+  steps.push('Dor aguda, tontura ou mal-estar: pare o exercício e avise a equipe.');
+  return steps.map((text, i): [string, string] => [String(i + 1).padStart(2, '0'), text]);
+}
+
+/** O que o aluno vai encontrar em cada tabela de treino. */
+export function sessionsSubtitle(plan: { hasStrength: boolean; hasRuns: boolean }): string {
+  const strength = 'séries, repetições, descanso e RIR (repetições em reserva)';
+  const runs = 'as etapas de cada corrida, com volume e alvo de intensidade';
+  if (plan.hasStrength && plan.hasRuns) return `Dia a dia, com ${strength} e ${runs}.`;
+  return `Dia a dia, com ${plan.hasRuns ? runs : strength}.`;
+}
+
+/** Um trecho de corrida (da corrida ou do HYROX), pelo que a legenda precisa dele. */
+interface RunTarget {
+  target: EnduranceTarget;
+  paceReference?: PaceReference;
+}
+
+/** Legenda dos treinos de corrida: o que é a zona e como ler a referência de ritmo/velocidade. */
+function runLegend(runs: readonly RunTarget[], references: readonly PaceReference[]): Content[] {
+  const lines: Content[] = [];
+  if (runs.some((r) => r.target.by === 'ZONE')) {
+    lines.push(
+      legendLine(
+        'Zona (1 a 5)',
+        'a intensidade da etapa pela frequência cardíaca, da mais leve (1) à mais forte (5). É o alvo do treino.',
+      ),
+    );
+  }
+  if (references.length > 0) {
+    lines.push(
+      legendLine(
+        'Ritmo (min/km)',
+        'referência para correr na rua. É a estimativa do ritmo em que aquela zona costuma cair para você, calculada pelo seu tempo de 5 km. Com calor, subida ou cansaço o ritmo muda, e vale a zona.',
+      ),
+      legendLine(
+        'Esteira (km/h)',
+        'a mesma referência como velocidade, para programar a esteira. Comece por ela e ajuste para ficar na zona indicada: quem manda é a frequência cardíaca.',
+      ),
+    );
+  }
+  return lines;
+}
+
 export function trainingPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<Buffer> {
   const training = plan.training;
   if (!training) throw new Error('aluno sem plano de treino ativo');
@@ -630,6 +775,17 @@ export function trainingPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<B
     new Set(exercises.map((e) => e.technique).filter((x) => x !== undefined)),
   );
   const loads = Array.from(new Set(exercises.map((e) => e.loadStrategy)));
+  // Trechos de corrida (corrida e HYROX): o que a legenda e as instruções precisam explicar.
+  const runTargets = structure.sessions.flatMap((s): RunTarget[] => {
+    if (s.content.modality === 'RUNNING') return s.content.segments;
+    if (s.content.modality === 'HYROX') {
+      return s.content.blocks.flatMap((b) => (b.type === 'RUN' ? [b] : []));
+    }
+    return [];
+  });
+  const references = runTargets.flatMap((r) => (r.paceReference ? [r.paceReference] : []));
+  const hasStrength = exercises.length > 0;
+  const hasRuns = runTargets.length > 0;
   const explanation = [plan.strategy?.studentMessage, structure.summary]
     .filter((x): x is string => Boolean(x))
     .map(t)
@@ -666,31 +822,29 @@ export function trainingPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<B
     summaryCard({
       label: 'Como o protocolo funciona',
       text: explanation,
-      steps: [
-        ['01', 'Siga os treinos nos dias da semana indicados no protocolo.'],
-        ['02', 'Controle a carga pelo RIR: pare a série com as repetições em reserva indicadas.'],
-        ['03', 'Dor aguda, tontura ou mal-estar: pare o exercício e avise a equipe.'],
-      ],
+      steps: howItWorks({ hasStrength, hasRuns, hasReferences: references.length > 0 }),
     }),
     ...sectionTitle(
       'Sua semana base',
       'Estes são os dias de cada treino. Se precisar, você pode trocar ou ajustar durante a semana.',
     ),
     weekOverview(groups),
-    ...sectionTitle(
-      'Seus treinos',
-      'Dia a dia, com séries, repetições, descanso e RIR (repetições em reserva).',
-    ),
+    ...sectionTitle('Seus treinos', sessionsSubtitle({ hasStrength, hasRuns })),
     ...weekSessions(groups),
     ...sectionTitle('Legenda', undefined, 14),
     {
       fontSize: 8.5,
       color: COLOR.musgo,
       stack: [
-        legendLine(
-          'RIR (Repetições em Reserva)',
-          'quantas repetições você ainda conseguiria fazer ao terminar a série. RIR 0 é até a falha.',
-        ),
+        ...(hasStrength
+          ? [
+              legendLine(
+                'RIR (Repetições em Reserva)',
+                'quantas repetições você ainda conseguiria fazer ao terminar a série. RIR 0 é até a falha.',
+              ),
+            ]
+          : []),
+        ...runLegend(runTargets, references),
         ...loads.map((load) => legendLine(LOAD_LABELS[load], LOAD_GLOSSARY[load])),
         ...techniques.map((x) => legendLine(TECHNIQUE_LABELS[x] ?? x, TECHNIQUE_GLOSSARY[x] ?? '')),
       ],
@@ -703,7 +857,11 @@ export function trainingPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<B
 
 const kcal = (n: number) => n.toLocaleString('pt-BR');
 const liters = (ml: number) => `${(ml / 1000).toLocaleString('pt-BR')} L`;
-const rangeValue = (d: DailyTargets) => `${kcal(d.energyKcal.min)}–${kcal(d.energyKcal.max)}`;
+/** "2.600" quando a meta é um número só; "2.400–2.600" quando é uma faixa. */
+export const rangeValue = (d: Pick<DailyTargets, 'energyKcal'>) =>
+  d.energyKcal.min === d.energyKcal.max
+    ? kcal(d.energyKcal.max)
+    : `${kcal(d.energyKcal.min)}–${kcal(d.energyKcal.max)}`;
 const brl = (value: number) =>
   value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const OPTION_LABELS = ['A', 'B', 'C'];
@@ -1394,7 +1552,7 @@ export function nutritionPlanPdf(plan: PlanRead, student?: PdfStudent): Promise<
     }),
     ...sectionTitle(
       'Metas do dia',
-      'Faixas de referência, não números para perseguir à risca. Cada barra mostra a parte das calorias que vem de cada macronutriente.',
+      'Metas de referência, não números para perseguir à risca. Cada barra mostra a parte das calorias que vem de cada macronutriente.',
     ),
     targetsCards(s),
     ...sectionTitle(

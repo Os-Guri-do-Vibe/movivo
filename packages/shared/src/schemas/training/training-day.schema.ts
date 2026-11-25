@@ -48,5 +48,12 @@ export const trainingDaySchema = z.object({
   week: z.array(trainingWeekDaySchema).length(7),
   selected: z.array(trainingDaySessionSchema),
   hasPlan: z.boolean(),
+  /**
+   * Primeiro dia com treino agendado para o aluno: a seta de semana anterior para nele (antes
+   * disso não há nada para ver). Nulo sem nenhum treino agendado.
+   */
+  firstScheduledOn: z.iso.date().nullable().optional(),
+  /** O aluno já respondeu as perguntas do dia (disposição, sono...) hoje. */
+  checkedInToday: z.boolean().optional(),
 });
 export type TrainingDay = z.infer<typeof trainingDaySchema>;

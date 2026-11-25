@@ -8,11 +8,14 @@ import {
   type SessionModality,
 } from '@movivo/shared';
 
-import { Button } from '@/components/ui/button';
-import { logExternal } from '@/lib/training-api';
+import { useTrainingApi } from './training-api-context';
+
+import { NEUTRAL_INPUT_CLASS as FIELD_CLASS } from './strength-session';
+import { StudentAlert } from './student-nav';
 
 /** Treino fora do plano (outro esporte, sessão avulsa): esforço e minutos bastam. */
 export function ExternalLogForm({ today, onLogged }: { today: string; onLogged: () => void }) {
+  const api = useTrainingApi();
   const [modality, setModality] = useState<SessionModality>('EXTERNAL_SPORT');
   const [performedOn, setPerformedOn] = useState(today);
   const [rpe, setRpe] = useState('6');
@@ -37,7 +40,7 @@ export function ExternalLogForm({ today, onLogged }: { today: string; onLogged: 
         durationMinutes,
         painReports: [],
       };
-      await logExternal(request);
+      await api.logExternal(request);
       setMinutes('');
       onLogged();
     } catch (caught) {
@@ -48,15 +51,18 @@ export function ExternalLogForm({ today, onLogged }: { today: string; onLogged: 
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 rounded-xl border border-border p-4">
-      <h3 className="font-semibold">Registrar outro treino</h3>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-label">
+    <form onSubmit={submit} className="rounded-3xl bg-card p-6 shadow-sm sm:p-8">
+      <p className="text-label font-bold tracking-widest text-muted-foreground uppercase">
+        Fora do plano
+      </p>
+      <h3 className="mt-2 text-h2 font-extrabold text-foreground">Registrar outro treino</h3>
+      <div className="mt-6 grid grid-cols-2 gap-3">
+        <label className="col-span-2 text-label text-muted-foreground">
           Tipo
           <select
             value={modality}
             onChange={(e) => setModality(e.target.value as SessionModality)}
-            className="h-11 rounded-lg border border-border bg-card px-3 text-body"
+            className={FIELD_CLASS}
           >
             {(Object.keys(SESSION_MODALITY_LABELS) as SessionModality[]).map((m) => (
               <option key={m} value={m}>
@@ -65,17 +71,17 @@ export function ExternalLogForm({ today, onLogged }: { today: string; onLogged: 
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-label">
+        <label className="col-span-2 text-label text-muted-foreground">
           Dia
           <input
             type="date"
             max={today}
             value={performedOn}
             onChange={(e) => setPerformedOn(e.target.value)}
-            className="h-11 rounded-lg border border-border bg-card px-3 text-body"
+            className={FIELD_CLASS}
           />
         </label>
-        <label className="flex flex-col gap-1 text-label">
+        <label className="text-label text-muted-foreground">
           Esforço (0–10)
           <input
             type="number"
@@ -83,30 +89,31 @@ export function ExternalLogForm({ today, onLogged }: { today: string; onLogged: 
             max={10}
             value={rpe}
             onChange={(e) => setRpe(e.target.value)}
-            className="h-11 w-24 rounded-lg border border-border bg-card px-3 text-body"
+            className={FIELD_CLASS}
           />
         </label>
-        <label className="flex flex-col gap-1 text-label">
+        <label className="text-label text-muted-foreground">
           Minutos
           <input
             inputMode="numeric"
             value={minutes}
             onChange={(e) => setMinutes(e.target.value)}
-            className="h-11 w-24 rounded-lg border border-border bg-card px-3 text-body"
+            className={FIELD_CLASS}
           />
         </label>
-        <Button type="submit" disabled={busy}>
-          Registrar
-        </Button>
       </div>
-      {error && (
-        <p
-          role="alert"
-          className="rounded-xl border border-destructive bg-destructive/10 p-3 text-label"
-        >
-          {error}
-        </p>
-      )}
+      {error ? (
+        <div className="mt-4">
+          <StudentAlert>{error}</StudentAlert>
+        </div>
+      ) : null}
+      <button
+        type="submit"
+        disabled={busy}
+        className="mt-8 min-h-14 w-full rounded-2xl bg-petroleo font-extrabold text-white transition-colors hover:bg-petroleo/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+      >
+        Registrar
+      </button>
     </form>
   );
 }

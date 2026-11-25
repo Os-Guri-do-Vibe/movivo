@@ -48,6 +48,28 @@ export interface OnboardingAnswers {
   body: OnboardingBodyStep | null;
 }
 
+/** Rótulo de uma nota ("Alimentos que evita: mamão" → "Alimentos que evita"). */
+const noteLabel = (note: string) => note.slice(0, note.indexOf(':')).trim();
+
+/**
+ * Conserto das notas gravadas no formato antigo (tudo junto, cortado em 500 caracteres): devolve
+ * as notas como deveriam estar, a partir das respostas guardadas da anamnese, ou `null` se já
+ * estão certas. Um assunto que só existe na nota antiga (a anamnese mais recente não o trouxe)
+ * é mantido como estava, para o conserto nunca apagar informação.
+ */
+export function repairedNotes(
+  existing: readonly string[],
+  fromAnswers: readonly string[],
+): string[] | null {
+  const pieces = existing.flatMap((summary) => summary.split(' | ')).filter(Boolean);
+  const answered = new Set(fromAnswers.map(noteLabel));
+  const kept = pieces.filter((piece) => piece.includes(':') && !answered.has(noteLabel(piece)));
+  const repaired = [...fromAnswers, ...kept];
+  const same =
+    repaired.length === existing.length && repaired.every((note) => existing.includes(note));
+  return same ? null : repaired;
+}
+
 /** Região de dor → tag de contraindicação do catálogo de exercícios. */
 const PAIN_TO_TAG: Partial<Record<PainRegion, string>> = {
   NECK: 'NECK',
@@ -61,6 +83,33 @@ const PAIN_TO_TAG: Partial<Record<PainRegion, string>> = {
 };
 
 const PREFERENCE_CONFIDENCE = 80;
+
+/** Teto do `summary` de um registro de saúde (`healthRecordPayloadSchema`). */
+const NOTE_MAX_CHARS = 500;
+
+/**
+ * Textos livres da anamnese, UM registro por assunto. Cada resposta tem até 300 caracteres e
+ * cabe inteira no seu registro: juntar tudo numa nota só estourava o teto de 500 e cortava o
+ * fim, que era justamente "Alimentos que evita" (o cardápio saía com o que o aluno não come).
+ * O rótulo de cada nota é o que os leitores procuram (ex.: `FoodCandidatesService`).
+ */
+export function healthNotes(
+  answers: Pick<OnboardingAnswers, 'goals' | 'preferences' | 'nutrition'>,
+): string[] {
+  const { goals, preferences, nutrition } = answers;
+  const labelled: [string, string | null | undefined][] = [
+    ['Motivação', goals.motivation],
+    ['Preferências de treino', preferences.trainingPreferences],
+    ['Prefere evitar', preferences.dislikedExercises],
+    ['Outro suplemento', nutrition.supplementOther],
+    ['Alimentos que gosta', nutrition.likedFoods],
+    ['Alimentos que evita', nutrition.dislikedFoods],
+  ];
+  return labelled.flatMap(([label, text]) => {
+    const value = text?.trim();
+    return value ? [`${label}: ${value}`.slice(0, NOTE_MAX_CHARS)] : [];
+  });
+}
 
 @Injectable()
 export class OnboardingProjection {
@@ -213,7 +262,7 @@ export class OnboardingProjection {
 
   /** Tudo que é saúde ou texto livre — só cifrado. */
   private async health(tx: TenantTransaction, userId: string, answers: OnboardingAnswers) {
-    const { preferences: health, pain, parq, nutrition, goals } = answers;
+    const { preferences: health, pain, parq, nutrition } = answers;
     const records: { kind: HealthRecordKind; payload: HealthRecordPayload }[] = [];
 
     const positive = parq.parq.answers.filter((a) => a.answer).map((a) => a.questionId);
@@ -256,16 +305,9 @@ export class OnboardingProjection {
         payload: { summary: `${allergy.allergen} (${allergy.severity})` },
       });
     }
-    const notes = [
-      goals.motivation && `Motivação: ${goals.motivation}`,
-      health.trainingPreferences && `Preferências de treino: ${health.trainingPreferences}`,
-      health.dislikedExercises && `Prefere evitar: ${health.dislikedExercises}`,
-      nutrition.supplementOther && `Outro suplemento: ${nutrition.supplementOther}`,
-      nutrition.likedFoods && `Alimentos que gosta: ${nutrition.likedFoods}`,
-      nutrition.dislikedFoods && `Alimentos que evita: ${nutrition.dislikedFoods}`,
-    ].filter((note): note is string => Boolean(note));
-    if (notes.length > 0)
-      records.push({ kind: 'NOTES', payload: { summary: notes.join(' | ').slice(0, 500) } });
+    for (const summary of healthNotes(answers)) {
+      records.push({ kind: 'NOTES', payload: { summary } });
+    }
 
     await tx
       .update(studentHealthRecords)

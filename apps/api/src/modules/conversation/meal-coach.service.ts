@@ -16,6 +16,7 @@ import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../cor
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { WHATSAPP_BUBBLE_SEPARATOR } from '../jobs/whatsapp-outbound.contract';
 import { mealTarget } from '../planning/calc/menu';
+import { FoodCandidatesService } from '../nutrition/food-candidates.service';
 import { FoodLogService } from '../nutrition/food-log.service';
 import {
   ADAPT_ENERGY_TOLERANCE,
@@ -51,6 +52,7 @@ const num = (n: number) => Math.round(n).toLocaleString('pt-BR');
 export class MealCoachService {
   constructor(
     private readonly foods: FoodLogService,
+    private readonly candidates: FoodCandidatesService,
     private readonly runner: AgentRunner,
     private readonly state: StudentStateReader,
     private readonly methodology: PublishedMethodologyReader,
@@ -94,6 +96,8 @@ export class MealCoachService {
       .filter((s) => !loggedSlots.has(s))
       .map((s) => MEAL_SLOT_LABELS[s]);
     const targets = day.targets;
+    // O que ele não come vale aqui como vale no plano: a sugestão do momento não traz de volta.
+    const tastes = await this.candidates.preferencesOf(userId);
     const input: MealAdaptInput = {
       message: request.text,
       meal: {
@@ -123,6 +127,8 @@ export class MealCoachService {
       pantry: request.pantry,
       avoid: request.avoid,
       dietaryRestrictions: request.dietaryRestrictions,
+      dislikedFoods: tastes.dislikedFoods?.slice(0, 700) ?? null,
+      allergies: tastes.allergenTerms.slice(0, 20),
       previousIssue: null,
     };
 

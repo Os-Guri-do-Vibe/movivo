@@ -9,7 +9,8 @@
  * `maxCorrectionRounds`. A saída aprovada é sempre uma PROPOSTA: quem executa é o motor de
  * políticas, fora daqui.
  */
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
 import type { PersonaKey } from '@movivo/shared';
@@ -141,6 +142,20 @@ export function composeSystem(
     .join('\n\n');
 }
 
+/**
+ * A REGRA que reprovou a saída, sem o dado: índices viram `*`, números viram `#` e o que está
+ * entre aspas some. Serve para medir quais regras mais custam rodadas de correção (cada rodada
+ * é uma chamada inteira ao modelo) sem levar nome de alimento, exercício ou valor do aluno ao log.
+ */
+export function violationRule(violation: Violation): string {
+  const path = violation.path.replace(/\.\d+(?=\.|$)/g, '.*');
+  const message = violation.message
+    .replace(/"[^"]*"/g, '"…"')
+    .replace(/\d+(?:[.,]\d+)?/g, '#')
+    .slice(0, 140);
+  return `${path}: ${message}`;
+}
+
 function correctionMessage(violations: Violation[]): string {
   const list = violations.map((v) => `- ${v.path}: ${v.message}`).join('\n');
   return `Sua resposta anterior tem problemas que impedem o uso:\n${list}\n\nCorrija TODOS e devolva o JSON completo outra vez, seguindo o schema.`;
@@ -150,8 +165,16 @@ function correctionMessage(violations: Violation[]): string {
 export class AgentRunner {
   constructor(
     private readonly gateway: ModelGateway,
-    @Optional() private readonly profiles: PublishedAgentProfiles | null = null,
-  ) {}
+    // `@Inject` explícito nos opcionais: com o tipo `X | null`, o TypeScript emite `Object` nos
+    // metadados e o Nest não acha o provedor. O parâmetro ficava sempre nulo, em silêncio: as
+    // fichas dos agentes e as personas publicadas nunca chegavam ao prompt.
+    @Optional()
+    @Inject(PublishedAgentProfiles)
+    private readonly profiles: PublishedAgentProfiles | null = null,
+    @Optional() @Inject(PinoLogger) private readonly logger: PinoLogger | null = null,
+  ) {
+    this.logger?.setContext(AgentRunner.name);
+  }
 
   async run<I, O>(
     task: AgentTask<I, O>,
@@ -213,7 +236,23 @@ export class AgentRunner {
           state.slices,
           methodology.parameters ?? {},
         );
-        if (violations.length > 0) rejectedOutput = result.text;
+        if (violations.length > 0) {
+          rejectedOutput = result.text;
+          // Cada reprovação custa uma chamada inteira: o log diz quais regras a causaram.
+          this.logger?.info(
+            {
+              event: 'agent_output_rejected',
+              taskId: task.id,
+              round,
+              vendor: result.vendor,
+              model: result.model,
+              latencyMs: result.latencyMs,
+              violations: violations.length,
+              rules: [...new Set(violations.map(violationRule))].slice(0, 12),
+            },
+            'saída do agente reprovada pelos validadores',
+          );
+        }
         if (violations.length === 0) {
           return {
             output: task.output.parse(parseOutput(task, result.text)),

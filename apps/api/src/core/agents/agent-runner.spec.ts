@@ -6,7 +6,7 @@ import type { ModelGateway } from '../ai/model-gateway';
 import type { TenantDatabase } from '../database/tenant-database.service';
 import type { AgentContextSources } from './agent-context';
 import { PublishedAgentProfiles } from './agent-profile.reader';
-import { AgentRunner, AgentTaskError, extractJson } from './agent-runner';
+import { AgentRunner, AgentTaskError, extractJson, violationRule } from './agent-runner';
 import { defineAgentTask } from './agent-task';
 
 const task = defineAgentTask({
@@ -376,5 +376,17 @@ describe('extractJson', () => {
     expect(extractJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
     expect(extractJson('Aqui está: {"a":2}')).toEqual({ a: 2 });
     expect(() => extractJson('sem json')).toThrow();
+  });
+});
+
+describe('violationRule', () => {
+  it('guarda a regra reprovada, sem índices, números nem o que veio entre aspas', () => {
+    expect(
+      violationRule({
+        path: 'meals.2.options.0.items.3',
+        message: 'a opção "Pão com ovos" tem 612 kcal e a meta é 480,5 kcal',
+      }),
+    ).toBe('meals.*.options.*.items.*: a opção "…" tem # kcal e a meta é # kcal');
+    expect(violationRule({ path: 'sessions', message: 'x'.repeat(300) }).length).toBeLessThan(160);
   });
 });

@@ -164,7 +164,11 @@ export class ConversationOrchestrator {
     private readonly guardrails: L1GuardrailService,
     private readonly logger: PinoLogger,
     /** Busca nos artigos (RAG). Opcional: sem ela, ou com `RAG_ENABLED=false`, a resposta é a de antes. */
-    @Optional() private readonly retrieval: KnowledgeRetrievalService | null = null,
+    // `@Inject` explícito: com o tipo `X | null` o Nest não acha o provedor pelos metadados e a
+    // busca ficava sempre nula, mesmo com `RAG_ENABLED=true`.
+    @Optional()
+    @Inject(KnowledgeRetrievalService)
+    private readonly retrieval: KnowledgeRetrievalService | null = null,
   ) {
     this.logger.setContext(ConversationOrchestrator.name);
   }

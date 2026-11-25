@@ -4,6 +4,7 @@ import {
   type CheckInAnswers,
   type CheckInQuestion,
   type MeasurementInput,
+  type StudentProgress,
 } from '@movivo/shared';
 
 import { TrainingApiError } from './training-api';
@@ -59,6 +60,8 @@ export interface EvolutionView {
   tasks: { title: string; target: number; progress: number; windowEnd: string; status: string }[];
   measurements: Record<string, { on: string; value: number }[]>;
   weeks: { weekStart: string; sessions: number; load: number }[];
+  /** Constância, últimas semanas, progressão por modalidade, recordes e previsões. */
+  progress?: StudentProgress;
 }
 
 export async function getEvolution(): Promise<EvolutionView> {

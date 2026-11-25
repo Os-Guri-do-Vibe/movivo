@@ -211,11 +211,57 @@ describe('sessões', () => {
         distanceMeters: 800,
         target: { by: 'PACE', secondsPerKm: { min: 270, max: 280 } },
       }),
-    ).toEqual({ label: 'Estímulo', volume: '6 × 800 m', target: '4:30–4:40/km', notes: undefined });
+    ).toEqual({
+      label: 'Estímulo',
+      volume: '6 × 800 m',
+      target: '4:30–4:40/km',
+      notes: undefined,
+    });
     expect(
       hyroxRow({ type: 'STATION', station: 'SLED_PUSH', distanceMeters: 50, loadKg: 102.5 }),
     ).toEqual({ label: 'Sled push', volume: '50 m · 102,5 kg', target: '—' });
     expect(hyroxRow({ type: 'STATION', station: 'WALL_BALLS', reps: 100 }).volume).toBe('100 rep.');
+  });
+
+  it('a referência traz os dois formatos ao lado da zona: ritmo (rua) e velocidade (esteira)', () => {
+    const secondsPerKm = { min: 360, max: 405 };
+    const both = { pace: '≈ 6:00–6:45/km', treadmill: '≈ 8,9–10,0 km/h' };
+    // Planejado para a rua ou para a esteira, o aluno vê os dois.
+    for (const treadmill of [false, true]) {
+      expect(
+        segmentRow({
+          type: 'STEADY',
+          durationSeconds: 1_800,
+          target: { by: 'ZONE', zone: 'Z2' },
+          paceReference: { secondsPerKm, treadmill },
+        }),
+      ).toMatchObject({ target: 'Zona 2', ...both });
+    }
+    expect(
+      hyroxRow({
+        type: 'RUN',
+        distanceMeters: 1_000,
+        target: { by: 'ZONE', zone: 'Z2' },
+        paceReference: { secondsPerKm, treadmill: true },
+      }),
+    ).toMatchObject(both);
+    // Alvo que já é ritmo: só a velocidade da esteira acrescenta algo.
+    const paced = segmentRow({
+      type: 'WORK',
+      distanceMeters: 1_000,
+      target: { by: 'PACE', secondsPerKm: { min: 300, max: 315 } },
+      paceReference: { secondsPerKm: { min: 300, max: 315 }, treadmill: false },
+    });
+    expect(paced.pace).toBeUndefined();
+    expect(paced.treadmill).toBe('≈ 11,4–12,0 km/h');
+    // Sem referência (aluno sem 5 km), nada aparece.
+    const plain = segmentRow({
+      type: 'STEADY',
+      durationSeconds: 600,
+      target: { by: 'ZONE', zone: 'Z2' },
+    });
+    expect(plain.pace).toBeUndefined();
+    expect(plain.treadmill).toBeUndefined();
   });
 
   it('resumo do plano', () => {

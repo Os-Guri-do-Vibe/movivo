@@ -287,6 +287,28 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
+    id: 'regenerate-protocol',
+    kind: 'TERMINAL',
+    name: 'Regerar um protocolo da Fila do zero',
+    description:
+      'Faz o mesmo que o botão "Regerar" da Fila para um protocolo de treino ou alimentar em revisão: recusa a proposta atual sem que chegue ao aluno, encerra o caso (com auditoria) e pede ao planejamento que refaça o protocolo do zero. Útil depois de um conserto de dados que muda o que os agentes recebem.',
+    file: 'apps/api/src/scripts/regenerate-protocol.ts',
+    command:
+      'docker compose exec api node --enable-source-maps dist/scripts/regenerate-protocol.js --user <aluno> --case <caso> --actor <staff>',
+    notRunnableReason: ARGUMENT_REQUIRED,
+  },
+  {
+    id: 'repair-anamnesis-notes',
+    kind: 'TERMINAL',
+    name: 'Consertar as notas de texto livre da anamnese',
+    description:
+      'Regrava, uma por assunto, as notas de texto livre da anamnese (motivação, preferências de treino, alimentos que gosta e que evita) que tinham sido gravadas juntas e cortadas em 500 caracteres, a partir das respostas guardadas. Idempotente; não mostra conteúdo. Depois dele, regere o protocolo dos alunos consertados.',
+    file: 'apps/api/src/scripts/repair-anamnesis-notes.ts',
+    command:
+      'docker compose exec api node --enable-source-maps dist/scripts/repair-anamnesis-notes.js [--user <aluno>] [--dry-run]',
+    notRunnableReason: OPERATOR_ONLY,
+  },
+  {
     id: 'build-default-knowledge',
     kind: 'TERMINAL',
     name: 'Gerar os artigos padrão da Base de Conhecimento',

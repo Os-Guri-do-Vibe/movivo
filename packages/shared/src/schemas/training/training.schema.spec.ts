@@ -2,7 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import { runningSegmentSchema, hyroxSessionContentSchema } from './endurance.schema';
 import { sessionLoad } from './execution.schema';
-import { enduranceTargetSchema, externalSportName, isUnnamedOtherSport } from './modality.schema';
+import {
+  enduranceTargetSchema,
+  externalSportName,
+  isUnnamedOtherSport,
+  paceRangeLabel,
+  paceReferenceLabel,
+  paceReferenceParts,
+  paceReferenceSchema,
+  treadmillSpeedKmh,
+  treadmillSpeedLabel,
+} from './modality.schema';
 import {
   planSessionSchema,
   sessionContentSchema,
@@ -174,5 +184,55 @@ describe('nome do esporte externo', () => {
     }
     expect(isUnnamedOtherSport('OTHER', 'Escalada')).toBe(false);
     expect(isUnnamedOtherSport('FOOTBALL', '')).toBe(false);
+  });
+});
+
+describe('ritmo de referência', () => {
+  it('a referência sai como ritmo (rua) e como velocidade (esteira); ritmo mais lento = velocidade menor', () => {
+    const range = { min: 360, max: 405 };
+    expect(paceRangeLabel(range)).toBe('6:00–6:45/km');
+    expect(paceRangeLabel({ min: 300, max: 300 })).toBe('5:00/km');
+    expect(treadmillSpeedKmh(360)).toBe(10);
+    expect(treadmillSpeedKmh(405)).toBe(8.9);
+    expect(treadmillSpeedLabel(range)).toBe('8,9–10,0 km/h');
+    expect(treadmillSpeedLabel({ min: 300, max: 300 })).toBe('12,0 km/h');
+    // Os dois formatos sempre: o aluno pode fazer o mesmo treino na rua ou na esteira.
+    for (const treadmill of [false, true]) {
+      expect(paceReferenceParts({ secondsPerKm: range, treadmill })).toEqual({
+        pace: '6:00–6:45/km',
+        treadmill: '8,9–10,0 km/h',
+      });
+      expect(paceReferenceLabel({ secondsPerKm: range, treadmill })).toBe(
+        '6:00–6:45/km · esteira 8,9–10,0 km/h',
+      );
+    }
+  });
+
+  it('é opcional no trecho de corrida e na corrida do HYROX, e não substitui o alvo', () => {
+    const reference = { secondsPerKm: { min: 360, max: 405 }, treadmill: false };
+    const segment = { type: 'STEADY', durationSeconds: 1_800, target: { by: 'ZONE', zone: 'Z2' } };
+    expect(runningSegmentSchema.safeParse(segment).success).toBe(true);
+    expect(runningSegmentSchema.safeParse({ ...segment, paceReference: reference }).success).toBe(
+      true,
+    );
+    expect(runningSegmentSchema.safeParse({ ...segment, target: undefined }).success).toBe(false);
+    expect(
+      hyroxSessionContentSchema.safeParse({
+        modality: 'HYROX',
+        kind: 'ENGINE',
+        blocks: [
+          {
+            type: 'RUN',
+            distanceMeters: 1_000,
+            target: { by: 'ZONE', zone: 'Z3' },
+            paceReference: { ...reference, treadmill: true },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      paceReferenceSchema.safeParse({ secondsPerKm: { min: 400, max: 300 }, treadmill: false })
+        .success,
+    ).toBe(false);
   });
 });

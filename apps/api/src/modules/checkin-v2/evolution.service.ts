@@ -1,18 +1,25 @@
 /** Leitura da evolução do aluno: metas, medidas ao longo do tempo e treinos concluídos. */
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray } from 'drizzle-orm';
 
 import type {
   GoalMilestone,
   GoalStrategy,
   MeasurementInput,
   MeasurementKind,
+  SessionContent,
+  StudentProgress,
 } from '@movivo/shared';
+import { studentProgressOf } from '@movivo/shared';
 
 import {
   bodyMeasurements,
+  executionMetrics,
+  executionSets,
   goalMilestones,
   goalTasks,
+  planSessions,
+  scheduledSessions,
   sessionExecutions,
   studentGoals,
   users,
@@ -22,6 +29,8 @@ import { addDays, mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 
 const WEEKS = 8;
+/** Quanto do histórico entra na constância e na progressão dos treinos. */
+const HISTORY_DAYS = 120;
 
 export interface EvolutionView {
   firstName: string | null;
@@ -31,6 +40,8 @@ export interface EvolutionView {
   tasks: { title: string; target: number; progress: number; windowEnd: string; status: string }[];
   measurements: Record<string, { on: string; value: number }[]>;
   weeks: { weekStart: string; sessions: number; load: number }[];
+  /** Constância, últimas semanas, progressão por modalidade, recordes e previsões. */
+  progress: StudentProgress;
 }
 
 @Injectable()
@@ -98,7 +109,10 @@ export class EvolutionService {
         };
       });
 
+      const progress = await this.progressOf(tx, userId, today);
+
       return {
+        progress,
         firstName: user?.name?.trim().split(/\s+/)[0] ?? null,
         strategyTitle: goal?.strategy?.title ?? null,
         strategy: goal?.strategy ?? null,
@@ -117,6 +131,92 @@ export class EvolutionService {
         measurements,
         weeks,
       };
+    });
+  }
+
+  /** Os registros do histórico que alimentam a constância e a progressão dos treinos. */
+  private async progressOf(
+    tx: Parameters<Parameters<TenantDatabase['runAsUser']>[2]>[0],
+    userId: string,
+    today: string,
+  ): Promise<StudentProgress> {
+    const since = addDays(today, -HISTORY_DAYS);
+    const scheduled = await tx
+      .select({ date: scheduledSessions.scheduledOn, status: scheduledSessions.status })
+      .from(scheduledSessions)
+      .where(and(eq(scheduledSessions.userId, userId), gte(scheduledSessions.scheduledOn, since)));
+    const executions = await tx
+      .select({
+        id: sessionExecutions.id,
+        date: sessionExecutions.performedOn,
+        status: sessionExecutions.status,
+        modality: sessionExecutions.modality,
+        durationMinutes: sessionExecutions.durationMinutes,
+        planSessionId: sessionExecutions.planSessionId,
+      })
+      .from(sessionExecutions)
+      .where(and(eq(sessionExecutions.userId, userId), gte(sessionExecutions.performedOn, since)));
+    const ids = executions.map((e) => e.id);
+    const metrics = ids.length
+      ? await tx
+          .select({
+            executionId: executionMetrics.executionId,
+            metrics: executionMetrics.metrics,
+            confirmed: executionMetrics.confirmed,
+          })
+          .from(executionMetrics)
+          .where(inArray(executionMetrics.executionId, ids))
+      : [];
+    const sets = ids.length
+      ? await tx
+          .select({
+            executionId: executionSets.executionId,
+            exerciseId: executionSets.exerciseId,
+            reps: executionSets.reps,
+            loadKg: executionSets.loadKg,
+            completed: executionSets.completed,
+            setNumber: executionSets.setNumber,
+          })
+          .from(executionSets)
+          .where(inArray(executionSets.executionId, ids))
+      : [];
+    // Nome do exercício como estava no treino do aluno.
+    const planIds = [
+      ...new Set(executions.map((e) => e.planSessionId).filter(Boolean)),
+    ] as string[];
+    const contents = planIds.length
+      ? await tx
+          .select({ content: planSessions.content })
+          .from(planSessions)
+          .where(inArray(planSessions.id, planIds))
+      : [];
+    const exerciseNames = new Map<string, string>();
+    for (const { content } of contents as { content: SessionContent }[]) {
+      if (content.modality !== 'STRENGTH') continue;
+      for (const exercise of content.exercises)
+        exerciseNames.set(exercise.exerciseId, exercise.name);
+    }
+    const dateOf = new Map(executions.map((e) => [e.id, e.date]));
+    const finished = new Set(
+      executions.filter((e) => e.status === 'COMPLETED' || e.status === 'PARTIAL').map((e) => e.id),
+    );
+    return studentProgressOf({
+      today,
+      scheduled,
+      executions: executions.map((e) => {
+        const m = metrics.find((row) => row.executionId === e.id);
+        return { ...e, metrics: m?.confirmed ? m.metrics : null };
+      }),
+      sets: sets
+        .filter((s) => s.completed && s.setNumber >= 1 && finished.has(s.executionId))
+        .map((s) => ({
+          executionId: s.executionId,
+          date: dateOf.get(s.executionId) ?? today,
+          exerciseId: s.exerciseId,
+          reps: s.reps,
+          loadKg: s.loadKg,
+        })),
+      exerciseNames,
     });
   }
 

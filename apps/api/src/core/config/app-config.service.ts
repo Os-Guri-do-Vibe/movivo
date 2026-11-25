@@ -322,6 +322,11 @@ export class AppConfigService {
   }
 
   /** Config do RAG: liga/desliga e piso de similaridade, top-K e candidatos da busca. */
+  /** Pré-visualização de cartões sem treino gravado (só a demonstração local). */
+  get shareCardPreviewEnabled(): boolean {
+    return this.config.SHARE_CARD_PREVIEW_ENABLED;
+  }
+
   get rag(): {
     readonly enabled: boolean;
     readonly proactiveEnabled: boolean;

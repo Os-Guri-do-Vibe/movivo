@@ -9,6 +9,7 @@ import {
   HYROX_STATION_LABELS,
   MEAL_SLOT_LABELS,
   MESOCYCLE_LABELS,
+  paceReferenceParts,
   runningSessionLabel,
   SESSION_MODALITY_LABELS,
   SESSION_PRIORITY_LABELS,
@@ -17,6 +18,7 @@ import {
   type EnduranceTarget,
   type HyroxBlock,
   type MealSlot,
+  type PaceReference,
   type PlanSession,
   type ProtocolWeekPreview,
   type RunningSegment,
@@ -335,7 +337,27 @@ export interface SegmentRow {
   label: string;
   volume: string;
   target: string;
+  /** Ritmo de referência para correr na rua ("≈ 6:00–6:45/km"); ausente sem 5 km. */
+  pace?: string;
+  /** A mesma referência como velocidade da esteira ("≈ 8,9–10,0 km/h"). */
+  treadmill?: string;
   notes?: string;
+}
+
+/**
+ * As duas referências ao lado do alvo: ritmo (rua) e velocidade (esteira). Quando o alvo já é o
+ * ritmo, só a velocidade acrescenta algo.
+ */
+export function referenceLabels(
+  reference: PaceReference | undefined,
+  target?: EnduranceTarget,
+): { pace?: string; treadmill?: string } {
+  if (!reference) return {};
+  const parts = paceReferenceParts(reference);
+  return {
+    ...(target?.by === 'PACE' ? {} : { pace: `≈ ${parts.pace}` }),
+    treadmill: `≈ ${parts.treadmill}`,
+  };
 }
 
 export function segmentRow(segment: RunningSegment): SegmentRow {
@@ -347,6 +369,7 @@ export function segmentRow(segment: RunningSegment): SegmentRow {
     label: SEGMENT_LABEL[segment.type] ?? humanizeCode(segment.type),
     volume: segment.repeat && segment.repeat > 1 ? `${segment.repeat} × ${amount}` : amount,
     target: targetLabel(segment.target),
+    ...referenceLabels(segment.paceReference, segment.target),
     notes: segment.notes,
   };
 }
@@ -357,6 +380,7 @@ export function hyroxRow(block: HyroxBlock): SegmentRow {
       label: 'Corrida',
       volume: distanceLabel(block.distanceMeters),
       target: targetLabel(block.target),
+      ...referenceLabels(block.paceReference, block.target),
     };
   }
   if (block.type === 'REST') {

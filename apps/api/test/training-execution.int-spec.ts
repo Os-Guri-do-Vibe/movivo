@@ -93,6 +93,8 @@ describe('execução do treino', () => {
     const again = await executions.start(userId, session?.scheduledSessionId ?? '', NOW);
     expect(again.id).toBe(started.id);
     expect(started.status).toBe('IN_PROGRESS');
+    // O cronômetro do treino conta a partir daqui.
+    expect(started.startedAt).toBe(NOW.toISOString());
 
     const sets = await executions.saveSets(userId, started.id, {
       sets: [
@@ -127,10 +129,19 @@ describe('execução do treino', () => {
     const finished = await executions.finish(
       userId,
       started.id,
-      { status: 'COMPLETED', rpe: 7, durationMinutes: 50, painReports: [], enjoyment: 4 },
+      {
+        status: 'COMPLETED',
+        rpe: 7,
+        durationMinutes: 50,
+        painReports: [],
+        enjoyment: 4,
+        feedback: '  Pesado no fim, mas terminei.  ',
+      },
       NOW,
     );
     expect(finished.status).toBe('COMPLETED');
+    // O que o aluno contou do treino fica gravado (sem espaços sobrando).
+    expect(finished.feedback).toBe('Pesado no fim, mas terminei.');
     const [row] = await db.runAsSystem((tx) =>
       tx.select().from(sessionExecutions).where(eq(sessionExecutions.id, started.id)),
     );
@@ -152,6 +163,17 @@ describe('execução do treino', () => {
         NOW,
       ),
     ).rejects.toThrow(/já foi concluído/);
+  });
+
+  it('as perguntas do dia: o diário sabe se já foram respondidas hoje', async () => {
+    const userId = await studentWithPlan();
+    expect((await executions.day(userId, undefined, NOW)).checkedInToday).toBe(false);
+    await executions.saveRestDayCheckIn(
+      userId,
+      { energy: 4, sleep: 3, soreness: null, mood: null, stress: null, nutrition: null },
+      NOW,
+    );
+    expect((await executions.day(userId, undefined, NOW)).checkedInToday).toBe(true);
   });
 
   it('o aluno não alcança a execução de outro aluno', async () => {

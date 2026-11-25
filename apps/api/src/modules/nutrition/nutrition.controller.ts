@@ -106,6 +106,20 @@ export class NutritionController {
     );
   }
 
+  @Put('logs/:id')
+  @HttpCode(204)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({ summary: 'Edita uma refeição já registrada (itens, porções e refeição)' })
+  async edit(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    const { meal, items } = parseBody(confirmFoodLogRequestSchema, raw);
+    await this.logs.replaceItems(userId, uuidSchema.parse(id), meal, items);
+  }
+
   @Post('logs')
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({ summary: 'Registra uma refeição já com os itens' })

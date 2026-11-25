@@ -90,11 +90,13 @@ export const studentEvolutionSchema = z.object({
     }),
   ),
   /** O que os agentes sabem do aluno (memória), para a equipe auditar. */
-  memory: z.array(
-    z.object({ kind: z.string(), text: z.string(), importance: z.number().int() }),
-  ),
+  memory: z.array(z.object({ kind: z.string(), text: z.string(), importance: z.number().int() })),
   reassessments: z.array(
-    z.object({ cycleEndedOn: z.iso.date(), status: z.string(), submittedAt: z.string().nullable() }),
+    z.object({
+      cycleEndedOn: z.iso.date(),
+      status: z.string(),
+      submittedAt: z.string().nullable(),
+    }),
   ),
 });
 export type StudentEvolution = z.infer<typeof studentEvolutionSchema>;

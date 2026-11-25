@@ -6,7 +6,7 @@
  *                    → modelo explica (hipóteses) e propõe ≤ 2 ações autorizadas pelos sinais
  *                    → cada ação: proposta → política → execução na mesma transação.
  */
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -86,7 +86,11 @@ export class WeeklyReviewService {
     private readonly queues: QueueManager,
     private readonly logger: PinoLogger,
     /** Busca nos artigos (RAG): sem ela, ou desligada, a leitura segue só pelos números. */
-    @Optional() private readonly retrieval: KnowledgeRetrievalService | null = null,
+    // `@Inject` explícito: com o tipo `X | null` o Nest não acha o provedor pelos metadados e a
+    // busca ficava sempre nula, mesmo com `RAG_ENABLED=true`.
+    @Optional()
+    @Inject(KnowledgeRetrievalService)
+    private readonly retrieval: KnowledgeRetrievalService | null = null,
   ) {
     this.logger.setContext(WeeklyReviewService.name);
   }

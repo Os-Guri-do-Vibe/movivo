@@ -60,3 +60,11 @@ export async function confirmFoodLog(logId: string, body: ConfirmFoodLogRequest)
 export async function removeFoodLog(logId: string): Promise<void> {
   await request(`/logs/${encodeURIComponent(logId)}`, { method: 'DELETE' });
 }
+
+/** Edita uma refeição já registrada (no site ou pelo WhatsApp): itens, porções e refeição. */
+export async function updateFoodLog(logId: string, body: ConfirmFoodLogRequest): Promise<void> {
+  await request(`/logs/${encodeURIComponent(logId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}

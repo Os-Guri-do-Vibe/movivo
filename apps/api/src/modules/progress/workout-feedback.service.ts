@@ -231,6 +231,7 @@ export class WorkoutFeedbackService {
       durationMinutes: execution.durationMinutes,
       load: execution.load,
       enjoyment: execution.enjoyment,
+      feedback: execution.feedback ?? null,
       planned: {
         minutes: scheduled?.minutes ?? null,
         load: scheduled?.load ?? null,

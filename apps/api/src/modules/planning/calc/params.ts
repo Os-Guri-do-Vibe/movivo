@@ -6,7 +6,11 @@
  * Campo ausente vira `null`: o validador correspondente deixa de checar aquela regra (a
  * publicação exige o documento completo, então em produção nada fica ausente).
  */
-import type { ExperienceLevel, MethodologyParameters } from '@movivo/shared';
+import {
+  DEFAULT_ZONE_PACE_PCT_OF_5K,
+  type ExperienceLevel,
+  type MethodologyParameters,
+} from '@movivo/shared';
 
 export interface Range {
   min: number;
@@ -107,6 +111,16 @@ export interface RunningRules {
   longRunMaxSharePct: number | null;
   longRunMaxMinutes: number | null;
   zoneBoundsPctHrMax: Record<string, Range>;
+  /** Ritmo de referência por zona, em % do ritmo de 5 km (padrão enquanto não for publicado). */
+  zonePacePctOf5k: Record<string, Range>;
+}
+
+/** A tabela publicada, completada pelo padrão nas zonas que ela não trouxer. */
+export function zonePacePctOf5k(params: Params): Record<string, Range> {
+  return {
+    ...DEFAULT_ZONE_PACE_PCT_OF_5K,
+    ...rowsAsRanges(params, 'zones', 'zonePacePctOf5k', 'pct'),
+  };
 }
 
 export function runningRules(params: Params, level: RulesLevel): RunningRules {
@@ -120,6 +134,7 @@ export function runningRules(params: Params, level: RulesLevel): RunningRules {
     longRunMaxSharePct: asNumber(field(params, 'progression', 'longRunMaxSharePct')),
     longRunMaxMinutes: asNumber(cell(params, 'progression', 'longRunMaxMinutes', level, 'minutes')),
     zoneBoundsPctHrMax: rowsAsRanges(params, 'zones', 'zoneBoundsPctHrMax', 'pct'),
+    zonePacePctOf5k: zonePacePctOf5k(params),
   };
 }
 

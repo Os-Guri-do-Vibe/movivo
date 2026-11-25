@@ -53,6 +53,7 @@ import { OutboxRelay } from '../domain-events/outbox-relay';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { checkTrainingPlan, type PlanCheckContext } from './calc/plan-check';
+import { withPaceReferences } from './calc/pace-reference';
 import { nutritionRules, hybridRules, hyroxRules } from './calc/params';
 import {
   externalSessionsOf,
@@ -61,6 +62,7 @@ import {
   levelOf,
   mesocyclePhaseOf,
   nutritionInputOf,
+  paceReferenceContextOf,
   planCheckContextOf,
   runningInputOf,
   scheduleContextOf,
@@ -860,7 +862,8 @@ export class PlanGenerationService {
       );
     }
     return {
-      structure,
+      // O ritmo de referência entra depois da verificação: é cálculo, não decisão do agente.
+      structure: withPaceReferences(structure, paceReferenceContextOf(view, runningParameters)),
       activeFocus,
       schedule: scheduleContextOf(view, hybridDoc.parameters, runningParameters),
       methodologyVersions: {

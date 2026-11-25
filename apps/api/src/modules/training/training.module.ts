@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { CatalogModule } from '../catalog/catalog.module';
 import { CoachingModule } from '../coaching/coaching.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { ExecutionTasksModule } from '../execution-tasks/execution-tasks.module';
@@ -11,6 +12,8 @@ import { ExecutionService } from './execution.service';
 import { ScheduleService } from './schedule.service';
 import { StravaController } from './strava/strava.controller';
 import { StravaService } from './strava/strava.service';
+import { ShareCardRenderer } from './share-card/share-card-renderer.service';
+import { ShareCardService } from './share-card/share-card.service';
 import { TrainingAccessService } from './training-access.service';
 import { TrainingController } from './training.controller';
 import { TrainingDailyScheduler } from './training-daily.scheduler';
@@ -19,6 +22,7 @@ import { TrainingLinkService } from './training-link.service';
 /** Execução diária do treino (qualquer modalidade), agenda adaptativa e link do dia. */
 @Module({
   imports: [
+    CatalogModule,
     CoachingModule,
     DomainEventsModule,
     ExecutionTasksModule,
@@ -35,6 +39,8 @@ import { TrainingLinkService } from './training-link.service';
     TrainingLinkService,
     TrainingDailyScheduler,
     StravaService,
+    ShareCardRenderer,
+    ShareCardService,
   ],
   exports: [ExecutionService, ScheduleService, TrainingAccessService, TrainingLinkService],
 })

@@ -6,10 +6,13 @@ import {
   Header,
   Headers,
   HttpCode,
+  NotFoundException,
   Param,
   Post,
   Put,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,6 +20,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 // Tipo `Express.Multer.File` de `@types/multer` (o tsconfig restringe `types`).
 import 'multer';
 import { z } from 'zod';
@@ -27,14 +31,36 @@ import {
   logExternalRequestSchema,
   saveMetricsRequestSchema,
   saveSetsRequestSchema,
+  shareCardPreviewSchema,
+  shareCardRequestSchema,
   uuidSchema,
 } from '@movivo/shared';
+
+import { AppConfigService } from '../../core/config';
 
 import { parseBody } from '../../core/validation/strict-input';
 import { ExecutionService } from './execution.service';
 import { imageForVision } from '../nutrition/image-guard';
 import { TrainingLinkService } from './training-link.service';
 import { TrainingAccessService } from './training-access.service';
+import type { ShareCardImage } from './share-card/share-card-renderer.service';
+import { ShareCardService } from './share-card/share-card.service';
+
+/**
+ * O PNG é do treino do aluno (sessão privada) e não muda depois de concluído: o navegador pode
+ * guardá-lo, nenhum cache compartilhado.
+ */
+function sendPng(res: Response, image: ShareCardImage): StreamableFile {
+  res.set({
+    'Content-Type': 'image/png',
+    'Content-Length': String(image.png.length),
+    'Cache-Control': 'private, max-age=86400',
+    ETag: `"${image.etag}"`,
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Disposition': 'inline',
+  });
+  return new StreamableFile(image.png);
+}
 
 const tokenSchema = z.object({ token: z.string().min(40).max(100) });
 const dateSchema = z.iso.date();
@@ -53,7 +79,43 @@ export class TrainingController {
     private readonly access: TrainingAccessService,
     private readonly executions: ExecutionService,
     private readonly links: TrainingLinkService,
+    private readonly shareCards: ShareCardService,
+    private readonly config: AppConfigService,
   ) {}
+
+  @Get('executions/:id/share-card')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({ summary: 'Modelos e números do cartão de compartilhamento de um treino fechado' })
+  async shareCardOptions(
+    @Param('id') id: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    return this.shareCards.options(userId, uuidSchema.parse(id));
+  }
+
+  @Get('executions/:id/share-card/image')
+  @ApiOperation({ summary: 'Cartão do treino (PNG 1080×1920) no modelo e fundo escolhidos' })
+  async shareCardImage(
+    @Param('id') id: string,
+    @Query() raw: unknown,
+    @Res({ passthrough: true }) res: Response,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    const request = parseBody(shareCardRequestSchema, raw);
+    return sendPng(res, await this.shareCards.image(userId, uuidSchema.parse(id), request));
+  }
+
+  @Post('share-card/preview')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Cartão a partir de dados enviados (só a demonstração local)' })
+  async shareCardPreview(@Body() raw: unknown, @Res({ passthrough: true }) res: Response) {
+    // Desligado fora do ambiente local: a rota simplesmente não existe.
+    if (!this.config.shareCardPreviewEnabled) throw new NotFoundException();
+    const { data, ...request } = parseBody(shareCardPreviewSchema, raw);
+    return sendPng(res, await this.shareCards.preview(data, request));
+  }
 
   @Post('access/exchange')
   @Header('Cache-Control', 'private, no-store')

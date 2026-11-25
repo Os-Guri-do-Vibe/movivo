@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { enduranceTargetSchema } from './modality.schema';
+import { enduranceTargetSchema, paceReferenceSchema } from './modality.schema';
 
 /** Distância XOR duração em cada trecho: nunca os dois, nunca nenhum. */
 function distanceXorDuration(value: { distanceMeters?: unknown; durationSeconds?: unknown }) {
@@ -107,6 +107,8 @@ export const runningSegmentSchema = z
     distanceMeters: z.number().int().min(50).max(50_000).optional(),
     durationSeconds: z.number().int().min(10).max(14_400).optional(),
     target: enduranceTargetSchema,
+    /** Ritmo (rua) ou velocidade (esteira) de referência; preenchido pelo sistema, não pelo agente. */
+    paceReference: paceReferenceSchema.optional(),
     notes: z.string().trim().max(200).optional(),
   })
   .refine(distanceXorDuration, DISTANCE_XOR_DURATION);
@@ -166,6 +168,8 @@ const hyroxRunBlockSchema = z.object({
   type: z.literal('RUN'),
   distanceMeters: z.number().int().min(100).max(10_000),
   target: enduranceTargetSchema,
+  /** Ritmo (rua) ou velocidade (esteira) de referência; preenchido pelo sistema, não pelo agente. */
+  paceReference: paceReferenceSchema.optional(),
 });
 
 const hyroxStationBlockSchema = z

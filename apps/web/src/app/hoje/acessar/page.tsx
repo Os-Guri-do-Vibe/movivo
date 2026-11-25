@@ -8,10 +8,10 @@
  * `border-destructive`...) em vez de `var(--...)` cru, para ficar igual ao resto do
  * fluxo de onboarding, não uma variação à parte.
  */
-import { ArrowRight, LockKeyhole } from 'lucide-react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
+import { AccessScreen } from '@/components/training/access-screen';
 
 export default function TrainingAccessPage() {
   const router = useRouter();
@@ -112,69 +112,28 @@ export default function TrainingAccessPage() {
   }
 
   return (
-    <div className="onboarding-light flex min-h-dvh w-full flex-col overflow-x-hidden bg-white text-foreground">
-      <header className="w-full bg-petroleo" aria-label="MOVIVO">
-        <div className="mx-auto flex h-[72px] w-full max-w-[640px] items-center justify-center px-5 sm:h-20 sm:px-8">
-          <Image
-            src="/brand/movivo-logo-horizontal.svg"
-            alt="MOVIVO"
-            width={176}
-            height={46}
-            preload
-            unoptimized
-            className="h-auto w-[154px] sm:w-44"
-          />
-        </div>
-      </header>
-      <main className="mx-auto flex w-full max-w-[640px] flex-1 flex-col px-5 pb-6 pt-6 sm:px-8 sm:pb-8 sm:pt-8">
-        <section className="flex flex-1 flex-col items-center justify-center text-center">
-          <LockKeyhole aria-hidden="true" className="mx-auto mb-5 size-10 text-verde-pulso" />
-          <h1 className="text-h1 font-extrabold tracking-tight text-foreground">
-            Tudo pronto{firstName ? `, ${firstName}` : ''}.
-          </h1>
-          <p className="mt-3 text-body leading-7 text-muted-foreground">
-            Seu treino de hoje está te esperando. Este link veio do seu WhatsApp e é só seu. Toque
-            abaixo para abrir o planejamento com segurança.
+    <AccessScreen firstName={firstName} busy={busy} error={error} onOpen={openWorkout}>
+      {error && token ? (
+        <div className="mt-4 flex flex-col items-center gap-3">
+          <p className="text-label text-muted-foreground">
+            Se você abriu o link em uma guia anônima, ele pode ter sido usado lá. Peça um novo link
+            e abra em uma guia normal.
           </p>
-          {error ? (
-            <p
-              role="alert"
-              className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo"
-            >
-              {error}
+          <button
+            type="button"
+            onClick={resendLink}
+            disabled={resending}
+            className="h-11 rounded-xl border border-primary px-5 text-label font-semibold text-primary disabled:opacity-60"
+          >
+            {resending ? 'Enviando...' : 'Receber novo link no WhatsApp'}
+          </button>
+          {resendNotice ? (
+            <p role="status" className="text-label text-petroleo">
+              {resendNotice}
             </p>
           ) : null}
-          {error && token ? (
-            <div className="mt-4 flex flex-col items-center gap-3">
-              <p className="text-label text-muted-foreground">
-                Se você abriu o link em uma guia anônima, ele pode ter sido usado lá. Peça um novo
-                link e abra em uma guia normal.
-              </p>
-              <button
-                type="button"
-                onClick={resendLink}
-                disabled={resending}
-                className="h-11 rounded-xl border border-primary px-5 text-label font-semibold text-primary disabled:opacity-60"
-              >
-                {resending ? 'Enviando...' : 'Receber novo link no WhatsApp'}
-              </button>
-              {resendNotice ? (
-                <p role="status" className="text-label text-petroleo">
-                  {resendNotice}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-        <button
-          type="button"
-          onClick={openWorkout}
-          disabled={busy}
-          className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
-        >
-          {busy ? 'Abrindo...' : 'Abrir meu treino'} <ArrowRight size={20} aria-hidden="true" />
-        </button>
-      </main>
-    </div>
+        </div>
+      ) : null}
+    </AccessScreen>
   );
 }

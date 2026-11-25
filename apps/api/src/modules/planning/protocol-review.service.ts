@@ -28,11 +28,13 @@ import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { PublishedMethodologyReader } from '../methodology/published-methodology.reader';
 import { StudentStateReader } from '../student-state/student-state.reader';
+import { withPaceReferences } from './calc/pace-reference';
 import { checkTrainingPlan } from './calc/plan-check';
 import { mondayOf } from './calc/week-planner';
 import {
   levelOf,
   nutritionInputOf,
+  paceReferenceContextOf,
   planCheckContextOf,
   scheduleContextOf,
   viableStrengthExercises,
@@ -256,11 +258,12 @@ export class ProtocolReviewService {
       const focus = [...original.modalityPriorities]
         .sort((a, b) => a.priority - b.priority)
         .map((p) => p.modality as CoachedModality);
+      const runningParameters = (await this.methodology.publishedOf('RUNNING'))?.parameters;
       const checkContext = planCheckContextOf(
         view,
         focus,
         (await this.methodology.publishedOf('HYBRID'))?.parameters,
-        (await this.methodology.publishedOf('RUNNING'))?.parameters,
+        runningParameters,
         today,
       );
       const violations = [
@@ -272,10 +275,14 @@ export class ProtocolReviewService {
       const catalog = this.catalog.getAll();
       return {
         kind: 'TRAINING',
-        structure: {
-          ...request.structure,
-          sessions: withCatalogNames(request.structure.sessions, catalog),
-        },
+        // O profissional pode ter mudado a zona de um trecho: o ritmo de referência é recalculado.
+        structure: withPaceReferences(
+          {
+            ...request.structure,
+            sessions: withCatalogNames(request.structure.sessions, catalog),
+          },
+          paceReferenceContextOf(view, runningParameters),
+        ),
       };
     }
 

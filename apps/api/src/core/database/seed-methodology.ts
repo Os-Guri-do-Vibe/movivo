@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
 import {
+  DEFAULT_ZONE_PACE_PCT_OF_5K,
   coachingActionTypeSchema,
   exampleParameters,
   METHODOLOGY_DOMAIN_SPECS,
@@ -107,6 +108,9 @@ const OVERRIDES: Record<string, MethodologyParameters> = {
         Z4: { pct: { min: 80, max: 90 } },
         Z5: { pct: { min: 90, max: 100 } },
       },
+      zonePacePctOf5k: Object.fromEntries(
+        Object.entries(DEFAULT_ZONE_PACE_PCT_OF_5K).map(([zone, pct]) => [zone, { pct }]),
+      ),
     },
   },
   HYROX: {

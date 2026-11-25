@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   draftFromPhoto: vi.fn(),
   confirmFoodLog: vi.fn(),
   removeFoodLog: vi.fn(),
+  updateFoodLog: vi.fn(),
 }));
 vi.mock('@/lib/nutrition-api', () => api);
 vi.mock('@/lib/training-api', () => ({
@@ -149,5 +150,64 @@ describe('FoodDayView', () => {
     api.getFoodDay.mockResolvedValue(day({ targets: null, hasPlan: false }));
     render(<FoodDayView />);
     expect(await screen.findByText(/ainda está sendo preparado/)).toBeInTheDocument();
+  });
+
+  const LUNCH = {
+    id: LOG_ID,
+    meal: 'LUNCH' as const,
+    items: [
+      {
+        foodItemId: '44444444-4444-4444-8444-444444444444',
+        label: 'Arroz branco cozido',
+        grams: 150,
+        portionSource: 'ESTIMATED' as const,
+      },
+      {
+        foodItemId: '55555555-5555-4555-8555-555555555555',
+        label: 'Feijão carioca',
+        grams: 100,
+        portionSource: 'ESTIMATED' as const,
+      },
+    ],
+    totals: { ...TOTALS, energyKcal: 280, proteinG: 9 },
+    confirmed: true,
+  };
+
+  it('"Editar" corrige porções, tira item e troca a refeição já registrada', async () => {
+    api.getFoodDay.mockResolvedValue(day({ logs: [LUNCH] }));
+    api.updateFoodLog.mockResolvedValue(undefined);
+    render(<FoodDayView />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Almoço' }));
+    const grams = screen.getByLabelText(/Gramas de Arroz branco cozido/);
+    await userEvent.clear(grams);
+    await userEvent.type(grams, '200');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Tirar' })[1] as HTMLElement);
+    await userEvent.selectOptions(screen.getByLabelText('Refeição'), 'DINNER');
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() =>
+      expect(api.updateFoodLog).toHaveBeenCalledWith(LOG_ID, {
+        meal: 'DINNER',
+        items: [{ ...LUNCH.items[0], grams: 200 }],
+      }),
+    );
+    expect(api.getFoodDay).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Apagar Almoço' })).toBeInTheDocument();
+  });
+
+  it('refeição registrada pelo WhatsApp aparece sozinha (a tela se atualiza)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.getFoodDay.mockResolvedValueOnce(day()).mockResolvedValue(day({ logs: [LUNCH] }));
+      render(<FoodDayView />);
+      expect(await screen.findByText('Nenhuma refeição registrada ainda.')).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(await screen.findByText(/Arroz branco cozido \(150 g\)/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

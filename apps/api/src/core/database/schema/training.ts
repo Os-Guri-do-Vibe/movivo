@@ -194,6 +194,8 @@ export const sessionExecutions = pgTable(
     /** sRPE realizado; calculado no fechamento a partir de `rpe` × `duration_minutes`. */
     load: integer('load'),
     enjoyment: smallint('enjoyment'),
+    /** O que o aluno contou do treino ao fechar, em texto livre. */
+    feedback: varchar('feedback', { length: 1000 }),
     painReports: jsonb('pain_reports')
       .$type<PainReport[]>()
       .notNull()

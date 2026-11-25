@@ -792,6 +792,20 @@
       "when": 1793651300000,
       "tag": "0112_cuidado_do_ciclo",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1793651400000,
+      "tag": "0113_feedback_do_treino",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1793651500000,
+      "tag": "0114_horas_de_sono",
+      "breakpoints": true
     }
   ]
 }

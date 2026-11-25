@@ -101,8 +101,9 @@ export const saveSetsRequestSchema = z.object({
 export type SaveSetsRequest = z.infer<typeof saveSetsRequestSchema>;
 
 /**
- * Check-in do dia, junto do fechamento do treino: o que os agentes precisam para entender o dia
- * a dia do aluno (disposição, sono, corpo, ânimo e alimentação). Tudo opcional e em um toque.
+ * Perguntas do dia (antes do treino, ou no descanso): o que os agentes precisam para entender o
+ * dia a dia do aluno (sono, horas dormidas, disposição, estresse e humor). Corpo e alimentação
+ * ainda chegam de outros caminhos (chat, aba de alimentação). Tudo opcional.
  */
 export const dailyCheckInSchema = z.object({
   /** 1 = péssimo, 5 = ótimo. */
@@ -113,6 +114,8 @@ export const dailyCheckInSchema = z.object({
   mood: z.number().int().min(1).max(5).nullable().optional(),
   /** 1 = sem estresse, 5 = muito estressado. */
   stress: z.number().int().min(1).max(5).nullable().optional(),
+  /** Quanto dormiu na noite passada, em minutos (de 1 h a 16 h). */
+  sleepMinutes: z.number().int().min(60).max(960).nullable().optional(),
   /** Como foi a alimentação do dia em relação ao plano. */
   nutrition: z.enum(['ON_TRACK', 'PARTIAL', 'OFF']).nullable().optional(),
 });
@@ -122,6 +125,8 @@ export type DailyCheckIn = z.infer<typeof dailyCheckInSchema>;
 export const finishExecutionRequestSchema = z.object({
   status: executionStatusSchema.exclude(['IN_PROGRESS']),
   rpe: rpeSchema.nullable(),
+  /** O que o aluno contou do treino, em texto livre ("como você se sentiu?"). */
+  feedback: z.string().trim().max(1_000).optional(),
   durationMinutes: z.number().int().min(1).max(600).nullable(),
   painReports: z.array(painReportSchema).max(6),
   enjoyment: z.number().int().min(1).max(5).nullable(),
@@ -159,5 +164,8 @@ export const executionViewSchema = z.object({
   rpe: z.number().nullable(),
   durationMinutes: z.number().int().nullable(),
   enjoyment: z.number().int().nullable(),
+  /** Quando o aluno tocou em "Iniciar": o cronômetro do treino conta a partir daqui. */
+  startedAt: z.string().nullable().optional(),
+  feedback: z.string().nullable().optional(),
 });
 export type ExecutionView = z.infer<typeof executionViewSchema>;

@@ -46,10 +46,12 @@ import {
   rulesLevel,
   runningRules,
   strengthRules,
+  zonePacePctOf5k,
   type HybridRules,
   type NutritionRules,
   type RulesLevel,
 } from './calc/params';
+import type { PaceReferenceContext } from './calc/pace-reference';
 import { isStarter, runningWeekRoles } from './calc/running-week';
 import type { ScheduleContext } from './plan-publisher.service';
 import { preferenceOf, usualMealsOf, type StateView } from './state-view';
@@ -138,6 +140,26 @@ export function venueOf(view: StateView, modality: CoachedModality): TrainingVen
     view.training.modalities.find((m) => m.modality === modality)?.venue ??
     defaultVenueOf(modality, view.training.venues)
   );
+}
+
+/**
+ * O que o cálculo do ritmo de referência precisa: o 5 km que o aluno informou (em qualquer
+ * modalidade: o do corredor vale para as corridas do HYROX), os percentuais por zona da
+ * metodologia de corrida e onde ele treina.
+ */
+export function paceReferenceContextOf(
+  view: StateView,
+  runningParams: MethodologyParameters | undefined,
+): PaceReferenceContext {
+  const recent5kSeconds =
+    view.training.modalities
+      .map((m) => m.recent5kSeconds)
+      .find((seconds): seconds is number => typeof seconds === 'number') ?? null;
+  return {
+    recent5kSeconds,
+    zonePacePctOf5k: zonePacePctOf5k(runningParams),
+    venues: { RUNNING: venueOf(view, 'RUNNING'), HYROX: venueOf(view, 'HYROX') },
+  };
 }
 
 /**

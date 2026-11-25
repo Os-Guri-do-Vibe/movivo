@@ -1,8 +1,10 @@
 import {
   HYROX_STATION_LABELS,
+  paceReferenceParts,
   runningSessionLabel,
   type EnduranceTarget,
   type HyroxBlock,
+  type PaceReference,
   type RunningSegment,
   type SessionContent,
 } from '@movivo/shared';
@@ -46,14 +48,29 @@ function volumeLabel(distanceMeters?: number, durationSeconds?: number): string 
   return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} s`;
 }
 
+/**
+ * Referência visual ao lado do alvo, nos dois formatos: ritmo para a rua e velocidade para a
+ * esteira. O alvo é quem manda. Quando o alvo já é o ritmo, só a velocidade acrescenta algo.
+ */
+export function referenceNote(
+  reference: PaceReference | undefined,
+  target?: EnduranceTarget,
+): string {
+  if (!reference) return '';
+  const { pace, treadmill } = paceReferenceParts(reference);
+  return target?.by === 'PACE'
+    ? ` (esteira ≈ ${treadmill})`
+    : ` (ritmo ≈ ${pace} · esteira ≈ ${treadmill})`;
+}
+
 export function segmentLine(segment: RunningSegment): string {
   const repeat = segment.repeat && segment.repeat > 1 ? `${segment.repeat} × ` : '';
-  return `${SEGMENT_LABELS[segment.type]}: ${repeat}${volumeLabel(segment.distanceMeters, segment.durationSeconds)} — ${targetLabel(segment.target)}`;
+  return `${SEGMENT_LABELS[segment.type]}: ${repeat}${volumeLabel(segment.distanceMeters, segment.durationSeconds)} — ${targetLabel(segment.target)}${referenceNote(segment.paceReference, segment.target)}`;
 }
 
 export function hyroxBlockLine(block: HyroxBlock): string {
   if (block.type === 'RUN') {
-    return `Corrida ${volumeLabel(block.distanceMeters)} — ${targetLabel(block.target)}`;
+    return `Corrida ${volumeLabel(block.distanceMeters)} — ${targetLabel(block.target)}${referenceNote(block.paceReference, block.target)}`;
   }
   if (block.type === 'REST') return `Descanso ${block.durationSeconds} s`;
   const volume = block.distanceMeters

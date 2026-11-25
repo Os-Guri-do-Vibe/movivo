@@ -9,8 +9,10 @@ import PDFDocument from 'pdfkit';
 import {
   externalSportName,
   HYROX_STATION_LABELS,
+  paceReferenceParts,
   runningSessionLabel,
   type EnduranceTarget,
+  type PaceReference,
   type PlanSession,
 } from '@movivo/shared';
 
@@ -98,6 +100,21 @@ export function targetLabel(target: EnduranceTarget): string {
   }
 }
 
+/**
+ * Referência ao lado do alvo, nos dois formatos: " (ref. ~6:00–6:45/km · esteira ~8,9–10,0 km/h)".
+ * Quando o alvo já é o ritmo, só a velocidade da esteira acrescenta algo. Vazio sem referência.
+ */
+export function referenceNote(
+  reference: PaceReference | undefined,
+  target?: EnduranceTarget,
+): string {
+  if (!reference) return '';
+  const { pace: outdoor, treadmill } = paceReferenceParts(reference);
+  return target?.by === 'PACE'
+    ? ` (esteira ~${treadmill})`
+    : ` (ref. ~${outdoor} · esteira ~${treadmill})`;
+}
+
 export function volume(distanceMeters?: number, durationSeconds?: number): string {
   if (distanceMeters !== undefined) {
     return distanceMeters >= 1000
@@ -137,7 +154,7 @@ export function sessionLines(session: PlanSession): string[] {
       ...content.segments.map((s) => {
         const reps = s.repeat && s.repeat > 1 ? `${s.repeat} × ` : '';
         const notes = s.notes ? `. ${s.notes}` : '';
-        return `${SEGMENT_LABELS[s.type] ?? s.type}: ${reps}${volume(s.distanceMeters, s.durationSeconds)} · ${targetLabel(s.target)}${notes}`;
+        return `${SEGMENT_LABELS[s.type] ?? s.type}: ${reps}${volume(s.distanceMeters, s.durationSeconds)} · ${targetLabel(s.target)}${referenceNote(s.paceReference, s.target)}${notes}`;
       }),
     ];
   }
@@ -146,7 +163,7 @@ export function sessionLines(session: PlanSession): string[] {
       content.rounds > 1 ? `${content.rounds} voltas pelo circuito:` : 'Circuito:',
       ...content.blocks.map((b) => {
         if (b.type === 'RUN') {
-          return `Corrida ${volume(b.distanceMeters)} · ${targetLabel(b.target)}`;
+          return `Corrida ${volume(b.distanceMeters)} · ${targetLabel(b.target)}${referenceNote(b.paceReference, b.target)}`;
         }
         if (b.type === 'REST') return `Pausa ${volume(undefined, b.durationSeconds)}`;
         const amount = b.reps ? `${b.reps} reps` : volume(b.distanceMeters, b.durationSeconds);

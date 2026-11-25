@@ -17,6 +17,7 @@ export function hasAnswers(checkIn: DailyCheckIn | undefined): checkIn is DailyC
       checkIn.soreness,
       checkIn.mood,
       checkIn.stress,
+      checkIn.sleepMinutes,
       checkIn.nutrition,
     ].some((value) => value !== null && value !== undefined)
   );
@@ -41,6 +42,7 @@ export async function saveDailyCheckIn(
     soreness: checkIn.soreness ?? existing?.soreness ?? null,
     mood: checkIn.mood ?? existing?.mood ?? null,
     stress: checkIn.stress ?? existing?.stress ?? null,
+    sleepMinutes: checkIn.sleepMinutes ?? existing?.sleepMinutes ?? null,
     nutrition: checkIn.nutrition ?? existing?.nutrition ?? null,
   };
   await tx

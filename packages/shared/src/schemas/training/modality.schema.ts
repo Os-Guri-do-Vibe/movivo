@@ -77,6 +77,65 @@ export const enduranceTargetSchema = z.discriminatedUnion('by', [
 ]);
 export type EnduranceTarget = z.infer<typeof enduranceTargetSchema>;
 
+/**
+ * Ritmo de referência de um trecho de corrida: um indicador VISUAL ao lado do alvo. O critério
+ * do trecho continua sendo `target` (em geral a zona cardíaca); a referência só dá ao aluno uma
+ * ideia de em que ritmo aquela zona costuma cair para ele. É calculada pelo sistema a partir do
+ * 5 km recente do aluno e dos percentuais da metodologia, nunca pelo agente.
+ */
+export const paceReferenceSchema = z.object({
+  /** Faixa em segundos por km (`min` é o mais rápido). */
+  secondsPerKm: rangeSchema(150, 900),
+  /**
+   * O treino foi planejado para a esteira (pelo terreno pedido ou pelo local do aluno). Os dois
+   * formatos são sempre mostrados (ritmo para a rua e velocidade para a esteira): o aluno pode
+   * fazer o mesmo treino num lugar ou no outro.
+   */
+  treadmill: z.boolean(),
+});
+export type PaceReference = z.infer<typeof paceReferenceSchema>;
+
+/** 330 → "5:30". */
+export function paceClock(secondsPerKm: number): string {
+  const total = Math.round(secondsPerKm);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** { min: 330, max: 360 } → "5:30–6:00/km". */
+export function paceRangeLabel(range: { min: number; max: number }): string {
+  return range.min === range.max
+    ? `${paceClock(range.min)}/km`
+    : `${paceClock(range.min)}–${paceClock(range.max)}/km`;
+}
+
+/** Velocidade da esteira (km/h, uma casa) para um ritmo em segundos por km. */
+export function treadmillSpeedKmh(secondsPerKm: number): number {
+  return Math.round(36_000 / secondsPerKm) / 10;
+}
+
+/** { min: 330, max: 360 } → "10,0–10,9 km/h" (o ritmo mais lento é a velocidade menor). */
+export function treadmillSpeedLabel(range: { min: number; max: number }): string {
+  const format = (kmh: number) =>
+    kmh.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const slow = treadmillSpeedKmh(range.max);
+  const fast = treadmillSpeedKmh(range.min);
+  return slow === fast ? `${format(fast)} km/h` : `${format(slow)}–${format(fast)} km/h`;
+}
+
+/** A mesma referência nos dois formatos: ritmo para correr na rua e velocidade para a esteira. */
+export function paceReferenceParts(reference: PaceReference): { pace: string; treadmill: string } {
+  return {
+    pace: paceRangeLabel(reference.secondsPerKm),
+    treadmill: treadmillSpeedLabel(reference.secondsPerKm),
+  };
+}
+
+/** "6:00–6:45/km · esteira 8,9–10,0 km/h": os dois formatos numa linha. */
+export function paceReferenceLabel(reference: PaceReference): string {
+  const { pace, treadmill } = paceReferenceParts(reference);
+  return `${pace} · esteira ${treadmill}`;
+}
+
 /** Tamanho máximo do nome do esporte quando o aluno escolhe "Outro" e digita qual é. */
 export const OTHER_SPORT_NAME_MAX = 80;
 

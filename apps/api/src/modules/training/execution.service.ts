@@ -6,7 +6,7 @@
  * externo. Relato de dor passa pela sentinela de segurança na mesma transação do fechamento.
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, min, or } from 'drizzle-orm';
 
 import type {
   DailyCheckIn,
@@ -21,6 +21,7 @@ import type {
 import { sessionLoad } from '@movivo/shared';
 
 import {
+  dailyCheckIns,
   executionMetrics,
   executionSets,
   planSessions,
@@ -170,13 +171,41 @@ export class ExecutionService {
           };
         });
 
+      // As perguntas do dia vêm antes do treino: respondidas uma vez por dia (água sozinha não conta).
+      const [answered] = await tx
+        .select({ id: dailyCheckIns.id })
+        .from(dailyCheckIns)
+        .where(
+          and(
+            eq(dailyCheckIns.userId, userId),
+            eq(dailyCheckIns.onDate, today),
+            or(
+              isNotNull(dailyCheckIns.energy),
+              isNotNull(dailyCheckIns.sleep),
+              isNotNull(dailyCheckIns.soreness),
+              isNotNull(dailyCheckIns.mood),
+              isNotNull(dailyCheckIns.stress),
+              isNotNull(dailyCheckIns.sleepMinutes),
+            ),
+          ),
+        );
+
+      // Até onde a seta de semana anterior pode voltar: o primeiro treino agendado do aluno.
+      const [first] = await tx
+        .select({ on: min(scheduledSessions.scheduledOn) })
+        .from(scheduledSessions)
+        .where(eq(scheduledSessions.userId, userId));
+
       return {
         firstName: user?.name?.trim().split(/\s+/)[0] ?? null,
         today,
         date,
         week,
         selected,
-        hasPlan: rows.length > 0,
+        // Semana sem treino antes do plano existir não é "plano em preparo": o aluno já tem plano.
+        hasPlan: rows.length > 0 || Boolean(first?.on),
+        firstScheduledOn: first?.on ?? null,
+        checkedInToday: Boolean(answered),
       };
     });
   }
@@ -375,6 +404,7 @@ export class ExecutionService {
           durationMinutes: minutes,
           load,
           enjoyment: request.enjoyment,
+          feedback: request.feedback?.trim() || null,
           painReports: request.painReports,
           finishedAt: now,
         })
@@ -673,6 +703,8 @@ export class ExecutionService {
         rpe: execution.rpe,
         durationMinutes: execution.durationMinutes,
         enjoyment: execution.enjoyment,
+        startedAt: execution.startedAt?.toISOString() ?? null,
+        feedback: execution.feedback ?? null,
       });
     }
     return out;

@@ -6,6 +6,7 @@ import {
   groupOf,
   rescaleOption,
   selectFoodCandidates,
+  singular,
   tokensOf,
   type FoodCandidate,
   type FoodRow,
@@ -235,5 +236,40 @@ describe('selectFoodCandidates', () => {
   it('extrai palavras do texto livre do aluno', () => {
     expect(tokensOf('arroz, frango e banana')).toEqual(['arroz', 'frango', 'banana']);
     expect(tokensOf(null)).toEqual([]);
+  });
+
+  it('lê a aversão como o aluno escreve: frase inteira, plural e acento', () => {
+    expect(tokensOf('Não gosto de mamão nem de ovos')).toEqual(['mamao', 'ovo']);
+    expect(tokensOf('mamões, peixes e pastéis')).toEqual(['mamao', 'peixe', 'pastel']);
+    expect(tokensOf('odeio fígado; evito qualquer coisa com coco')).toEqual(['figado', 'coco']);
+    expect(singular('nozes')).toBe('noz');
+    expect(singular('feijoes')).toBe('feijao');
+    expect(singular('paes')).toBe('pao');
+    expect(singular('flores')).toBe('flor');
+    expect(singular('lebres')).toBe('lebre');
+    expect(singular('arroz')).toBe('arroz');
+    expect(singular('ovo')).toBe('ovo');
+  });
+
+  it('o que o aluno evita não entra na lista do cardápio, do jeito que ele escreveu', () => {
+    const fruitAndEggs = [
+      row('20', 'Mamão, Papaia, cru', 'Frutas e derivados', 40),
+      row('21', 'Banana, prata, crua', 'Frutas e derivados', 98),
+      row('22', 'Ovo, de galinha, inteiro, cozido', 'Ovos e derivados', 146),
+      row('23', 'Frango, peito, sem pele, cozido', 'Carnes e derivados', 163),
+    ];
+    const pickedWith = (dislikedFoods: string) =>
+      selectFoodCandidates(fruitAndEggs, {
+        dietaryRestrictions: [],
+        allergenTerms: [],
+        dislikedFoods,
+      }).map((food) => food.name);
+    expect(pickedWith('')).toEqual(
+      expect.arrayContaining(['Mamão Papaia cru', 'Ovo de galinha cozido']),
+    );
+    const filtered = pickedWith('Não gosto de mamão nem de ovos');
+    expect(filtered.join(' ')).not.toMatch(/Mamão|Ovo/);
+    expect(filtered.join(' ')).toMatch(/Banana/);
+    expect(filtered.join(' ')).toMatch(/frango/i);
   });
 });

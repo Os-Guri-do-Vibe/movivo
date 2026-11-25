@@ -83,6 +83,9 @@ export type IssueMap = ReadonlyMap<string, readonly string[]>;
 const STRENGTH_COLS =
   '@xl:grid-cols-[2rem_minmax(0,1fr)_4.5rem_6rem_6.5rem_8.5rem] @xl:items-baseline';
 const ENDURANCE_COLS = '@xl:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem] @xl:items-baseline';
+/** Com o ritmo de referência: duas colunas a mais (ritmo na rua e velocidade na esteira). */
+const ENDURANCE_REFERENCE_COLS =
+  '@xl:grid-cols-[2rem_minmax(0,1fr)_6.5rem_7.5rem_8rem_8rem] @xl:items-baseline';
 const CELL_LABEL = 'text-muted-foreground @xl:sr-only';
 
 /* -------------------------------------------------------------------------- */
@@ -289,16 +292,23 @@ function StrengthRows({ exercises }: { exercises: readonly StrengthExercise[] })
 }
 
 function EnduranceRows({ rows, labels }: { rows: readonly SegmentRow[]; labels: string[] }) {
+  // A referência (ritmo na rua e velocidade na esteira) só ganha colunas quando existe: aluno
+  // sem 5 km informado continua vendo a tabela de sempre.
+  const withReference = rows.some((row) => row.pace || row.treadmill);
+  const cols = withReference ? ENDURANCE_REFERENCE_COLS : ENDURANCE_COLS;
   return (
     <>
-      <ColumnsHeader cols={ENDURANCE_COLS} labels={labels} />
+      <ColumnsHeader
+        cols={cols}
+        labels={withReference ? [...labels, 'Ritmo (rua)', 'Esteira'] : labels}
+      />
       <ol className="divide-y divide-border">
         {rows.map((row, index) => (
           <li
             key={`${index}-${row.label}`}
             className={cn(
               'grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-2.5 @xl:px-5',
-              ENDURANCE_COLS,
+              cols,
             )}
           >
             <span className="font-mono text-xs text-muted-foreground tabular-nums">
@@ -319,10 +329,28 @@ function EnduranceRows({ rows, labels }: { rows: readonly SegmentRow[]; labels: 
                 <span className={CELL_LABEL}>Intensidade </span>
                 {row.target}
               </span>
+              {withReference ? (
+                <>
+                  <span className="text-muted-foreground">
+                    {row.pace ? <span className={CELL_LABEL}>Ritmo (rua) </span> : null}
+                    {row.pace ?? <span className="hidden @xl:inline">—</span>}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {row.treadmill ? <span className={CELL_LABEL}>Esteira </span> : null}
+                    {row.treadmill ?? <span className="hidden @xl:inline">—</span>}
+                  </span>
+                </>
+              ) : null}
             </div>
           </li>
         ))}
       </ol>
+      {withReference ? (
+        <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground @xl:px-5">
+          Ritmo e esteira são referências calculadas pelo 5 km do aluno. O alvo do trecho é a
+          intensidade.
+        </p>
+      ) : null}
     </>
   );
 }

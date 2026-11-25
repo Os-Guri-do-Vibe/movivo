@@ -77,6 +77,31 @@ export async function trainingBackendFetch(path: string, init: RequestInit = {})
   return fetch(`${API_BASE}${path}`, { ...init, headers, cache: 'no-store' });
 }
 
+/** Chamada à API sem sessão de aluno (só a pré-visualização da demonstração usa). */
+export function trainingPublicFetch(path: string, init: RequestInit = {}) {
+  return fetch(`${API_BASE}${path}`, { ...init, cache: 'no-store' });
+}
+
+/** Repassa um PNG da API (cartão do treino) sem passar por JSON. */
+export function forwardImage(response: Response): NextResponse {
+  if (!response.ok || !response.body) {
+    return NextResponse.json(
+      { message: 'Não foi possível carregar a imagem.' },
+      { status: response.ok ? 502 : response.status, headers: PRIVATE_HEADERS },
+    );
+  }
+  return new NextResponse(response.body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/png',
+      // Imagem do treino do aluno: o navegador pode guardar, nenhum cache compartilhado.
+      'Cache-Control': 'private, max-age=86400',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 export async function forward(response: Response): Promise<NextResponse> {
   // 204 não tem corpo: `NextResponse.json` com esse status é inválido.
   if (response.status === 204)

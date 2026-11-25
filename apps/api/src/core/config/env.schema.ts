@@ -401,6 +401,12 @@ export const envSchema = z
      */
     RAG_PROACTIVE_ENABLED: envBoolean.default(false),
     /**
+     * Libera `POST /training/share-card/preview`, que desenha um cartão de compartilhamento a
+     * partir de dados enviados no pedido, sem treino gravado e sem login. Só serve à página de
+     * demonstração do diário no ambiente local: DESLIGADA por padrão e nunca ligada na VPS.
+     */
+    SHARE_CARD_PREVIEW_ENABLED: envBoolean.default(false),
+    /**
      * Threshold de cosseno do retrieval denso (Victor §4.2). Achado 2026-09-02: o default
      * documentado (0.75) nunca foi medido contra o `text-embedding-3-small` real — só contra
      * o embedding fake de dev, que tem outra distribuição. Com o provedor real habilitado

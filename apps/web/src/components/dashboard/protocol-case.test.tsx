@@ -250,8 +250,8 @@ describe('Caso de protocolo — leitura', () => {
     ).closest('section');
     const audit = await screen.findByRole('complementary', { name: 'Detalhes e auditoria' });
     const protocol = await screen.findByRole('region', { name: 'Plano de treino' });
-    expect(profile).not.toBeNull();
-    expect(profile!.compareDocumentPosition(audit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    if (!profile) throw new Error('perfil não encontrado');
+    expect(profile.compareDocumentPosition(audit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(audit.compareDocumentPosition(protocol) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     const auditToggle = within(audit).getByRole('button', { name: /Detalhes e auditoria/ });

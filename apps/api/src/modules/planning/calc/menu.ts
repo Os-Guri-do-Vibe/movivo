@@ -230,14 +230,106 @@ export function cleanFoodName(name: string): string {
   return normalizeFoodName(name);
 }
 
-/** Palavras do texto livre do aluno ("arroz, frango e banana") com 3 letras ou mais. */
+/**
+ * Palavras que aparecem no texto livre do aluno sem serem alimento ("não gosto de nada com
+ * coco": só "coco" interessa).
+ */
+const FILLER_WORDS: ReadonlySet<string> = new Set([
+  'que',
+  'com',
+  'sem',
+  'tudo',
+  'nada',
+  'nao',
+  'nem',
+  'mas',
+  'por',
+  'para',
+  'pra',
+  'pro',
+  'dos',
+  'das',
+  'uns',
+  'uma',
+  'umas',
+  'meu',
+  'minha',
+  'muito',
+  'muita',
+  'pouco',
+  'pouca',
+  'mais',
+  'menos',
+  'bem',
+  'tipo',
+  'tipos',
+  'qualquer',
+  'nenhum',
+  'nenhuma',
+  'todo',
+  'toda',
+  'todos',
+  'todas',
+  'coisa',
+  'coisas',
+  'comida',
+  'comidas',
+  'alimento',
+  'alimentos',
+  'gosto',
+  'gosta',
+  'gostar',
+  'evito',
+  'evita',
+  'evitar',
+  'como',
+  'comer',
+  'odeio',
+  'detesto',
+  'suporto',
+  'tolero',
+  'adoro',
+  'amo',
+  'prefiro',
+  'quando',
+  'esta',
+  'estao',
+  'cru',
+  'crua',
+  'cozido',
+  'cozida',
+  'frito',
+  'frita',
+]);
+
+/**
+ * Singular de uma palavra em português, pelas regras gerais de plural ("ovos" → "ovo", "mamões"
+ * → "mamao", "pasteis" → "pastel", "nozes" → "noz"). O aluno escreve "não gosto de ovos" e a
+ * tabela diz "Ovo, de galinha": sem isso a aversão não casava com o alimento.
+ */
+export function singular(word: string): string {
+  if (word.length <= 3) return word;
+  if (/(oes|aes)$/.test(word)) return `${word.slice(0, -3)}ao`;
+  if (/(ais|eis|ois|uis)$/.test(word) && word.length > 4) return `${word.slice(0, -2)}l`;
+  if (/ns$/.test(word)) return `${word.slice(0, -2)}m`;
+  // "flores" → "flor", "nozes" → "noz"; "lebres" (consoante antes do r) só perde o "s".
+  if (/([aeiou]res|zes)$/.test(word) && word.length > 4) return word.slice(0, -2);
+  if (/s$/.test(word) && !/ss$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
+ * Palavras do texto livre do aluno ("arroz, frango e banana"), no singular, sem acento e sem as
+ * palavras de ligação.
+ */
 export function tokensOf(text: string | null | undefined): string[] {
   if (!text) return [];
-  return fold(text)
+  const tokens = fold(text)
     .split(/[^a-z]+/)
-    .filter(
-      (token) => token.length >= 3 && !['que', 'com', 'sem', 'tudo', 'gosto'].includes(token),
-    );
+    .filter((token) => token.length >= 3 && !FILLER_WORDS.has(token))
+    .map(singular)
+    .filter((token) => token.length >= 3 && !FILLER_WORDS.has(token));
+  return [...new Set(tokens)];
 }
 
 export interface CandidateFilter {

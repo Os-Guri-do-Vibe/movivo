@@ -2,8 +2,15 @@ import type { PlanRead } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import { buildOption, quantityLabel, type FoodCandidate } from './calc/menu';
-import { pdfText, sessionLines } from './plan-pdf';
-import { nutritionPlanPdf, protocolPdfFileName, trainingPlanPdf } from './protocol-pdf';
+import { pdfText, referenceNote, sessionLines } from './plan-pdf';
+import {
+  howItWorks,
+  nutritionPlanPdf,
+  protocolPdfFileName,
+  rangeValue,
+  sessionsSubtitle,
+  trainingPlanPdf,
+} from './protocol-pdf';
 
 const plan: PlanRead = {
   firstName: 'Ana',
@@ -285,6 +292,44 @@ describe('plan-pdf', () => {
     expect(energyChart).not.toContain('1.800–2.000 kcal');
   });
 
+  it('HYROX em circuito: o PDF diz quantas voltas repetir os blocos', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const hyrox = structuredClone(plan);
+    if (!hyrox.training) throw new Error('fixture');
+    hyrox.training.structure.sessions = [
+      {
+        key: 'HYROX_A',
+        title: 'HYROX — corrida comprometida',
+        purpose: 'Correr bem depois das estações.',
+        priority: 'KEY',
+        weeklyFrequency: 1,
+        estimatedMinutes: 60,
+        estimatedRpe: 7,
+        content: {
+          modality: 'HYROX',
+          kind: 'COMPROMISED_RUNNING',
+          rounds: 4,
+          blocks: [
+            { type: 'RUN', distanceMeters: 1_000, target: { by: 'ZONE', zone: 'Z3' } },
+            { type: 'STATION', station: 'SKIERG', distanceMeters: 500 },
+          ],
+        },
+      },
+    ];
+    hyrox.training.baseWeek = [{ weekday: 'MON', slot: 'EVENING', planSessionKey: 'HYROX_A' }];
+    const pdf = await getDocumentProxy(new Uint8Array(await trainingPlanPdf(hyrox)));
+    const { text } = await extractText(pdf, { mergePages: true });
+    // Texto em fonte mono pode quebrar a linha na coluna: compara sem espaços.
+    const compact = text.replace(/\s+/g, '');
+    expect(compact).toContain('4voltas');
+    expect(compact).toContain('repitaos2blocosabaixo4vezes');
+  });
+
+  it('meta de caloria do dia: um número só quando não há faixa', () => {
+    expect(rangeValue({ energyKcal: { min: 2_600, max: 2_600 } })).toBe('2.600');
+    expect(rangeValue({ energyKcal: { min: 2_400, max: 2_600 } })).toBe('2.400–2.600');
+  });
+
   it('gera nomes de arquivo de PDF seguros, com o nome completo em slug', () => {
     expect(protocolPdfFileName('treino', 'João da Silva')).toBe(
       'protocolo-de-treino-joao-da-silva.pdf',
@@ -305,6 +350,111 @@ describe('plan-pdf', () => {
       'Aquecimento: 10 min · zona 1',
       'Estímulo: 6 × 800 m · ritmo 4:30–4:45/km',
     ]);
+  });
+
+  it('o PDF de treino mostra o ritmo na rua e a velocidade na esteira, com a legenda', async () => {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const withReferences = structuredClone(plan);
+    const sessions = withReferences.training?.structure.sessions ?? [];
+    const running = sessions[1];
+    if (running?.content.modality !== 'RUNNING') throw new Error('fixture');
+    running.content.segments = [
+      {
+        type: 'WARMUP',
+        durationSeconds: 600,
+        target: { by: 'ZONE', zone: 'Z1' },
+        paceReference: { secondsPerKm: { min: 405, max: 450 }, treadmill: false },
+      },
+      {
+        type: 'STEADY',
+        durationSeconds: 1_800,
+        target: { by: 'ZONE', zone: 'Z2' },
+        paceReference: { secondsPerKm: { min: 360, max: 405 }, treadmill: true },
+      },
+    ];
+    sessions.push({
+      key: 'HYROX',
+      title: 'HYROX',
+      purpose: 'Corrida comprometida.',
+      priority: 'IMPORTANT',
+      weeklyFrequency: 1,
+      estimatedMinutes: 60,
+      estimatedRpe: 8,
+      content: {
+        modality: 'HYROX',
+        kind: 'COMPROMISED_RUNNING',
+        rounds: 2,
+        blocks: [
+          {
+            type: 'RUN',
+            distanceMeters: 1_000,
+            target: { by: 'ZONE', zone: 'Z3' },
+            paceReference: { secondsPerKm: { min: 330, max: 360 }, treadmill: true },
+          },
+          { type: 'STATION', station: 'WALL_BALLS', reps: 30, loadKg: 6 },
+        ],
+      },
+    });
+    const text = async (source: PlanRead) => {
+      const pdf = await getDocumentProxy(new Uint8Array(await trainingPlanPdf(source)));
+      // O texto quebra de linha dentro dos cartões: compara sem os espaços.
+      return (await extractText(pdf, { mergePages: true })).text.replace(/\s+/g, '');
+    };
+    const rendered = await text(withReferences);
+    for (const expected of [
+      // Cada trecho traz os dois: ritmo para a rua e velocidade para a esteira, seja qual for o
+      // lugar para onde o treino foi planejado.
+      '~6:45–7:30',
+      '~8,0–8,9',
+      '~6:00–6:45',
+      '~8,9–10,0',
+      '~5:30–6:00',
+      '~10,0–10,9',
+      'RITMO (MIN/KM)',
+      'ESTEIRA (KM/H)',
+      'referência para correr na rua',
+      'para programar a esteira',
+      'Zona (1 a 5)',
+      'quem manda é a zona de frequência cardíaca',
+    ]) {
+      expect(rendered, expected).toContain(expected.replace(/\s+/g, ''));
+    }
+    // Sem referência (aluno sem 5 km), o PDF não ganha coluna nem legenda vazias.
+    const plain = await text(plan);
+    expect(plain.toUpperCase()).not.toContain('RITMO(MIN/KM)');
+    expect(plain.toUpperCase()).not.toContain('ESTEIRA(KM/H)');
+    expect(plain).not.toContain('paraprogramaraesteira');
+  });
+
+  it('as instruções do protocolo se adaptam ao que o plano tem', () => {
+    expect(howItWorks({ hasStrength: true, hasRuns: false, hasReferences: false })).toEqual([
+      ['01', 'Siga os treinos nos dias da semana indicados no protocolo.'],
+      ['02', 'Controle a carga pelo RIR: pare a série com as repetições em reserva indicadas.'],
+      ['03', 'Dor aguda, tontura ou mal-estar: pare o exercício e avise a equipe.'],
+    ]);
+    const runsOnly = howItWorks({ hasStrength: false, hasRuns: true, hasReferences: true });
+    expect(runsOnly.map(([n]) => n)).toEqual(['01', '02', '03']);
+    expect(runsOnly[1]?.[1]).toMatch(/quem manda é a zona.*referência visual/);
+    expect(howItWorks({ hasStrength: false, hasRuns: true, hasReferences: false })[1]?.[1]).toMatch(
+      /sem se prender ao ritmo/,
+    );
+    expect(sessionsSubtitle({ hasStrength: false, hasRuns: true })).not.toMatch(/RIR/);
+    expect(sessionsSubtitle({ hasStrength: true, hasRuns: true })).toMatch(/RIR.*corrida/);
+  });
+
+  it('a versão em texto da sessão traz a referência ao lado do alvo', () => {
+    expect(referenceNote(undefined)).toBe('');
+    const secondsPerKm = { min: 360, max: 405 };
+    // Os dois formatos, seja o treino planejado para a rua ou para a esteira.
+    for (const treadmill of [false, true]) {
+      expect(referenceNote({ secondsPerKm, treadmill })).toBe(
+        ' (ref. ~6:00–6:45/km · esteira ~8,9–10,0 km/h)',
+      );
+    }
+    // Alvo que já é ritmo: só a velocidade acrescenta algo.
+    expect(referenceNote({ secondsPerKm, treadmill: false }, { by: 'PACE', secondsPerKm })).toBe(
+      ' (esteira ~8,9–10,0 km/h)',
+    );
   });
 
   it('tira o que a fonte padrão do PDF não desenha (emoji), mantendo acentos', () => {

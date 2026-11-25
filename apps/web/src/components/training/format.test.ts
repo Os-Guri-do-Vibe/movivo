@@ -5,6 +5,7 @@ import {
   durationLabel,
   enduranceLines,
   paceLabel,
+  referenceNote,
   segmentLine,
   targetLabel,
 } from './format';
@@ -21,6 +22,26 @@ describe('formatação do treino', () => {
     expect(targetLabel({ by: 'RPE', rpe: { min: 3, max: 4 } })).toBe('esforço 3–4 de 10');
     expect(durationLabel(1_690)).toBe('28 min');
     expect(durationLabel(3_900)).toBe('1h05');
+  });
+
+  it('mostra a referência ao lado do alvo, sem tirar a zona do lugar', () => {
+    const secondsPerKm = { min: 360, max: 405 };
+    expect(referenceNote(undefined)).toBe('');
+    expect(
+      segmentLine({
+        type: 'STEADY',
+        durationSeconds: 1_800,
+        target: { by: 'ZONE', zone: 'Z2' },
+        paceReference: { secondsPerKm, treadmill: false },
+      }),
+    ).toBe('Contínuo: 30 min — zona 2 (ritmo ≈ 6:00–6:45/km · esteira ≈ 8,9–10,0 km/h)');
+    // Planejado para a esteira, o aluno continua vendo o ritmo para a rua.
+    expect(referenceNote({ secondsPerKm, treadmill: true })).toBe(
+      ' (ritmo ≈ 6:00–6:45/km · esteira ≈ 8,9–10,0 km/h)',
+    );
+    expect(referenceNote({ secondsPerKm, treadmill: false }, { by: 'PACE', secondsPerKm })).toBe(
+      ' (esteira ≈ 8,9–10,0 km/h)',
+    );
   });
 
   it('descreve trechos de corrida e blocos de HYROX', () => {

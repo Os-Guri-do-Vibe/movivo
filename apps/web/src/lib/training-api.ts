@@ -4,6 +4,7 @@
  */
 import {
   executionViewSchema,
+  shareCardOptionsSchema,
   type DailyCheckIn,
   trainingDaySchema,
   type ExecutionView,
@@ -11,6 +12,9 @@ import {
   type LogExternalRequest,
   type SaveMetricsRequest,
   type SaveSetsRequest,
+  type ShareCardData,
+  type ShareCardLayout,
+  type ShareCardOptions,
   type TrainingDay,
 } from '@movivo/shared';
 
@@ -115,4 +119,56 @@ export async function logExternal(body: LogExternalRequest): Promise<ExecutionVi
 
 export async function saveCheckIn(body: DailyCheckIn): Promise<void> {
   await request('/check-in', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export type { ShareCardOptions };
+
+/** Modelos e números do cartão de um treino fechado. */
+export async function getShareCard(executionId: string): Promise<ShareCardOptions> {
+  const payload = await request(`/executions/${encodeURIComponent(executionId)}/share-card`);
+  return shareCardOptionsSchema.parse(payload);
+}
+
+/** Lê o PNG do cartão; erro com status para o painel saber se vale tentar de novo. */
+async function pngOf(response: Response): Promise<Blob> {
+  if (!response.ok) {
+    throw new TrainingApiError(response.status, 'Não foi possível carregar a imagem do treino.');
+  }
+  const blob = await response.blob();
+  if (blob.size === 0 || !blob.type.startsWith('image/png')) {
+    throw new TrainingApiError(502, 'A imagem do treino veio vazia.');
+  }
+  return blob;
+}
+
+/** O PNG do cartão (1080×1920, fundo transparente) no modelo escolhido. Desenhado no servidor. */
+export async function getShareCardImage(
+  executionId: string,
+  layout: ShareCardLayout,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const query = new URLSearchParams({ layout });
+  return pngOf(
+    await fetch(
+      `/api/training/executions/${encodeURIComponent(executionId)}/share-card/image?${query}`,
+      { credentials: 'same-origin', signal },
+    ),
+  );
+}
+
+/** Cartão a partir de dados de exemplo, sem treino gravado (só a demonstração local). */
+export async function previewShareCardImage(
+  data: ShareCardData,
+  layout: ShareCardLayout,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  return pngOf(
+    await fetch('/api/training/share-card/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data, layout }),
+      credentials: 'same-origin',
+      signal,
+    }),
+  );
 }

@@ -4,10 +4,14 @@ import { useRef, useState } from 'react';
 
 import type { EnduranceMetrics, ExecutionView, SessionContent } from '@movivo/shared';
 
-import { Button } from '@/components/ui/button';
-import { saveMetrics, uploadActivityFile, uploadScreenshot } from '@/lib/training-api';
+import { useTrainingApi } from './training-api-context';
 
 import { durationLabel, enduranceLines, paceLabel } from './format';
+import { StudentAlert } from './student-nav';
+
+/** Ação secundária (contorno verde) no padrão do check-in. */
+const SECONDARY =
+  'min-h-11 rounded-xl border border-verde-pulso bg-card px-4 text-label font-bold text-petroleo transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50';
 
 /** "28:14" ou "1:05:30" → segundos; `null` se o formato não for reconhecido. */
 export function parseClock(text: string): number | null {
@@ -32,38 +36,58 @@ export function MetricsSummary({ metrics }: { metrics: EnduranceMetrics }) {
     rows.push(['Ritmo médio', `${paceLabel(metrics.avgPaceSecondsPerKm)} /km`]);
   }
   if (metrics.avgHeartRate !== undefined) rows.push(['FC média', `${metrics.avgHeartRate} bpm`]);
+  if (metrics.maxHeartRate !== undefined) rows.push(['FC máxima', `${metrics.maxHeartRate} bpm`]);
   if (metrics.elevationGainMeters !== undefined) {
     rows.push(['Subida', `${metrics.elevationGainMeters} m`]);
   }
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
       {rows.map(([label, value]) => (
-        <div key={label} className="contents">
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd>{value}</dd>
+        <div key={label}>
+          <dt className="text-label text-muted-foreground">{label}</dt>
+          <dd className="font-mono text-h3 font-extrabold text-foreground">{value}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-/** Corrida e HYROX: prescrição, números (à mão, por arquivo) e confirmação. */
+/** A prescrição de corrida e HYROX, trecho a trecho, como linhas numeradas do cartão. */
+export function EnduranceLines({ content }: { content: SessionContent }) {
+  return (
+    <ol className="divide-y divide-border">
+      {enduranceLines(content).map((line, index) => (
+        <li key={`${index}-${line}`} className="flex gap-3 px-4 py-3 text-body text-foreground">
+          <span
+            aria-hidden="true"
+            className="w-5 shrink-0 pt-0.5 text-center text-label font-bold text-muted-foreground"
+          >
+            {index + 1}
+          </span>
+          <span className="min-w-0">{line}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Corrida e HYROX em andamento: a prescrição trecho a trecho e, para quem usa relógio, o envio do
+ * arquivo (.fit/.gpx) ou de um print. Os números lidos entram já preenchidos no fechamento, onde
+ * o aluno confere ou digita tudo à mão.
+ */
 export function EnduranceSession({
   executionId,
   content,
   metrics,
-  confirmed,
   onChange,
 }: {
   executionId: string;
   content: SessionContent;
   metrics: EnduranceMetrics | null;
-  confirmed: boolean;
   onChange: (view: ExecutionView) => void;
 }) {
-  const [distanceKm, setDistanceKm] = useState('');
-  const [clock, setClock] = useState('');
-  const [heartRate, setHeartRate] = useState('');
+  const api = useTrainingApi();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -75,127 +99,65 @@ export function EnduranceSession({
     try {
       onChange(await action());
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Não foi possível concluir.');
+      setError(caught instanceof Error ? caught.message : 'Não foi possível ler o arquivo.');
     } finally {
       setBusy(false);
     }
   }
 
-  function manual() {
-    const seconds = parseClock(clock);
-    const km = Number(distanceKm.replace(',', '.'));
-    if (!Number.isFinite(km) || km <= 0 || seconds === null) {
-      setError('Informe a distância em km e o tempo no formato mm:ss ou h:mm:ss.');
-      return;
-    }
-    const hr = heartRate.trim() === '' ? undefined : Number(heartRate);
-    void run(() =>
-      saveMetrics(executionId, {
-        confirmed: true,
-        metrics: {
-          distanceMeters: Math.round(km * 1000),
-          movingSeconds: seconds,
-          ...(hr && Number.isInteger(hr) ? { avgHeartRate: hr } : {}),
-        },
-      }),
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4">
-      <ul className="list-disc pl-5 text-body">
-        {enduranceLines(content).map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
+    <div>
+      <EnduranceLines content={content} />
 
-      {metrics ? (
-        <div className="rounded-xl border border-border p-4">
-          <h4 className="mb-2 font-semibold">
-            {confirmed ? 'Números confirmados' : 'Números lidos do arquivo'}
-          </h4>
-          <MetricsSummary metrics={metrics} />
-          {!confirmed && (
-            <div className="mt-3 flex gap-3">
-              <Button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void run(() => saveMetrics(executionId, { metrics, confirmed: true }))
-                }
-              >
-                Está certo
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => fileInput.current?.click()}
-              >
-                Enviar outro arquivo
-              </Button>
-            </div>
+      <div className="border-t border-border px-4 py-5">
+        <div className="rounded-2xl bg-muted p-4">
+          {metrics ? (
+            <>
+              <h4 className="mb-3 font-extrabold text-foreground">Números lidos do relógio</h4>
+              <MetricsSummary metrics={metrics} />
+              <p className="mt-3 text-label text-muted-foreground">
+                Você confere (e corrige, se precisar) ao finalizar o treino.
+              </p>
+            </>
+          ) : (
+            <>
+              <h4 className="font-extrabold text-foreground">Usou relógio ou app?</h4>
+              <p className="mt-1 text-label text-muted-foreground">
+                Envie o arquivo ou um print e os números entram sozinhos no fechamento. Sem relógio,
+                é só digitar no final.
+              </p>
+            </>
           )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
-          <h4 className="font-semibold">Registre os números</h4>
-          <p className="text-label text-muted-foreground">
-            Envie o arquivo do relógio (.fit ou .gpx) ou digite os números.
-          </p>
-          <div>
-            <Button
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button
               type="button"
-              variant="outline"
               disabled={busy}
               onClick={() => fileInput.current?.click()}
+              className={SECONDARY}
             >
-              Enviar arquivo .fit ou .gpx
-            </Button>
-            <Button
+              {metrics ? 'Enviar outro arquivo' : 'Enviar arquivo .fit ou .gpx'}
+            </button>
+            <button
               type="button"
-              variant="outline"
-              className="ml-2"
               disabled={busy}
               onClick={() => imageInput.current?.click()}
+              className={SECONDARY}
             >
               Enviar print do relógio
-            </Button>
+            </button>
           </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-label">
-              Distância (km)
-              <input
-                inputMode="decimal"
-                value={distanceKm}
-                onChange={(e) => setDistanceKm(e.target.value)}
-                className="h-11 w-28 rounded-lg border border-border bg-card px-3 text-body"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-label">
-              Tempo (mm:ss)
-              <input
-                value={clock}
-                onChange={(e) => setClock(e.target.value)}
-                placeholder="28:14"
-                className="h-11 w-28 rounded-lg border border-border bg-card px-3 text-body"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-label">
-              FC média (opcional)
-              <input
-                inputMode="numeric"
-                value={heartRate}
-                onChange={(e) => setHeartRate(e.target.value)}
-                className="h-11 w-28 rounded-lg border border-border bg-card px-3 text-body"
-              />
-            </label>
-            <Button type="button" disabled={busy} onClick={manual}>
-              Salvar números
-            </Button>
-          </div>
+          {busy ? (
+            <p role="status" className="mt-3 text-label text-muted-foreground">
+              Lendo os números…
+            </p>
+          ) : null}
         </div>
-      )}
+        {error ? (
+          <div className="mt-4">
+            <StudentAlert>{error}</StudentAlert>
+          </div>
+        ) : null}
+      </div>
       <input
         ref={fileInput}
         type="file"
@@ -204,7 +166,7 @@ export function EnduranceSession({
         aria-label="Arquivo da atividade"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void run(() => uploadActivityFile(executionId, file));
+          if (file) void run(() => api.uploadActivityFile(executionId, file));
           event.target.value = '';
         }}
       />
@@ -216,18 +178,10 @@ export function EnduranceSession({
         aria-label="Print do relógio ou do aplicativo"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void run(() => uploadScreenshot(executionId, file));
+          if (file) void run(() => api.uploadScreenshot(executionId, file));
           event.target.value = '';
         }}
       />
-      {error && (
-        <p
-          role="alert"
-          className="rounded-xl border border-destructive bg-destructive/10 p-3 text-label"
-        >
-          {error}
-        </p>
-      )}
     </div>
   );
 }

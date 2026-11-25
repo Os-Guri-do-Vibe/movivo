@@ -498,6 +498,29 @@ const RUNNING: DomainSpec = {
             },
           },
         },
+        zonePacePctOf5k: {
+          kind: 'table',
+          label: 'Ritmo de referência por zona (% do ritmo de 5 km)',
+          hint: 'O ritmo em que cada zona costuma cair, como percentual do ritmo de 5 km do aluno (100% = o ritmo do 5 km; acima de 100% é mais lento). Aparece ao lado da zona como referência visual: ritmo na rua, velocidade na esteira. O critério do treino continua sendo a zona.',
+          rows: [
+            { key: 'Z1', label: 'Z1', example: { pct: { min: 135, max: 150 } } },
+            { key: 'Z2', label: 'Z2', example: { pct: { min: 120, max: 135 } } },
+            { key: 'Z3', label: 'Z3', example: { pct: { min: 110, max: 120 } } },
+            { key: 'Z4', label: 'Z4', example: { pct: { min: 103, max: 110 } } },
+            { key: 'Z5', label: 'Z5', example: { pct: { min: 95, max: 103 } } },
+          ],
+          columns: {
+            pct: {
+              kind: 'range',
+              label: '% do ritmo de 5 km',
+              hint: 'Do mais rápido ao mais lento.',
+              unit: '%',
+              min: 80,
+              max: 200,
+              example: { min: 120, max: 135 },
+            },
+          },
+        },
       },
     },
   ],
@@ -1371,6 +1394,20 @@ export const METHODOLOGY_DOMAIN_SPECS: readonly DomainSpec[] = [
   AUTONOMY,
   COMMUNICATION,
 ];
+
+/**
+ * Ritmo de referência por zona, em % do ritmo de 5 km do aluno (tempo por km): vale enquanto a
+ * metodologia de corrida publicada não trouxer a tabela `zones.zonePacePctOf5k`.
+ */
+export const DEFAULT_ZONE_PACE_PCT_OF_5K: Readonly<
+  Record<'Z1' | 'Z2' | 'Z3' | 'Z4' | 'Z5', { min: number; max: number }>
+> = {
+  Z1: { min: 135, max: 150 },
+  Z2: { min: 120, max: 135 },
+  Z3: { min: 110, max: 120 },
+  Z4: { min: 103, max: 110 },
+  Z5: { min: 95, max: 103 },
+};
 
 export const methodologyDomainSchema = z.enum([
   'STRENGTH',

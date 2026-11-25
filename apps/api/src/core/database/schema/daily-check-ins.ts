@@ -34,6 +34,8 @@ export const dailyCheckIns = pgTable(
     stress: smallint('stress'),
     /** Alimentação do dia em relação ao plano: ON_TRACK, PARTIAL ou OFF. */
     nutrition: varchar('nutrition', { length: 10 }),
+    /** Horas dormidas na noite passada, em minutos (perguntas do dia). */
+    sleepMinutes: smallint('sleep_minutes'),
     /** Água registrada no dia (ml), somada a cada registro pelo WhatsApp. */
     waterMl: integer('water_ml'),
     /** De onde veio: fechamento do treino (`SESSION`) ou dia de descanso (`DAILY`). */
@@ -54,6 +56,10 @@ export const dailyCheckIns = pgTable(
     check(
       'ck_daily_check_ins_nutrition',
       sql`${t.nutrition} is null or ${t.nutrition} in ('ON_TRACK', 'PARTIAL', 'OFF')`,
+    ),
+    check(
+      'ck_daily_check_ins_sleep_minutes',
+      sql`${t.sleepMinutes} is null or ${t.sleepMinutes} between 60 and 960`,
     ),
     check(
       'ck_daily_check_ins_water',

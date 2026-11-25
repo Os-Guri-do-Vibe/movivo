@@ -112,6 +112,9 @@ export class DayDigestService {
         date,
         scales: mergeObservationScales(base, reports),
         nutritionCheck: (check?.nutrition as DayDigest['nutritionCheck']) ?? null,
+        checkInSleepHours: check?.sleepMinutes
+          ? Math.round((check.sleepMinutes / 60) * 10) / 10
+          : null,
         observations: reports,
         sessions,
         executions,

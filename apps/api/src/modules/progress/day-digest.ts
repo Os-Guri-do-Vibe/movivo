@@ -44,6 +44,8 @@ export interface DayDigestInput {
   date: string;
   scales: DayScales;
   nutritionCheck: DayDigest['nutritionCheck'];
+  /** Horas dormidas informadas nas perguntas do dia (vale o relato do chat, quando há). */
+  checkInSleepHours?: number | null;
   observations: readonly ObservationView[];
   sessions: ReadonlyArray<{ status: string; minutes: number | null }>;
   executions: ReadonlyArray<{ status: string; rpe: number | null }>;
@@ -104,7 +106,7 @@ export function buildDayDigest(input: DayDigestInput): Omit<DayDigest, 'agentAct
     date: input.date,
     scales: input.scales,
     nutritionCheck: input.nutritionCheck,
-    sleepHours: hours?.valueNum ?? null,
+    sleepHours: hours?.valueNum ?? input.checkInSleepHours ?? null,
     reports: input.observations.map((o) => ({
       kind: o.kind,
       score: o.score,

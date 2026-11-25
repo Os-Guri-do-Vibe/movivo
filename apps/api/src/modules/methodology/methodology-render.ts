@@ -31,18 +31,29 @@ function formatValue(field: ColumnSpec | FieldSpec, value: unknown): string {
   }
 }
 
+/**
+ * Um campo que entrou na especificação DEPOIS da publicação não existe no documento publicado
+ * (ele só passa a existir quando o profissional publicar a próxima versão). O agente recebe
+ * exatamente o que foi publicado, então o campo ausente simplesmente não aparece: nunca derruba
+ * a geração nem vira "undefined" no prompt.
+ */
+const missing = (value: unknown) => value === undefined || value === null;
+
 function renderField(field: FieldSpec, value: unknown): string[] {
+  if (missing(value)) return [];
   if (field.kind !== 'table') return [`- ${field.label}: ${formatValue(field, value)}`];
   const rows = value as Record<string, Record<string, unknown>>;
-  const lines = [`- ${field.label}:`];
+  const lines: string[] = [];
   for (const row of field.rows) {
-    const cells = Object.entries(field.columns).map(([key, column]) => {
-      const cell = formatValue(column, rows[row.key]?.[key]);
-      return Object.keys(field.columns).length === 1 ? cell : `${column.label}: ${cell}`;
+    const cells = Object.entries(field.columns).flatMap(([key, column]) => {
+      const published = rows[row.key]?.[key];
+      if (missing(published)) return [];
+      const cell = formatValue(column, published);
+      return [Object.keys(field.columns).length === 1 ? cell : `${column.label}: ${cell}`];
     });
-    lines.push(`  - ${row.label}: ${cells.join('; ')}`);
+    if (cells.length > 0) lines.push(`  - ${row.label}: ${cells.join('; ')}`);
   }
-  return lines;
+  return lines.length > 0 ? [`- ${field.label}:`, ...lines] : [];
 }
 
 export function renderMethodology(
