@@ -537,6 +537,15 @@ services:
       # volta no webhook e de onde baixa o PDF do protocolo — por isso o nome do
       # serviço, e não localhost (que dentro do container é ele mesmo).
       API_PUBLIC_URL: http://api:3001
+      # RAG (busca nos artigos da Base de Conhecimento) LIGADO no local, para testar com os artigos
+      # reais. Em produção a chave vem de infra/vps/api.env via o secret API_ENV_PRODUCTION (ver
+      # apps/api/src/core/knowledge/README.md).
+      RAG_ENABLED: 'true'
+      # RAG na revisão semanal (mensagens proativas), também ligado no local.
+      RAG_PROACTIVE_ENABLED: 'true'
+      # Pré-visualização do cartão do treino com dados de exemplo (página /hoje/demo). Só local:
+      # na VPS não existe e a rota responde 404.
+      SHARE_CARD_PREVIEW_ENABLED: 'true'
     secrets:
       - postgres_app_password
       - redis_password
@@ -590,6 +599,9 @@ services:
       NODE_ENV: production
       # BFF do dashboard fala com a API pela rede interna, como na VPS.
       MOVIVO_API_URL: http://api:3001/api/v1
+      # Página de demonstração do diário (/hoje/demo, todos os cenários com dados de exemplo).
+      # Só local: na VPS não existe e a página responde 404.
+      STUDENT_DEMO_ENABLED: 'true'
     ports:
       - '127.0.0.1:${HOST_WEB_PORT:-3000}:3444'
     deploy:

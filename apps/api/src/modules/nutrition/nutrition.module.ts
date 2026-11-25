@@ -1,0 +1,25 @@
+import { Module } from '@nestjs/common';
+
+import { CatalogModule } from '../catalog/catalog.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { ExecutionTasksModule } from '../execution-tasks/execution-tasks.module';
+import { TrainingModule } from '../training/training.module';
+import { StudentStateModule } from '../student-state/student-state.module';
+import { FoodCandidatesService } from './food-candidates.service';
+import { FoodLogService } from './food-log.service';
+import { NutritionController } from './nutrition.controller';
+
+/** Registro alimentar do aluno: texto/foto → rascunho → confirmação, e o dia com a meta. */
+@Module({
+  imports: [
+    CatalogModule,
+    DomainEventsModule,
+    ExecutionTasksModule,
+    StudentStateModule,
+    TrainingModule,
+  ],
+  controllers: [NutritionController],
+  providers: [FoodLogService, FoodCandidatesService],
+  exports: [FoodLogService, FoodCandidatesService],
+})
+export class NutritionModule {}

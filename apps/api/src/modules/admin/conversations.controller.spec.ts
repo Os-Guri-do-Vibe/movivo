@@ -43,7 +43,7 @@ describe('ConversationsController', () => {
     expect(() => guard.canActivate(contextFor(actor(role), 'list'))).toThrow(ForbiddenException);
   });
 
-  // Escrever para o aluno (pausar o Coach, enviar mensagem) é capability própria.
+  // Escrever para o aluno (pausar a IA, enviar mensagem) é capability própria.
   it.each(['setAiAttendance', 'sendMessage'] as const)(
     '%s: aceita ADMIN e PROFESSIONAL; nega SUPPORT, MARKETING e FINANCE',
     (h) => {

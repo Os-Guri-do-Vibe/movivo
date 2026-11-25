@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AnamnesisApiError,
+  describeAnamnesisError,
   getSession,
   isPhoneComplete,
   isSessionReplaced,
@@ -171,5 +172,40 @@ describe('submitAnamnesis', () => {
     vi.stubGlobal('fetch', mockFetch(200, { status: 'SUBMITTED', outcome: 'READY' }));
     const res = await submitAnamnesis('ref');
     expect(res).toEqual({ status: 'SUBMITTED', outcome: 'READY' });
+  });
+});
+
+describe('falhas e mensagens ao aluno', () => {
+  it('sem rede (ou tempo esgotado) vira status 0 e pede para conferir a conexão', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    const error = await submitAnamnesis('ref').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AnamnesisApiError);
+    expect((error as AnamnesisApiError).status).toBe(0);
+    expect(describeAnamnesisError(error, 'x')).toMatch(/conexão com a internet/);
+  });
+
+  it('só aproveita texto do servidor, curto e sem tipos estranhos', async () => {
+    vi.stubGlobal('fetch', mockFetch(409, { message: ['a'.repeat(1000), 42, { html: '<b>' }] }));
+    const error = (await getSession().catch((e: unknown) => e)) as AnamnesisApiError;
+    expect(error.issues).toEqual(['a'.repeat(300)]);
+  });
+
+  it('traduz cada status para PT-BR sem repassar erro de schema', () => {
+    const fallback = 'Confira os campos.';
+    const err = (status: number, issues: string[] = []) => new AnamnesisApiError(status, issues);
+    expect(describeAnamnesisError(err(400, ['Too small: expected >=1']), fallback)).toBe(fallback);
+    expect(
+      describeAnamnesisError(err(400, ['Esse código expirou.']), fallback, {
+        trustBadRequest: true,
+      }),
+    ).toBe('Esse código expirou.');
+    expect(describeAnamnesisError(err(409, ['Já existe um cadastro.']), fallback)).toBe(
+      'Já existe um cadastro.',
+    );
+    expect(describeAnamnesisError(err(410), fallback)).toMatch(/sessão expirou/);
+    expect(describeAnamnesisError(err(412), fallback)).toMatch(/outra aba/);
+    expect(describeAnamnesisError(err(429), fallback)).toMatch(/Muitas tentativas/);
+    expect(describeAnamnesisError(err(503, ['stack trace']), fallback)).toMatch(/instabilidade/);
+    expect(describeAnamnesisError(new Error('boom'), fallback)).toBe(fallback);
   });
 });

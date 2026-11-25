@@ -1,0 +1,1 @@
+DROP TABLE "reengagement_nudges" CASCADE;

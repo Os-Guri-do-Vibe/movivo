@@ -1,7 +1,43 @@
 import {
-  agentConfigHistoryResponseSchema,
+  studentEvolutionSchema,
+  type StudentEvolution,
+  tacoCatalogResponseSchema,
+  tacoFoodsResponseSchema,
+  type ImportTacoInput,
+  type TacoCatalogResponse,
+  type TacoFoodsResponse,
+  agentCostsSchema,
+  agentsOverviewSchema,
+  exceptionActionResponseSchema,
+  exceptionDecisionsResponseSchema,
+  exceptionDetailSchema,
+  exceptionExamFileSchema,
+  exceptionListResponseSchema,
+  anamnesisAnswersViewSchema,
+  swapOptionsResponseSchema,
+  type SwapOptions,
+  exceptionsSummarySchema,
+  type AnamnesisAnswersView,
+  type ExceptionScope,
+  type ExceptionsSummary,
+  type AgentCosts,
+  type AgentsOverview,
+  type ExceptionDecision,
+  type ExceptionDetail,
+  type ExceptionListItem,
+  agentProfileResponseSchema,
+  agentProfilesOverviewSchema,
+  agentProfileTestResponseSchema,
+  type AgentProfileKey,
+  type AgentProfileUpdate,
+  protocolAdjustmentResponseSchema,
+  protocolRegenerationResponseSchema,
+  protocolReviewSchema,
+  type EditProtocolRequest,
+  type ProtocolReview,
+  type ModelTierName,
+  type SaveTierRoutesRequest,
   auditSearchResponseSchema,
-  agentPersonaResponseSchema,
   configSimulationResponseSchema,
   exerciseCatalogResponseSchema,
   type ExerciseCatalogResponse,
@@ -10,29 +46,22 @@ import {
   type RetireExerciseCatalogEntryInput,
   faqEntriesResponseSchema,
   forbiddenTopicsResponseSchema,
-  inviolableRulesResponseSchema,
   type CreateForbiddenTopicInput,
   type ForbiddenTopicActionInput,
   type ForbiddenTopicsResponse,
   l1GuardrailsResponseSchema,
-  type AgentConfigHistoryResponse,
   type AuditSearchQuery,
   type AuditSearchResponse,
-  type BiologicalSex,
-  type AgentPersonaResponse,
   type ConfigSimulationResponse,
   type FaqEntriesResponse,
-  type InviolableRulesResponse,
   type L1GuardrailsResponse,
   knowledgeDocumentsResponseSchema,
   knowledgeDocumentContentResponseSchema,
   type KnowledgeDocumentContentResponse,
   type KnowledgeDocumentsResponse,
   type ReviewKnowledgeDocumentInput,
-  type PublishAgentConfigInput,
   type PublishFaqEntryInput,
   type PublishL1GuardrailInput,
-  type RollbackAgentConfigInput,
   type RollbackFaqEntryInput,
   type RetireFaqEntryInput,
   type RetireL1GuardrailInput,
@@ -74,6 +103,7 @@ import {
   type ControlCenterScriptsResponse,
   type ControlCenterScriptRunResponse,
 } from '@movivo/shared';
+import { looksPortuguese } from './api-message';
 
 interface Parser<T> {
   parse(value: unknown): T;
@@ -132,29 +162,6 @@ export interface KnowledgeDocumentsViewResponse extends Omit<KnowledgeDocumentsR
 export type MethodologyStatus =
   'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'PUBLISHED' | 'REJECTED' | 'ARCHIVED';
 
-export interface MethodologyVersionView {
-  id: string;
-  version: number | string;
-  status: MethodologyStatus;
-  content: string;
-  sha256: string | null;
-  changeNote: string | null;
-  createdBy: string | null;
-  reviewedBy: string | null;
-  createdAt: string;
-  reviewedAt: string | null;
-  publishedAt: string | null;
-  statusChangedAt: string | null;
-  current: boolean;
-}
-
-export interface MethodologyResponse {
-  data: {
-    versions: MethodologyVersionView[];
-  };
-  meta: KnowledgeDocumentsResponse['meta'];
-}
-
 export class ControlCenterApiError extends Error {
   constructor(
     readonly status: number,
@@ -181,15 +188,6 @@ const KNOWLEDGE_STATUSES = new Set<KnowledgeDocumentStatus>([
   'ARCHIVED',
   'PENDING',
 ]);
-const METHODOLOGY_STATUSES = new Set<MethodologyStatus>([
-  'DRAFT',
-  'IN_REVIEW',
-  'APPROVED',
-  'PUBLISHED',
-  'REJECTED',
-  'ARCHIVED',
-]);
-
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -243,61 +241,6 @@ const knowledgeDocumentsViewResponseSchema: Parser<KnowledgeDocumentsViewRespons
   },
 };
 
-const methodologyResponseSchema: Parser<MethodologyResponse> = {
-  parse(value) {
-    if (
-      !isRecord(value) ||
-      !isRecord(value.data) ||
-      !Array.isArray(value.data.versions) ||
-      !isRecord(value.meta)
-    ) {
-      throw new Error('Resposta de metodologia inválida.');
-    }
-    const currentId = optionalString(value.data.currentVersionId);
-    const versions = value.data.versions.map((entry) => {
-      if (
-        !isRecord(entry) ||
-        typeof entry.id !== 'string' ||
-        (typeof (entry.version ?? entry.versionLabel) !== 'number' &&
-          typeof (entry.version ?? entry.versionLabel) !== 'string') ||
-        typeof entry.status !== 'string' ||
-        !METHODOLOGY_STATUSES.has(entry.status as MethodologyStatus) ||
-        typeof entry.content !== 'string' ||
-        typeof (entry.createdAt ?? entry.statusChangedAt) !== 'string'
-      ) {
-        throw new Error('Versão de metodologia inválida.');
-      }
-      const status = entry.status as MethodologyStatus;
-      const statusChangedAt = optionalString(entry.statusChangedAt);
-      return {
-        id: entry.id,
-        version: (entry.version ?? entry.versionLabel) as number | string,
-        status,
-        content: entry.content,
-        sha256: optionalString(entry.sha256 ?? entry.contentHash ?? entry.contentSha256),
-        changeNote: optionalString(entry.changeNote),
-        createdBy: optionalString(entry.createdBy ?? entry.createdByName),
-        reviewedBy: optionalString(entry.reviewedBy ?? entry.reviewedByName ?? entry.lastActor),
-        createdAt: (entry.createdAt ?? entry.statusChangedAt) as string,
-        reviewedAt:
-          optionalString(entry.reviewedAt) ??
-          (status === 'APPROVED' || status === 'REJECTED' ? statusChangedAt : null),
-        publishedAt:
-          optionalString(entry.publishedAt) ?? (status === 'PUBLISHED' ? statusChangedAt : null),
-        statusChangedAt,
-        current:
-          entry.current === true ||
-          entry.isCurrent === true ||
-          (currentId !== null && entry.id === currentId),
-      };
-    });
-    return {
-      data: { versions },
-      meta: value.meta as unknown as MethodologyResponse['meta'],
-    };
-  },
-};
-
 async function request<T>(path: string, schema: Parser<T>, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/dashboard/control/${path}`, {
     credentials: 'same-origin',
@@ -307,7 +250,7 @@ async function request<T>(path: string, schema: Parser<T>, signal?: AbortSignal)
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? 'Seu papel não pode acessar este setor.'
@@ -402,7 +345,7 @@ const CONVERSATION_ACTION_MESSAGES = {
   contract: 'A operação devolveu dados fora do contrato esperado.',
 };
 
-/** Pausa (`true`) ou reativa (`false`) o atendimento automático do AI Coach de um aluno. */
+/** Pausa (`true`) ou reativa (`false`) o atendimento automático de um aluno. */
 export function setConversationAiPaused(
   studentId: string,
   paused: boolean,
@@ -472,47 +415,6 @@ export function getAuditEvents(
   return request(`audit?${params.toString()}`, auditSearchResponseSchema, signal);
 }
 
-/* --------------------------------- Pilar IA (US-7.7) --------------------------------- */
-
-/**
- * Leituras do pilar IA. Todas são escopadas a um slot de persona (`targetSex`): existem duas
- * personas publicadas ao mesmo tempo, uma por público, cada uma com histórico e numeração de
- * versão próprios. O slot vai em **query param** porque a API o exige assim — `persona/:sex`
- * colidiria com a rota `persona/history` no roteador do Nest.
- */
-function slotQuery(targetSex: BiologicalSex): string {
-  return `?${new URLSearchParams({ targetSex }).toString()}`;
-}
-
-export function getAgentPersona(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<AgentPersonaResponse> {
-  return request(`ai/persona${slotQuery(targetSex)}`, agentPersonaResponseSchema, signal);
-}
-
-export function getAgentConfigHistory(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<AgentConfigHistoryResponse> {
-  return request(
-    `ai/persona/history${slotQuery(targetSex)}`,
-    agentConfigHistoryResponseSchema,
-    signal,
-  );
-}
-
-export function getInviolableRules(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<InviolableRulesResponse> {
-  return request(
-    `ai/inviolable-rules${slotQuery(targetSex)}`,
-    inviolableRulesResponseSchema,
-    signal,
-  );
-}
-
 /**
  * Mutações do pilar IA. O servidor é a autoridade: a validação client-side existe para dar
  * erro cedo, e a capability `AI_CONFIG_WRITE` é exigida no endpoint — esconder o botão na UI
@@ -541,7 +443,7 @@ async function mutate<T>(
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const message =
-      isRecord(value) && typeof value.message === 'string'
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
         ? value.message
         : response.status === 403
           ? messages.forbidden
@@ -555,16 +457,6 @@ async function mutate<T>(
   } catch {
     throw new ControlCenterApiError(502, messages.contract);
   }
-}
-
-export function publishAgentPersona(input: PublishAgentConfigInput): Promise<AgentPersonaResponse> {
-  return mutate('ai/persona', input, agentPersonaResponseSchema);
-}
-
-export function rollbackAgentPersona(
-  input: RollbackAgentConfigInput,
-): Promise<AgentPersonaResponse> {
-  return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
 }
 
 export function simulateAgentConfig(
@@ -700,6 +592,24 @@ export function uploadKnowledgeArticle(file: File): Promise<KnowledgeDocumentsVi
   });
 }
 
+export function getTacoCatalog(signal?: AbortSignal): Promise<TacoCatalogResponse> {
+  return request('ai/taco', tacoCatalogResponseSchema, signal);
+}
+
+/** Todos os alimentos da TACO já importados, com a composição por 100 g. */
+export function getTacoFoods(signal?: AbortSignal): Promise<TacoFoodsResponse> {
+  return request('ai/taco/foods', tacoFoodsResponseSchema, signal);
+}
+
+/** Importa a TACO (CSV exportado da planilha oficial). Idempotente pelo número do alimento. */
+export function importTacoCsv(input: ImportTacoInput): Promise<TacoCatalogResponse> {
+  return mutate('ai/taco/import', input, tacoCatalogResponseSchema, {
+    forbidden: 'Seu papel não pode importar a TACO.',
+    fallback: 'Não foi possível importar a TACO.',
+    contract: 'A resposta da importação veio fora do contrato esperado.',
+  });
+}
+
 /** Exclui o artigo da base ativa. Sem justificativa. */
 export function deleteKnowledgeDocument(id: string): Promise<KnowledgeDocumentsViewResponse> {
   return mutate(
@@ -739,71 +649,6 @@ export function archiveKnowledgeDocument(
   );
 }
 
-export function getMethodology(signal?: AbortSignal): Promise<MethodologyResponse> {
-  return request('ai/methodology', methodologyResponseSchema, signal);
-}
-
-export function createMethodologyVersion(input: {
-  content: string;
-  changeNote?: string;
-}): Promise<MethodologyResponse> {
-  return mutate('ai/methodology', input, methodologyResponseSchema, {
-    forbidden: 'Seu papel não pode criar versões da metodologia.',
-    fallback:
-      'Não foi possível salvar a nova versão. Confira se o conteúdo tem ao menos 200 caracteres.',
-    contract: 'A resposta ao salvar a versão veio fora do contrato esperado.',
-  });
-}
-
-export function submitMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/submit`,
-    { note },
-    methodologyResponseSchema,
-  );
-}
-
-export function reviewMethodologyVersion(
-  id: string,
-  input: { decision: 'APPROVED' | 'REJECTED'; note: string },
-): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/review`,
-    input,
-    methodologyResponseSchema,
-  );
-}
-
-/** A observação é opcional: publicar uma versão não exige justificativa. */
-export function publishMethodologyVersion(id: string, note?: string): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/publish`,
-    note?.trim() ? { note: note.trim() } : {},
-    methodologyResponseSchema,
-    {
-      forbidden: 'Seu papel não pode publicar a metodologia.',
-      fallback: 'Não foi possível publicar esta versão.',
-      contract: 'A resposta ao publicar a versão veio fora do contrato esperado.',
-    },
-  );
-}
-
-export function rollbackMethodologyVersion(
-  id: string,
-  note?: string,
-): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/rollback`,
-    note?.trim() ? { note: note.trim() } : {},
-    methodologyResponseSchema,
-    {
-      forbidden: 'Seu papel não pode restaurar versões da metodologia.',
-      fallback: 'Não foi possível restaurar esta versão.',
-      contract: 'A resposta ao restaurar a versão veio fora do contrato esperado.',
-    },
-  );
-}
-
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */
 
 export function getPartnerDistribution(signal?: AbortSignal): Promise<PartnerDistributionResponse> {
@@ -834,4 +679,342 @@ export function runSystemScript(id: string): Promise<ControlCenterScriptRunRespo
     fallback: 'Não foi possível executar o script.',
     contract: 'A execução devolveu dados fora do contrato esperado.',
   });
+}
+
+/* --------- Fila de exceções (por conselho profissional) -------- */
+
+/** `scope`: `QUEUE` = Fila do Profissional; `ALERTS` = Alertas. */
+export function getExceptions(
+  status?: 'OPEN' | 'IN_REVIEW' | 'RESOLVED',
+  scope?: ExceptionScope,
+  signal?: AbortSignal,
+): Promise<ExceptionListItem[]> {
+  const query = new URLSearchParams();
+  if (status) query.set('status', status);
+  if (scope) query.set('scope', scope);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return request(`exceptions${suffix}`, exceptionListResponseSchema, signal);
+}
+
+export function getExceptionsSummary(signal?: AbortSignal): Promise<ExceptionsSummary> {
+  return request('exceptions/summary', exceptionsSummarySchema, signal);
+}
+
+export function getException(id: string, signal?: AbortSignal): Promise<ExceptionDetail> {
+  return request(`exceptions/${id}`, exceptionDetailSchema, signal);
+}
+
+export function getExceptionDecisions(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ExceptionDecision[]> {
+  return request(`exceptions/${id}/decisions`, exceptionDecisionsResponseSchema, signal);
+}
+
+/** Respostas da anamnese do aluno do caso (dado de saúde; cada leitura fica na auditoria). */
+export function getExceptionAnamnesis(
+  id: string,
+  signal?: AbortSignal,
+): Promise<AnamnesisAnswersView> {
+  return request(`exceptions/${id}/anamnesis`, anamnesisAnswersViewSchema, signal);
+}
+
+/** Exercícios que a equipe pode escolher numa troca sem equivalente seguro. */
+export function getSwapOptions(id: string, signal?: AbortSignal): Promise<SwapOptions> {
+  return request(`exceptions/${id}/swap-options`, swapOptionsResponseSchema, signal);
+}
+
+/** A equipe escolhe o exercício: a troca entra no protocolo e o aluno recebe o protocolo novo. */
+export function substituteExercise(id: string, toExerciseId: string) {
+  return mutate(
+    `exceptions/${id}/substitute`,
+    { toExerciseId },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/** Arquivo original do exame do caso (PDF ou foto, em base64). */
+export function getExceptionExamFile(id: string, signal?: AbortSignal) {
+  return request(`exceptions/${id}/exam-file`, exceptionExamFileSchema, signal);
+}
+
+const EXCEPTION_MESSAGES = {
+  forbidden: 'Este caso é de outro domínio profissional.',
+  fallback: 'Não foi possível concluir a ação neste caso.',
+  contract: 'A resposta veio fora do contrato esperado.',
+};
+
+export function claimException(id: string) {
+  return mutate(`exceptions/${id}/claim`, {}, exceptionActionResponseSchema, EXCEPTION_MESSAGES);
+}
+
+export function approveException(id: string, note?: string) {
+  return mutate(
+    `exceptions/${id}/approve`,
+    note ? { note } : {},
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+export function rejectException(id: string, note: string) {
+  return mutate(
+    `exceptions/${id}/reject`,
+    { note },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+export function resolveException(id: string, note: string) {
+  return mutate(
+    `exceptions/${id}/resolve`,
+    { note },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/** Protocolo em revisão do caso (plano completo, prévia da semana e opções de troca). */
+export function getExceptionProtocol(id: string, signal?: AbortSignal): Promise<ProtocolReview> {
+  return request(`exceptions/${id}/protocol`, protocolReviewSchema, signal);
+}
+
+/** Pede aos agentes um novo protocolo com a orientação do profissional (encerra o caso). */
+export function requestProtocolAdjustment(id: string, instruction: string) {
+  return mutate(
+    `exceptions/${id}/request-adjustment`,
+    { instruction },
+    protocolAdjustmentResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/**
+ * Descarta a proposta e manda os agentes gerarem o protocolo INTEIRO de novo, do zero e sem
+ * orientação (publicação de treino ou alimentar). O caso é encerrado; o novo protocolo volta
+ * para a fila como caso novo. Falha de geração continua usando `resolveException`.
+ */
+export function regenerateProtocol(id: string) {
+  return mutate(
+    `exceptions/${id}/regenerate`,
+    {},
+    protocolRegenerationResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/** Um problema da conferência do servidor, com o caminho do campo (`sessions.0.content…`). */
+export interface ProtocolEditIssue {
+  path: readonly (string | number)[];
+  message: string;
+}
+
+/** Erro da edição com cada problema apontado pela conferência do servidor, em PT-BR. */
+export class ProtocolEditError extends ControlCenterApiError {
+  constructor(
+    status: number,
+    message: string,
+    readonly issues: readonly string[],
+    /** Os mesmos problemas com o caminho, para apontar a sessão, o exercício ou a refeição. */
+    readonly details: readonly ProtocolEditIssue[] = issues.map((text) => ({
+      path: [],
+      message: text,
+    })),
+  ) {
+    super(status, message);
+  }
+}
+
+function protocolEditIssuesOf(value: unknown): ProtocolEditIssue[] {
+  if (!isRecord(value) || !Array.isArray(value.issues)) return [];
+  return value.issues.flatMap((issue) =>
+    isRecord(issue) && typeof issue.message === 'string'
+      ? [
+          {
+            path: Array.isArray(issue.path)
+              ? issue.path.filter(
+                  (part): part is string | number =>
+                    typeof part === 'string' || typeof part === 'number',
+                )
+              : typeof issue.path === 'string'
+                ? issue.path.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+                : [],
+            message: issue.message,
+          },
+        ]
+      : [],
+  );
+}
+
+export async function saveExceptionProtocol(
+  id: string,
+  input: EditProtocolRequest,
+): Promise<ProtocolReview> {
+  const response = await fetch(`/api/dashboard/control/exceptions/${id}/protocol`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const details = protocolEditIssuesOf(value);
+    const message =
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
+        ? value.message
+        : response.status === 403
+          ? EXCEPTION_MESSAGES.forbidden
+          : 'Não foi possível salvar o protocolo.';
+    throw new ProtocolEditError(
+      response.status,
+      message,
+      details.map((issue) => issue.message),
+      details,
+    );
+  }
+  const parsed = protocolReviewSchema.safeParse(value);
+  if (!parsed.success) throw new ControlCenterApiError(502, EXCEPTION_MESSAGES.contract);
+  return parsed.data;
+}
+
+/* --------- Agentes de IA: tarefas, níveis de modelo e custo -------- */
+
+export function getAgents(signal?: AbortSignal): Promise<AgentsOverview> {
+  return request('agents', agentsOverviewSchema, signal);
+}
+
+export function getAgentCosts(days: number, signal?: AbortSignal): Promise<AgentCosts> {
+  return request(`agents/costs?days=${days}`, agentCostsSchema, signal);
+}
+
+const PROFILE_MESSAGES = {
+  forbidden: 'Só contas ADMIN editam as fichas dos agentes.',
+  fallback: 'Não foi possível concluir a ação na ficha.',
+  contract: 'A resposta veio fora do contrato esperado.',
+};
+
+export async function getAgentProfiles(signal?: AbortSignal) {
+  return (await request('agents/profiles', agentProfilesOverviewSchema, signal)).data;
+}
+
+export async function openAgentProfileDraft(agent: AgentProfileKey) {
+  return (
+    await mutate(
+      `agents/profiles/${agent}/drafts`,
+      {},
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function updateAgentProfile(id: string, input: AgentProfileUpdate) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/update`,
+      input,
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function testAgentProfile(id: string) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/test`,
+      {},
+      agentProfileTestResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function publishAgentProfile(id: string) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/publish`,
+      {},
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export function discardAgentProfile(id: string) {
+  return mutate(
+    `agents/profiles/documents/${id}/discard`,
+    {},
+    { parse: (value: unknown) => value },
+    PROFILE_MESSAGES,
+  );
+}
+
+export async function saveTierRoutes(
+  tier: ModelTierName,
+  input: SaveTierRoutesRequest,
+): Promise<AgentsOverview['tiers']> {
+  const response = await fetch(`/api/dashboard/control/agents/tiers/${tier}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
+        ? value.message
+        : response.status === 403
+          ? 'Seu papel não pode trocar o modelo de um nível.'
+          : 'Não foi possível salvar as rotas.';
+    throw new ControlCenterApiError(response.status, message);
+  }
+  const parsed = agentsOverviewSchema.shape.tiers.safeParse(value);
+  if (!parsed.success)
+    throw new ControlCenterApiError(502, 'A resposta veio fora do contrato esperado.');
+  return parsed.data;
+}
+
+/** Protocolo ativo do aluno, aberto para emenda pelo profissional do domínio. */
+export function getActiveProtocol(
+  studentId: string,
+  kind: 'TRAINING' | 'NUTRITION',
+  signal?: AbortSignal,
+): Promise<ProtocolReview> {
+  return request(`protocols/${studentId}/${kind}`, protocolReviewSchema, signal);
+}
+
+/** Emenda o protocolo ativo: a conferência é a mesma da edição; o aluno recebe a versão nova. */
+export async function amendActiveProtocol(
+  studentId: string,
+  input: EditProtocolRequest,
+): Promise<void> {
+  const response = await fetch(`/api/dashboard/control/protocols/${studentId}/${input.kind}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (response.ok) return;
+  const details = protocolEditIssuesOf(value);
+  const message =
+    isRecord(value) && typeof value.message === 'string' && looksPortuguese(value.message)
+      ? value.message
+      : response.status === 403
+        ? EXCEPTION_MESSAGES.forbidden
+        : 'Não foi possível salvar a emenda do protocolo.';
+  throw new ProtocolEditError(
+    response.status,
+    message,
+    details.map((issue) => issue.message),
+    details,
+  );
+}
+
+export function getStudentEvolution(id: string, signal?: AbortSignal): Promise<StudentEvolution> {
+  return request(`students/${encodeURIComponent(id)}/evolution`, studentEvolutionSchema, signal);
 }

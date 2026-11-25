@@ -33,7 +33,7 @@ export const authSessions = pgTable(
     /**
      * `CASCADE`: um refresh token é estado de sessão efêmero — não é prova
      * documental. Se a conta for removida (caso raro), as sessões vão junto.
-     * Distinto de `consents`/`protocols`, que usam `RESTRICT` por serem prova.
+     * Distinto de `consents`, que usa `RESTRICT` por ser prova.
      */
     userId: userIdColumn()
       .notNull()

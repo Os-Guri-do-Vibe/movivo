@@ -96,7 +96,7 @@ async function createUser(): Promise<{ userId: string; to: string }> {
     if (!u) throw new Error('seed user');
     return u.id;
   });
-  // O dunning do PAST_DUE é um COACH_MESSAGE (health-gated) — precisa de consentimento ativo.
+  // O dunning do PAST_DUE é um CONVERSATION_MESSAGE (health-gated) — precisa de consentimento ativo.
   await seedHealthEligibility(adminClient, userId);
   return { userId, to };
 }
@@ -163,7 +163,6 @@ afterAll(async () => {
        ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable;
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
-       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM access_link_tokens WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );

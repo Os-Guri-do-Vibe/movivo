@@ -6,8 +6,7 @@
  * `current_setting('app.current_user_id')` (Sato §4.2), e é por isso que ele é
  * **coluna líder** dos índices por usuário (Sato §4.5).
  */
-import { boolean, check, index, pgTable, varchar } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import { boolean, index, pgTable, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
 import { biologicalSexEnum, userRoleEnum, userStatusEnum } from './enums';
@@ -49,19 +48,15 @@ export const users = pgTable(
     /** Nome do perfil no WhatsApp. Dado pessoal comum. */
     whatsappName: varchar('whatsapp_name', { length: 255 }),
 
-    /** Preferências do diário de treino. 05:00 é o default do produto, sempre no fuso do titular. */
+    /** Fuso do titular: agenda de treino, check-ins e revisão semanal respeitam este fuso. */
     timezone: varchar('timezone', { length: 64 }).notNull().default('America/Sao_Paulo'),
-    workoutReminderTime: varchar('workout_reminder_time', { length: 5 }).notNull().default('05:00'),
 
     /**
-     * Sexo biológico informado pelo titular na Etapa 1 da anamnese — denormalizado aqui
-     * (a origem continua sendo `anamnesis_sessions.data_block_1`) porque toda mensagem do
-     * WhatsApp precisa dele para resolver QUAL persona atende o titular (Sprint 11).
+     * Sexo biológico informado pelo titular na anamnese — denormalizado aqui porque os
+     * cálculos de energia e de referência do planejamento dependem dele.
      *
-     * **Nullable de propósito.** Titular criado antes desta coluna existir fica `NULL` até
-     * uma nova anamnese (o backfill do `migrate.ts` cobre quem já submeteu). `NULL` nunca
-     * derruba mensagem: a resolução da persona trata como "sem titular em contexto" e cai
-     * no empréstimo entre slots. **Nunca inferir por heurística de nome** (exigência
+     * **Nullable de propósito.** `NULL` significa "não informado"; o planejamento então
+     * trabalha sem a referência. **Nunca inferir por heurística de nome** (exigência
      * explícita do Sato): errar o palpite é pior que não ter o dado.
      *
      * -- LGPD: dado pessoal comum (Alexandre §5.7), não sensível do Art. 11. Ainda assim
@@ -93,17 +88,14 @@ export const users = pgTable(
     /**
      * Marca de anonimização do direito ao esquecimento (LGPD Art. 18, IV).
      *
-     * A MOVIVO **não** apaga a linha: o protocolo assinado por um profissional
-     * CREF precisa sobreviver por prazo de guarda defensiva (`ARQUITETURA.md`
-     * §8). O fluxo correto é anonimizar os identificadores e carimbar aqui a
-     * data. A coluna nasce agora, mesmo sem o fluxo implementado, para que
-     * nenhuma query escrita nas Sprints 1-3 ignore a existência do estado
-     * "titular anonimizado" e precise ser reescrita depois.
+     * A MOVIVO **não** apaga a linha: planos, decisões e registros assinados por um
+     * profissional precisam sobreviver por prazo de guarda defensiva (`ARQUITETURA.md`
+     * §8). O fluxo correto é anonimizar os identificadores e carimbar aqui a data.
      *
      * ## Campos que o fluxo precisa zerar quando for implementado
      * `name`, `email`, `whatsapp_name`, `phone_number` (pseudonimizado) e
-     * **`biological_sex`** (Sprint 11 — exigência do Sato ao aprovar a denormalização:
-     * campo derivado de anamnese não pode sobreviver ao apagamento da origem). O endpoint
+     * **`biological_sex`** (exigência do Sato ao aprovar a denormalização: campo derivado de
+     * anamnese não pode sobreviver ao apagamento da origem). O endpoint
      * `POST /control-center/admin/subjects/:id/anonymize` segue deliberadamente bloqueado
      * (`STEP_UP_REQUIRED_NOT_IMPLEMENTED`) até existir step-up — esta lista é o contrato
      * que aquele fluxo terá de cumprir.
@@ -112,19 +104,18 @@ export const users = pgTable(
 
     /**
      * PAR-Q com resposta positiva bloqueia a geração automática e exige o
-     * profissional CREF (guardrail de Clóvis/Alexandre: a IA nunca decide
-     * sozinha). Fica em `users` — e não só na anamnese — porque é uma trava de
-     * conta consultada em todo fluxo de geração.
+     * profissional (a IA nunca decide sozinha nesse caso). Fica em `users` — e não só na
+     * anamnese — porque é uma trava de conta consultada em todo fluxo de geração.
      */
     requiresProfessionalReview: boolean('requires_professional_review').notNull().default(false),
 
     /**
-     * Quando o profissional pausou o atendimento automático do AI Coach para este titular
-     * (aba "Conversas" do painel). `NULL` = o Coach responde normalmente. Pausado, o inbound
+     * Quando o profissional pausou o atendimento automático para este titular (aba
+     * "Conversas" do painel). `NULL` = a IA responde normalmente. Pausado, o inbound
      * é só registrado no histórico e quem responde é um humano. Vale até reativar à mão —
      * não expira sozinho. Quem pausou/reativou fica na trilha de auditoria.
      */
-    coachPausedAt: eventTimestamp('coach_paused_at'),
+    attendancePausedAt: eventTimestamp('attendance_paused_at'),
 
     /**
      * Até quando a equipe já leu a conversa deste titular na aba "Conversas". Mensagem
@@ -141,10 +132,6 @@ export const users = pgTable(
     index('idx_users_status').on(table.status),
     // Sequência de conversão do trial (dias 7/10/13/14 — Lucas §MVP).
     index('idx_users_trial_ends_at').on(table.trialEndsAt),
-    check(
-      'ck_users_workout_reminder_time',
-      sql`${table.workoutReminderTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`,
-    ),
   ],
 );
 

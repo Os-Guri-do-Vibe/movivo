@@ -100,6 +100,12 @@ const imageMessageSchema = z.object({
   mimetype: z.string().optional(),
 });
 
+/** `fileLength` chega como número ou string (Long do protobuf serializado). */
+const documentMessageSchema = z.object({
+  mimetype: z.string().optional(),
+  fileLength: z.union([z.number(), z.string()]).optional(),
+});
+
 const messageSchema = z.object({
   conversation: z.string().optional(),
   extendedTextMessage: z.object({ text: z.string().optional() }).optional(),
@@ -128,8 +134,13 @@ const messageSchema = z.object({
       ptt: z.boolean().optional(),
     })
     .optional(),
-  /** Só o espelho da aba "Conversas" lê imagem; o pipeline da IA continua ignorando-a. */
+  /** Imagem: o espelho mostra e, se for exame, a medicina lê. */
   imageMessage: imageMessageSchema.optional(),
+  /** Documento (só PDF segue adiante); com legenda, o Baileys embrulha em `documentWithCaptionMessage`. */
+  documentMessage: documentMessageSchema.optional(),
+  documentWithCaptionMessage: z
+    .object({ message: z.object({ documentMessage: documentMessageSchema.optional() }).optional() })
+    .optional(),
 });
 
 const upsertDataSchema = z.object({
@@ -242,6 +253,8 @@ export class EvolutionInboundEdge implements WhatsappInboundEdge {
     );
 
     let candidate: unknown;
+    const document =
+      message?.documentMessage ?? message?.documentWithCaptionMessage?.message?.documentMessage;
     if (rawText) {
       const text = sanitizeText(rawText);
       if (text.length === 0) return this.discard('empty_text');
@@ -266,8 +279,23 @@ export class EvolutionInboundEdge implements WhatsappInboundEdge {
             : {}),
         },
       };
+    } else if (message?.imageMessage || document?.mimetype === 'application/pdf') {
+      // Mesma referência do áudio: a mídia só é baixada depois dos gates do titular.
+      const media = message?.imageMessage ?? document;
+      const fileLength = Number(document?.fileLength);
+      candidate = {
+        messageId: key.id,
+        from,
+        media: {
+          mediaKey: JSON.stringify(key),
+          mimetype: media?.mimetype?.slice(0, 100) || 'image/jpeg',
+          ...(Number.isFinite(fileLength) && fileLength >= 0
+            ? { fileLength: Math.floor(fileLength) }
+            : {}),
+        },
+      };
     } else {
-      // Imagem, sticker, reaction, protocolMessage: nenhum campo suportado → descarte.
+      // Sticker, reaction, protocolMessage, documento que não é PDF: descarte.
       return this.discard('unsupported_message_type');
     }
 

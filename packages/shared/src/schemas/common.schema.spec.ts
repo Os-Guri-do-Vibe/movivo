@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { ProtocolStatus, SubscriptionStatus } from '../enums';
+import { SubscriptionStatus } from '../enums';
 import { paginationQuerySchema, subscriptionStatusSchema, uuidSchema } from './common.schema';
 
 describe('paginationQuerySchema', () => {
@@ -34,11 +34,5 @@ describe('uuidSchema', () => {
   it('aceita UUID válido e rejeita string arbitrária', () => {
     expect(uuidSchema.parse('11111111-1111-4111-8111-111111111111')).toBeTruthy();
     expect(() => uuidSchema.parse('nao-e-uuid')).toThrow();
-  });
-});
-
-describe('ProtocolStatus', () => {
-  it('inclui PENDING_SIGNATURE — o gate de assinatura CREF é estrutural', () => {
-    expect(ProtocolStatus.PENDING_SIGNATURE).toBe('PENDING_SIGNATURE');
   });
 });

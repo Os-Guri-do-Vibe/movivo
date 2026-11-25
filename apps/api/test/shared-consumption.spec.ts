@@ -14,7 +14,6 @@ import { describe, expect, it } from 'vitest';
 import {
   APP_VERSION,
   API_VERSION_PREFIX,
-  ProtocolStatus,
   SubscriptionStatus,
   paginationQuerySchema,
   subscriptionStatusSchema,
@@ -27,7 +26,6 @@ describe('consumo de @movivo/shared pelo backend', () => {
   });
 
   it('expõe os enums de domínio usados por back e front', () => {
-    expect(ProtocolStatus.PENDING_SIGNATURE).toBe('PENDING_SIGNATURE');
     expect(SubscriptionStatus.TRIALING).toBe('TRIALING');
   });
 

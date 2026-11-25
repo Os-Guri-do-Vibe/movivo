@@ -14,14 +14,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioTranscriptionPort } from '../../core/audio/audio-transcription.port';
 import type { AppConfigService } from '../../core/config';
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
-import { SUBSCRIPTION_INBOUND_EVENT, WORKOUT_INBOUND_EVENT } from '../../core/event-bus/events';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import { MEDIA_INBOUND_EVENT, SUBSCRIPTION_INBOUND_EVENT } from '../../core/event-bus/events';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { EvolutionTransport } from './evolution-transport';
@@ -76,7 +75,6 @@ function makeService(
     secret?: string;
     userRows?: Array<{ id: string }>;
     consentActive?: boolean;
-    checkinHandled?: boolean;
     subscriptionHandled?: boolean;
     evolutionEdge?: WhatsappInboundEdge;
     audioHealthDataApproved?: boolean;
@@ -85,7 +83,8 @@ function makeService(
     transcribe?: ReturnType<typeof vi.fn>;
     evolutionInstanceName?: string | null;
     downloadAudio?: ReturnType<typeof vi.fn>;
-    coachPaused?: boolean;
+    downloadMedia?: ReturnType<typeof vi.fn>;
+    attendancePaused?: boolean;
   } = {},
 ) {
   const { redis, rpush, keys, seed } = fakeRedis();
@@ -127,7 +126,7 @@ function makeService(
     request: vi.fn(async (event: string) =>
       event === SUBSCRIPTION_INBOUND_EVENT
         ? (opts.subscriptionHandled ?? false)
-        : (opts.checkinHandled ?? false),
+        : event === MEDIA_INBOUND_EVENT,
     ),
   } as unknown as DomainEventBus;
   // A borda real da EvolutionAPI é exercitada no spec dela.
@@ -152,10 +151,17 @@ function makeService(
       base64: Buffer.from('OggS-test-audio').toString('base64'),
       mimetype: 'audio/ogg; codecs=opus',
     }));
+  const downloadMedia =
+    opts.downloadMedia ??
+    vi.fn(async () => ({
+      base64: Buffer.from('%PDF-1.7 exame').toString('base64'),
+      mimetype: 'application/pdf',
+    }));
   const evolutionTransport = {
     lastKnownInstanceName: () =>
       'evolutionInstanceName' in opts ? opts.evolutionInstanceName : INSTANCE_NAME,
     downloadAudio,
+    downloadMedia,
   } as unknown as EvolutionTransport;
   const mirror = { capture: vi.fn(), attachTranscript: vi.fn() };
   const service = new WhatsappInboundService(
@@ -168,10 +174,9 @@ function makeService(
     queues,
     healthConsent,
     events,
-    { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     config,
     { encryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
-    { isPaused: vi.fn(async () => opts.coachPaused ?? false) } as unknown as CoachAttendanceService,
+    { isPaused: vi.fn(async () => opts.attendancePaused ?? false) } as unknown as AttendanceService,
     { emitMessage } as unknown as ConversationEventsService,
     mirror as unknown as WhatsappMirrorService,
     logger,
@@ -190,6 +195,7 @@ function makeService(
     logger,
     transcribe,
     downloadAudio,
+    downloadMedia,
     mirror,
   };
 }
@@ -230,7 +236,7 @@ describe('WhatsappInboundService.ingest', () => {
       AiResponseJob,
       { delay: number },
     ];
-    expect(jobName).toBe('coach-response');
+    expect(jobName).toBe('agent-response');
     expect(job.userId).toBe(USER_ID);
     expect(job.batchKey).toContain(USER_ID.toLowerCase());
     expect(job).not.toHaveProperty('text'); // nenhum PII no job
@@ -239,7 +245,7 @@ describe('WhatsappInboundService.ingest', () => {
   });
 
   it('atendimento pausado: registra a mensagem no histórico e NÃO aciona a IA', async () => {
-    const paused = makeService({ coachPaused: true });
+    const paused = makeService({ attendancePaused: true });
     await paused.service.ingest({
       ...delivery(payload({ text: 'doeu o joelho' })),
       correlationId: 'c1',
@@ -260,7 +266,7 @@ describe('WhatsappInboundService.ingest', () => {
   });
 
   it('atendimento pausado: revogação de consentimento continua valendo', async () => {
-    const paused = makeService({ coachPaused: true });
+    const paused = makeService({ attendancePaused: true });
     await paused.service.ingest({
       ...delivery(payload({ text: 'Revogar consentimento de saude' })),
       correlationId: 'c1',
@@ -385,11 +391,6 @@ describe('WhatsappInboundService.ingest', () => {
       expect.any(Object),
     );
     expect(created.rpush).not.toHaveBeenCalled();
-    // O trilho de treino (saúde) nunca é consultado sem consentimento.
-    expect(created.events.request).not.toHaveBeenCalledWith(
-      WORKOUT_INBOUND_EVENT,
-      expect.anything(),
-    );
   });
 
   it('pedido de cancelamento é tratado pela assinatura, antes da IA e até sem consentimento de saúde', async () => {
@@ -413,15 +414,6 @@ describe('WhatsappInboundService.ingest', () => {
       expect.anything(),
     );
     expect(created.rpush).toHaveBeenCalledOnce();
-  });
-
-  it('roteia check-in pelo barramento sem importar o dominio e nao chama o Coach', async () => {
-    const created = makeService({ checkinHandled: true });
-    const s = delivery(payload({ text: 'dor no quadril' }));
-    await created.service.ingest({ ...s, correlationId: 'checkin' });
-    expect(created.events.request).toHaveBeenCalledWith(WORKOUT_INBOUND_EVENT, expect.anything());
-    expect(created.rpush).not.toHaveBeenCalled();
-    expect(created.enqueue).not.toHaveBeenCalled();
   });
 
   it('borda rejeita (verify falso) → nada é processado', async () => {
@@ -550,7 +542,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledTimes(1);
     expect(created.enqueue).toHaveBeenCalledWith(
       'ai-response',
-      'coach-response',
+      'agent-response',
       expect.any(Object),
       expect.any(Object),
     );
@@ -593,7 +585,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -608,7 +600,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -625,7 +617,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -640,7 +632,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -661,5 +653,82 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.downloadAudio).not.toHaveBeenCalled();
     expect(created.transcribe).not.toHaveBeenCalled();
     expect(created.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('WhatsappInboundService.ingest — foto ou PDF (exame)', () => {
+  function mediaEdge(media: { mediaKey: string; mimetype: string; fileLength?: number }) {
+    return {
+      provider: 'EVOLUTION' as const,
+      verify: () => ({ ok: true as const }),
+      normalize: () => [{ messageId: 'doc-1', from: PHONE, media } as never],
+      capture: () => null,
+    };
+  }
+  const ingest = (created: ReturnType<typeof makeService>) =>
+    created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: {},
+      correlationId: 'media',
+    });
+
+  it('PDF conferido pelos bytes vai ao consumidor de exames, sem passar pela IA de conversa', async () => {
+    const created = makeService({
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'application/pdf' }),
+    });
+    await ingest(created);
+    expect(created.downloadMedia).toHaveBeenCalledWith(INSTANCE_NAME, '{"id":"WA-2"}');
+    expect(created.events.request).toHaveBeenCalledWith(
+      MEDIA_INBOUND_EVENT,
+      expect.objectContaining({ userId: USER_ID, mediaType: 'application/pdf' }),
+    );
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('conteúdo que não confere com o tipo: avisa e não entrega', async () => {
+    const created = makeService({
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'application/pdf' }),
+      downloadMedia: vi.fn(async () => ({
+        base64: Buffer.from('<script>').toString('base64'),
+        mimetype: 'application/pdf',
+      })),
+    });
+    await ingest(created);
+    expect(created.events.request).not.toHaveBeenCalledWith(MEDIA_INBOUND_EVENT, expect.anything());
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('tipo fora da lista ou grande demais: nem baixa', async () => {
+    for (const media of [
+      { mediaKey: '{"id":"WA-3"}', mimetype: 'image/gif' },
+      { mediaKey: '{"id":"WA-4"}', mimetype: 'application/pdf', fileLength: 20 * 1024 * 1024 },
+    ]) {
+      const created = makeService({ evolutionEdge: mediaEdge(media) });
+      await ingest(created);
+      expect(created.downloadMedia).not.toHaveBeenCalled();
+    }
+  });
+
+  it('sem consentimento de saúde: recusa antes de baixar', async () => {
+    const created = makeService({
+      consentActive: false,
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'image/jpeg' }),
+    });
+    await ingest(created);
+    expect(created.downloadMedia).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'health-consent-inactive',
+      expect.any(Object),
+      expect.any(Object),
+    );
   });
 });

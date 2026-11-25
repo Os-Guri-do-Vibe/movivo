@@ -170,7 +170,7 @@ interface EditableFields {
   videoUrl: string;
 }
 
-function ExerciseEditorDialog({
+export function ExerciseEditorDialog({
   mode,
   existingKeys,
   onClose,
@@ -342,7 +342,7 @@ function ExerciseEditorDialog({
 }
 
 export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: boolean }) {
-  const { data, error, forbidden, loading, refresh, setData } =
+  const { data, error, forbidden, loading, refresh, setData, updatedAt } =
     useControlCenterResource<ExerciseCatalogResponse>(getExerciseCatalog);
   const [modal, setModal] = useState<
     { kind: 'create' } | { kind: 'edit'; entry: ExerciseCatalogEntryVersion } | null
@@ -557,11 +557,14 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
   }
 
   return (
-    <div>
+    // Largura máxima: em monitor grande e ultrawide a lista não estica por milhares de pixels
+    // (nome à esquerda, ações a um metro de distância). Abaixo disso, ocupa o espaço todo.
+    <div className="mx-auto w-full max-w-7xl">
       <SectorHeader
         title="Exercícios"
         headingLevel="h2"
         icon={Dumbbell}
+        updatedAt={updatedAt}
         refreshing={loading}
         onRefresh={() => void refresh()}
       />
@@ -576,6 +579,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
       ) : null}
 
       <FilterBar
+        layout="grid"
         label="Filtros do catálogo de exercícios"
         onSubmit={searchExercises}
         chips={chips}
@@ -597,7 +601,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
           </>
         }
       >
-        <FilterField label="Nome" className="lg:w-64">
+        <FilterField label="Nome" className="@md:col-span-2 @3xl:col-span-4 @5xl:col-span-1">
           <span className={cn(FIELD_BOX, CONTROL_H)}>
             <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             <input
@@ -612,7 +616,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
           </span>
         </FilterField>
 
-        <FilterFieldset legend="Músculo" className="lg:w-56">
+        <FilterFieldset legend="Músculo">
           <FilterMultiSelect
             options={CATALOG_MUSCLE_OPTIONS}
             selected={form.muscleGroups}
@@ -620,7 +624,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
           />
         </FilterFieldset>
 
-        <FilterFieldset legend="Local disponível" className="lg:w-56">
+        <FilterFieldset legend="Local disponível">
           <FilterMultiSelect
             options={LOCATION_FILTER_OPTIONS}
             selected={form.locations}
@@ -630,7 +634,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
           />
         </FilterFieldset>
 
-        <FilterFieldset legend="Nível" className="lg:w-56">
+        <FilterFieldset legend="Nível">
           <FilterMultiSelect
             options={EXERCISE_LEVEL_OPTIONS}
             selected={form.levels}
@@ -644,7 +648,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
           />
         </FilterFieldset>
 
-        <FilterField label="Favoritos" className="lg:w-48">
+        <FilterField label="Favoritos">
           <FilterSelect
             value={form.favorite}
             onValueChange={(value) =>
@@ -666,7 +670,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
             : 'exercício(s) cadastrado(s) no total.'}
         </p>
         {canWrite ? (
-          <Button onClick={() => setModal({ kind: 'create' })}>
+          <Button className="w-full sm:w-auto" onClick={() => setModal({ kind: 'create' })}>
             <Plus aria-hidden="true" />
             Novo exercício
           </Button>
@@ -684,7 +688,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
               key={entry.exerciseKey}
               className="rounded-xl border border-l-4 border-border bg-card p-4 text-card-foreground"
             >
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3 sm:items-center">
                 <div className="flex min-w-0 items-center gap-3">
                   <span
                     aria-hidden="true"
@@ -694,7 +698,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
                   </span>
                   <div className="min-w-0">
                     <h3 className="text-body font-semibold">{entry.name}</h3>
-                    <p className="mt-1 truncate text-label text-muted-foreground">
+                    <p className="mt-1 line-clamp-2 text-label text-muted-foreground">
                       {entry.muscleGroups.join(', ')} |{' '}
                       {entry.locations.map((loc) => TRAINING_LOCATION_LABELS[loc]).join(', ')}
                     </p>
@@ -773,22 +777,24 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
       )}
 
       {filtered.length > 0 ? (
-        <TableFooter>
-          <ResultCount
-            from={rangeStart}
-            to={rangeEnd}
-            total={filtered.length}
-            noun="exercício(s)"
-          />
-          {totalPages > 1 ? (
-            <TablePagination
-              label="Paginação do catálogo de exercícios"
-              page={currentPage}
-              totalPages={totalPages}
-              onPageChange={setPage}
+        <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card [&>div]:border-t-0">
+          <TableFooter>
+            <ResultCount
+              from={rangeStart}
+              to={rangeEnd}
+              total={filtered.length}
+              noun="exercício(s)"
             />
-          ) : null}
-        </TableFooter>
+            {totalPages > 1 ? (
+              <TablePagination
+                label="Paginação do catálogo de exercícios"
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setPage}
+              />
+            ) : null}
+          </TableFooter>
+        </div>
       ) : null}
 
       {modal ? (

@@ -22,6 +22,9 @@ export function useControlCenterResource<T>(load: (signal?: AbortSignal) => Prom
   const [error, setError] = useState('');
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Hora da última carga que deu certo: alimenta o "Atualizado em" dos painéis cujo dado não
+  // traz a hora do servidor. Mexer no dado "por dentro" (`setData`) não conta como atualização.
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
@@ -30,6 +33,7 @@ export function useControlCenterResource<T>(load: (signal?: AbortSignal) => Prom
       setLoading(true);
       try {
         setData(await load(signal));
+        setUpdatedAt(new Date());
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
         setForbidden(caught instanceof ControlCenterApiError && caught.status === 403);
@@ -49,13 +53,47 @@ export function useControlCenterResource<T>(load: (signal?: AbortSignal) => Prom
 
   // `setData`: para mutações cuja resposta já É o recurso atualizado (ex.: favoritar no
   // catálogo de exercícios) — sincroniza sem um segundo GET nem o piscar de `loading`.
-  return { data, error, forbidden, loading, refresh, setData };
+  return { data, error, forbidden, loading, refresh, setData, updatedAt };
+}
+
+const UPDATED_AT_TIMEZONE: ControlCenterMeta['timezone'] = 'America/Sao_Paulo';
+
+/**
+ * "Atualizado em 01/11/2026, 21:19": a linha de frescor que fica logo abaixo do título de todo
+ * painel. Usa `meta` (hora que o servidor gerou o dado) quando existe; sem ela, `at` (hora da
+ * última carga no navegador). Sem nenhuma das duas, não desenha nada.
+ */
+export function UpdatedAt({
+  meta,
+  at,
+  className,
+}: {
+  meta?: ControlCenterMeta;
+  at?: Date | string | number | null;
+  className?: string;
+}) {
+  const moment = meta ? new Date(meta.generatedAt) : at == null ? null : new Date(at);
+  if (!moment || Number.isNaN(moment.getTime())) return null;
+  return (
+    <p className={cn('mt-2 flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
+      <Clock3 aria-hidden="true" className="size-3.5" />
+      Atualizado em{' '}
+      <time dateTime={moment.toISOString()}>
+        {new Intl.DateTimeFormat('pt-BR', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+          timeZone: meta?.timezone ?? UPDATED_AT_TIMEZONE,
+        }).format(moment)}
+      </time>
+    </p>
+  );
 }
 
 export function SectorHeader({
   title,
   icon: Icon,
   meta,
+  updatedAt,
   refreshing,
   onRefresh,
   refreshLabel = 'Atualizar',
@@ -70,6 +108,8 @@ export function SectorHeader({
    */
   icon?: LucideIcon;
   meta?: ControlCenterMeta;
+  /** Hora da última carga, para painéis cujo dado não traz `meta` do servidor. */
+  updatedAt?: Date | string | number | null;
   refreshing?: boolean;
   onRefresh?: () => void;
   /** Texto do botão em repouso. O estado de carregamento é sempre "Atualizando…". */
@@ -85,19 +125,7 @@ export function SectorHeader({
           {Icon ? <Icon aria-hidden="true" className="size-7 text-verde-pulso" /> : null}
           {title}
         </Heading>
-        {meta ? (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock3 aria-hidden="true" className="size-3.5" />
-            Atualizado em{' '}
-            <time dateTime={meta.generatedAt}>
-              {new Intl.DateTimeFormat('pt-BR', {
-                dateStyle: 'short',
-                timeStyle: 'short',
-                timeZone: meta.timezone,
-              }).format(new Date(meta.generatedAt))}
-            </time>
-          </p>
-        ) : null}
+        <UpdatedAt meta={meta} at={updatedAt} />
       </div>
       {onRefresh ? (
         /*

@@ -43,7 +43,7 @@ describe('SummaryDashboard', () => {
     expect(within(board).getAllByRole('article')).toHaveLength(4);
     expect(
       within(board).getByLabelText(
-        'Protocolo entregue em até 2 horas: 97 por cento, objetivo 95 por cento, Dentro do objetivo',
+        'Plano entregue em até 2 horas: 97 por cento, objetivo 95 por cento, Dentro do objetivo',
       ),
     ).toBeVisible();
     expect(within(board).getByLabelText('Margem de erro consumida: 60 por cento')).toBeVisible();
@@ -65,12 +65,10 @@ describe('SummaryDashboard', () => {
     expect(screen.getByText(/não depende de OpenTelemetry/)).toBeVisible();
   });
 
-  it('uso do RAG e dependências nomeadas em vez de zero', async () => {
+  it('dependências ainda não medidas aparecem nomeadas em vez de zero', async () => {
     getSystemSummary.mockResolvedValue(systemResponse);
     render(<SummaryDashboard resource="system" />);
-    expect(await screen.findByLabelText('Consultas em 30 dias: 340')).toBeVisible();
-    expect(screen.getByLabelText('Consultas que acharam material: 62,5%')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Ainda não medimos' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Ainda não medimos' })).toBeVisible();
     expect(screen.getByText('Sprint 9')).toBeVisible();
     expect(screen.getByText('Fase 6 — Infraestrutura')).toBeVisible();
   });

@@ -100,7 +100,9 @@ describe('Landing', () => {
     const faq = container.querySelector('#perguntas-frequentes');
     expect(faq?.querySelectorAll('details')).toHaveLength(buildFaq().length);
     // Conteúdo no DOM mesmo com as perguntas fechadas: é o que buscadores e IAs leem.
-    expect(faq?.textContent).toMatch(/orientação de treino individualizada pelo WhatsApp/);
+    expect(faq?.textContent).toMatch(
+      /assessoria de movimento, performance e bem-estar pelo WhatsApp/,
+    );
 
     const script = container.querySelector('script[type="application/ld+json"]');
     const data = JSON.parse(script?.textContent ?? '{}') as { '@graph': { '@type': string }[] };

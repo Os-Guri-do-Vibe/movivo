@@ -6,8 +6,8 @@ export const LEGAL_RELEASE: {
   privacy: string | null;
   checkoutApproved: boolean;
 } = {
-  terms: 'terms-2026-09-v1',
-  privacy: 'privacy-2026-09-v1',
+  terms: 'terms-2026-10-v2',
+  privacy: 'privacy-2026-10-v2',
   checkoutApproved: false,
 };
 

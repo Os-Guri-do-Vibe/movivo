@@ -1,0 +1,17 @@
+import type { NextRequest } from 'next/server';
+
+import { assertSameOrigin, exchangeMagicToken, failure, TrainingBffError } from '../_lib/bff';
+
+export async function POST(request: NextRequest) {
+  try {
+    assertSameOrigin(request);
+    const body = (await request.json()) as { token?: unknown };
+    if (typeof body.token !== 'string' || body.token.length < 40 || body.token.length > 100) {
+      throw new TrainingBffError(400, 'Link invalido.');
+    }
+    await exchangeMagicToken(body.token);
+    return Response.json({ ok: true });
+  } catch (error) {
+    return failure(error);
+  }
+}

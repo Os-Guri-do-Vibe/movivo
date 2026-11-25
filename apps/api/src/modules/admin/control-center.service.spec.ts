@@ -12,14 +12,9 @@ import {
 import { getTableName, isTable } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { DatabaseHealthService } from '../../core/database';
 import type { RedisHealthService } from '../../core/redis';
-import type { Redis } from 'ioredis';
-
-import type { HealthCipherService } from '../../core/database/health-cipher.service';
-import { RedisKeyBuilder } from '../../core/redis';
 import type { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
 import type { EvolutionTransport } from '../whatsapp/evolution-transport';
@@ -73,12 +68,6 @@ function withEvolution(evolution: Partial<EvolutionTransport>) {
   nextEvolution = evolution;
 }
 
-/** Persona ativa devolvida pelo repositório (padrão: nenhuma publicada). */
-let nextPersona: { version: number } | null = null;
-function withPersonas(persona: { version: number } | null) {
-  nextPersona = persona;
-}
-
 function serviceWithSystemResults(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
@@ -101,14 +90,9 @@ function serviceWithSystemResults(...results: unknown[][]) {
     { ping: vi.fn().mockResolvedValue({ latencyMs: 2 }) } as unknown as DatabaseHealthService,
     { ping: vi.fn().mockResolvedValue({ latencyMs: 3 }) } as unknown as RedisHealthService,
     audit as unknown as AuditService,
-    { decryptJson: vi.fn().mockReturnValue(null) } as unknown as HealthCipherService,
-    { mget: vi.fn().mockResolvedValue([]) } as unknown as Redis,
-    new RedisKeyBuilder('movivo'),
-    { activePayload: vi.fn().mockResolvedValue(nextPersona) } as unknown as AgentConfigRepository,
     nextEvolution as unknown as EvolutionTransport,
   );
   nextEvolution = { hasCredentials: () => false };
-  nextPersona = null;
   return { service, db, audit };
 }
 
@@ -225,12 +209,12 @@ function systemFixture(
     errorBudgetConsumedPercent: number | null;
     objective: string;
   }>,
+  failures = 2,
 ): ControlCenterSystemResponse {
   return {
     data: {
       slos,
-      aiFailures: metric(2),
-      aiDlq: metric(1),
+      aiFailures: metric(failures),
       whatsappLatency: { samples: 50, p50: metric(4000), p95: metric(9000), p99: metric(20000) },
     } as unknown as ControlCenterSystemResponse['data'],
     meta: META,
@@ -239,7 +223,7 @@ function systemFixture(
 
 const SLO_OK = {
   status: 'GREEN' as const,
-  title: 'Resposta do AI Coach em até 30 segundos',
+  title: 'Resposta da IA em até 30 segundos',
   currentPercent: 99,
   errorBudgetConsumedPercent: 10,
   objective: 'Ao menos 95% em até 30s.',
@@ -346,8 +330,7 @@ describe('ControlCenterService overview (US-7.8)', () => {
     expect(marketing).toMatchObject({ state: 'ATTENTION' });
   });
 
-  it('IA ancora na taxa bloqueada e fica ATTENTION quando ela passa do limiar', async () => {
-    withPersonas({ version: 3 });
+  it('IA ancora na taxa retida e fica ATTENTION quando ela passa do limiar', async () => {
     const { service } = serviceWithSystemResults([{ blocked: 6, validated: 100 }]);
     stubPillar(service, 'system', systemFixture([SLO_OK]));
 
@@ -356,44 +339,38 @@ describe('ControlCenterService overview (US-7.8)', () => {
     const ai = response.data.pillars.find((p) => p.pillar === 'AI');
     expect(ai?.state).toBe('ATTENTION');
     expect(ai?.headline).toMatchObject({
-      label: 'Resposta bloqueada pela validação',
+      label: 'Resposta retida pela validação',
       metric: { value: 6 },
     });
-    expect(ai?.reason).toMatch(/bloqueada/);
+    expect(ai?.reason).toMatch(/retida/);
   });
 
-  it('IA traz a latência p95 do coach e as falhas de job (falha + DLQ), e fica OK dentro dos limites', async () => {
-    withPersonas({ version: 3 });
+  it('IA traz a latência p95 do WhatsApp e, com chamadas falhando, pede ação nos fornecedores', async () => {
     const { service } = serviceWithSystemResults([{ blocked: 1, validated: 100 }]);
     stubPillar(service, 'system', systemFixture([SLO_OK]));
 
     const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
 
     const ai = response.data.pillars.find((p) => p.pillar === 'AI');
-    expect(ai?.state).toBe('OK');
-    expect(ai?.reason).toBeNull();
+    expect(ai?.state).toBe('ATTENTION');
     expect(ai?.details).toEqual([
       expect.objectContaining({
-        label: 'Resposta do coach (p95)',
+        label: 'Resposta no WhatsApp (p95)',
         metric: expect.objectContaining({ value: 9000 }),
       }),
-      expect.objectContaining({ metric: expect.objectContaining({ value: 3 }) }),
+      expect.objectContaining({ metric: expect.objectContaining({ value: 2 }) }),
     ]);
-    expect(ai?.signals).toEqual([
-      { label: 'Personas', state: 'OK', text: 'Masculina v3 · Feminina v3' },
-    ]);
+    expect(ai?.reason).toMatch(/créditos e chaves/);
   });
 
-  it('IA fica ATTENTION sem persona publicada, mesmo com a taxa bloqueada baixa', async () => {
+  it('IA fica OK com taxa baixa e nenhuma chamada falha', async () => {
     const { service } = serviceWithSystemResults([{ blocked: 0, validated: 100 }]);
-    stubPillar(service, 'system', systemFixture([SLO_OK]));
+    stubPillar(service, 'system', systemFixture([SLO_OK], 0));
 
     const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
 
     const ai = response.data.pillars.find((p) => p.pillar === 'AI');
-    expect(ai?.state).toBe('ATTENTION');
-    expect(ai?.signals[0]).toMatchObject({ state: 'ATTENTION', text: 'Nenhuma publicada' });
-    expect(ai?.reason).toMatch(/persona/);
+    expect(ai).toMatchObject({ state: 'OK', reason: null, signals: [] });
   });
 
   it('IA e Sistema compartilham uma única leitura de system() por Visão Geral', async () => {
@@ -630,7 +607,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 20,
         formSubmitted: 18,
-        protocolActive: 15,
+        planActive: 15,
         subscriptionActive: 12,
       }),
       [
@@ -660,7 +637,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 12,
         formSubmitted: 9,
-        protocolActive: 1,
+        planActive: 1,
         subscriptionActive: 0,
       }),
       [],
@@ -678,7 +655,7 @@ describe('ControlCenterService projections', () => {
       value: null,
       status: 'UNAVAILABLE',
     });
-    expect(response.data.funnel.protocolActive).toMatchObject({
+    expect(response.data.funnel.planActive).toMatchObject({
       value: null,
       status: 'UNAVAILABLE',
     });
@@ -693,7 +670,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 20,
         formSubmitted: 20,
-        protocolActive: 20,
+        planActive: 20,
         subscriptionActive: 20,
       }),
       [{ value: 'pessoa@example.com', total: 12 }],
@@ -716,7 +693,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 100,
         formSubmitted: 30,
-        protocolActive: 25,
+        planActive: 25,
         subscriptionActive: 20,
       }),
       [],
@@ -755,7 +732,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 40,
         formSubmitted: 35,
-        protocolActive: 30,
+        planActive: 30,
         subscriptionActive: 25,
       }),
       [{ value: 'LOSE_FAT', total: 3 }],
@@ -786,7 +763,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 40,
         formSubmitted: 35,
-        protocolActive: 30,
+        planActive: 30,
         subscriptionActive: 25,
       }),
       [{ value: 'LOSE_FAT', total: 21 }],
@@ -807,7 +784,7 @@ describe('ControlCenterService projections', () => {
   it('suprime o funil da anamnese inteiro quando uma célula cairia entre 1 e 9', async () => {
     const { service } = serviceWithSystemResults(
       ...marketingHead(
-        { formStarted: 100, formSubmitted: 30, protocolActive: 25, subscriptionActive: 20 },
+        { formStarted: 100, formSubmitted: 30, planActive: 25, subscriptionActive: 20 },
         { settledSessions: 100, reached2: 95, reached3: 90, submitted: 85 },
       ),
       [],
@@ -850,7 +827,7 @@ describe('ControlCenterService projections', () => {
       ...marketingHead({
         formStarted: 60,
         formSubmitted: 50,
-        protocolActive: 40,
+        planActive: 40,
         subscriptionActive: 30,
       }),
       [],
@@ -947,7 +924,7 @@ describe('ControlCenterService projections', () => {
         tokens_input: 1_000_000,
         tokens_output: 100_000,
         priced_jobs: 10,
-        cost_usd: 2.8,
+        cost_brl: 15.12,
       },
       {
         model: 'modelo-sem-preco',
@@ -955,7 +932,7 @@ describe('ControlCenterService projections', () => {
         tokens_input: 500,
         tokens_output: 100,
         priced_jobs: 0,
-        cost_usd: 0,
+        cost_brl: 0,
       },
     ];
   }
@@ -995,17 +972,14 @@ describe('ControlCenterService projections', () => {
     ]);
   });
 
-  it('converte tokens em reais pela tabela de preço e não inventa custo de modelo desconhecido', async () => {
+  it('soma o custo de IA em reais por modelo e não inventa custo de modelo sem preço', async () => {
     withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
 
-    // TASK-7.9.4 — conferência com tolerância 0 (`toBe`, não `toBeCloseTo`).
-    // Cálculo manual, fora do código de produção:
-    //   entrada: 1.000.000 tokens ÷ 1000 = 1000 × US$0,002 = US$2,00
-    //   saída:     100.000 tokens ÷ 1000 =  100 × US$0,008 = US$0,80
-    //   US$2,80 × câmbio 5,4 = R$15,12 (exato em double: 15.12)
+    // Conferência com tolerância 0 (`toBe`, não `toBeCloseTo`): o custo já vem em R$ de
+    // `model_runs.cost_brl`, calculado na hora de cada chamada com o preço vigente da época.
     const EXPECTED_AI_COST_BRL = 15.12;
     expect(response.data.aiCostByModel[0]?.costBrl).toBe(EXPECTED_AI_COST_BRL);
     expect(response.data.aiCostByModel[1]?.costBrl).toBeNull();
@@ -1206,14 +1180,25 @@ describe('ControlCenterService projections', () => {
     );
   });
 
-  it('não inventa latência zero quando nenhum job possui amostra', async () => {
+  it('não inventa latência zero quando nenhuma chamada possui amostra', async () => {
+    withExecute([{ delivered: 0, within_sla: 0 }]);
     const { service } = serviceWithSystemResults(
-      [{ total: 0, completed: 0, failed: 0, dlq: 0, samples: 0, p50: null, p95: null, p99: null }],
+      [
+        {
+          total: 0,
+          completed: 0,
+          failed: 0,
+          primaryRoute: 0,
+          samples: 0,
+          p50: null,
+          p95: null,
+          p99: null,
+        },
+      ],
       [],
       [],
       [{ samples: 0, p50: null, p95: null, p99: null, withinSla: 0 }],
       [],
-      [{ total: 12 }],
     );
 
     const response = await service.system();
@@ -1235,25 +1220,24 @@ describe('ControlCenterService projections', () => {
       month: '2-digit',
       day: '2-digit',
     }).format(new Date(Date.now() - 86_400_000));
+    withExecute([{ delivered: 100, within_sla: 97 }]);
     const { service } = serviceWithSystemResults(
       [
         {
           total: 100,
           completed: 98,
           failed: 2,
-          dlq: 0,
+          primaryRoute: 96,
           samples: 100,
           p50: '1200',
           p95: '4800.5',
           p99: '9000',
-          protocolsDelivered: 100,
-          protocolsWithinSla: 97,
         },
       ],
       [
         {
-          model: 'gpt-4.1',
-          jobType: 'AI_RESPONSE',
+          model: 'deepseek-v4-pro',
+          jobType: 'conversation.answer_question',
           samples: 100,
           p50: '1200',
           p95: '4800',
@@ -1263,38 +1247,44 @@ describe('ControlCenterService projections', () => {
       [{ day: yesterday, total: '4800.5' }],
       [{ samples: 50, p50: '9000', p95: '25000', p99: '31000', withinSla: 49 }],
       [],
-      [{ total: 12 }],
     );
 
     const response = await service.system();
 
     expect(response.data.aiLatency.p95).toMatchObject({ value: 4800.5, status: 'AVAILABLE' });
-    expect(response.data.aiLatencyByModel[0]).toMatchObject({ model: 'gpt-4.1', p95: 4800 });
+    expect(response.data.aiLatencyByModel[0]).toMatchObject({
+      model: 'deepseek-v4-pro',
+      p95: 4800,
+    });
     // Série diária é de inteiros: o percentil fracionário é arredondado.
     expect(response.data.aiLatencyP95Daily.some((point) => point.value === 4801)).toBe(true);
 
-    const delivery = response.data.slos.find((slo) => slo.key === 'PROTOCOL_DELIVERY');
+    const delivery = response.data.slos.find((slo) => slo.key === 'PLAN_DELIVERY');
     // 97% contra meta de 95%: sobra 5% de orçamento, 3% gasto = 60% consumido.
     expect(delivery).toMatchObject({
       currentPercent: 97,
       errorBudgetConsumedPercent: 60,
       status: 'GREEN',
     });
-    const success = response.data.slos.find((slo) => slo.key === 'AI_JOB_SUCCESS');
+    const success = response.data.slos.find((slo) => slo.key === 'MODEL_SUCCESS');
     // 98% contra meta de 99%: orçamento de 1% com 2% gasto = 200% (estourado).
     expect(success).toMatchObject({ errorBudgetConsumedPercent: 200, status: 'RED' });
+    // 96 das 100 chamadas na rota preferida (meta 95%).
+    expect(response.data.slos.find((slo) => slo.key === 'MODEL_PRIMARY_ROUTE')).toMatchObject({
+      currentPercent: 96,
+    });
     expect(response.data.slos.length).toBeGreaterThanOrEqual(3);
     expect(response.data.slos.length).toBeLessThanOrEqual(5);
   });
 
   it('não exibe indicador ausente como zero: nomeia dependência e sprint', async () => {
+    withExecute([{ delivered: 0, within_sla: 0 }]);
     const { service } = serviceWithSystemResults(
-      [{ total: 0, completed: 0, failed: 0, dlq: 0, samples: 0 }],
+      [{ total: 0, completed: 0, failed: 0, primaryRoute: 0, samples: 0 }],
       [],
       [],
       [{ samples: 0, withinSla: 0 }],
       [],
-      [{ total: 0 }],
     );
 
     const response = await service.system();
@@ -1309,22 +1299,5 @@ describe('ControlCenterService projections', () => {
     expect(JSON.stringify(response.data.pendingCapabilities)).not.toMatch(/Sprint 8/);
     // TASK-7.5.1: nenhum indicador desta tela é atribuído a OpenTelemetry.
     expect(response.meta.dataQuality.join(' ')).not.toMatch(/latência de IA é um proxy/i);
-  });
-
-  it('uso do RAG fica indisponível quando o Redis não responde, nunca zero', async () => {
-    const { service } = serviceWithSystemResults(
-      [{ total: 0, completed: 0, failed: 0, dlq: 0, samples: 0 }],
-      [],
-      [],
-      [{ samples: 0, withinSla: 0 }],
-      [],
-      [{ total: 7 }],
-    );
-    Reflect.set(service, 'redis', { mget: vi.fn().mockRejectedValue(new Error('down')) });
-
-    const response = await service.system();
-
-    expect(response.data.ragQueries).toMatchObject({ value: null, status: 'UNAVAILABLE' });
-    expect(response.data.ragCorpusChunks).toMatchObject({ value: 7, status: 'AVAILABLE' });
   });
 });

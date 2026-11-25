@@ -20,11 +20,11 @@ import {
 } from '../../core/database/tenant-database.service';
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
-import { lowestLevel } from '../protocol/exercise-catalog';
+import { lowestLevel } from '../catalog/exercises/exercise-catalog';
 import {
   ExerciseCatalogProvider,
   levelsOfRow,
-} from '../protocol/exercise-catalog-provider.service';
+} from '../catalog/exercises/exercise-catalog-provider.service';
 import { AuditService } from './audit.service';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;

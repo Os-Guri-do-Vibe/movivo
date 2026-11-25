@@ -50,10 +50,9 @@ describe('BullMQ — fundação de filas', () => {
   it('registra as 5 filas de §6 + sanity + dead-letter', () => {
     expect(queues.registeredNames()).toEqual(
       expect.arrayContaining([
-        QUEUE.protocolGeneration,
+        QUEUE.planGeneration,
         QUEUE.aiResponse,
         QUEUE.whatsappOutbound,
-        QUEUE.checkinWeekly,
         QUEUE.conversionSequence,
         QUEUE.sanity,
         QUEUE.deadLetter,

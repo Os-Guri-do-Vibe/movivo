@@ -41,6 +41,7 @@ const APPROVE_AND_INDEX = [
   [{ status: 'APPROVED', stage: 'INDEXING', error_code: null }],
   [], // appendKnowledgeEvent(INDEXING)
   STAGED,
+  [{ title: 'Artigo de teste' }], // título do documento (contexto do embedding)
   [], // lock (publicação)
   [{ status: 'INDEXING', stage: 'INDEXING', error_code: null }],
   [], // insert embedding
@@ -253,6 +254,7 @@ describe('KnowledgeProcessingWorker.process → index', () => {
         state({ status: 'APPROVED', stage: 'INDEXING' }),
         [], // appendKnowledgeEvent(INDEXING/INDEXING)
         STAGED, // select staged chunks
+        [{ title: 'Artigo de teste' }], // título do documento
         [], // lock (transação 2)
         state({ status: 'INDEXING', stage: 'INDEXING' }),
         [], // insert embedding
@@ -264,12 +266,46 @@ describe('KnowledgeProcessingWorker.process → index', () => {
     const result = await worker.process(job('index'));
 
     expect(result).toEqual({ status: 'PUBLISHED', chunks: 1 });
-    expect(embedding.embedBatch).toHaveBeenCalledWith([CONTENT]);
-    expect(execute).toHaveBeenCalledTimes(9);
+    // O vetor é do trecho COM o cabeçalho do documento; o texto gravado não muda.
+    expect(embedding.embedBatch).toHaveBeenCalledWith([`Documento: Artigo de teste\n\n${CONTENT}`]);
+    expect(execute).toHaveBeenCalledTimes(10);
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'knowledge_document_published', chunks: 1 }),
       expect.any(String),
     );
+  });
+
+  it('o cabeçalho que o profissional escreve no topo do arquivo entra no vetor de todos os trechos', async () => {
+    const first = {
+      id: 'chunk-1',
+      chunk_index: 0,
+      chunk_text: 'Tipo: meta-análise\nAno: 2023\nDomínio: força, hipertrofia\n\nResumo do estudo.',
+      chunk_sha256: 'a'.repeat(64),
+    };
+    const second = { ...first, id: 'chunk-2', chunk_index: 1, chunk_text: 'Meio do artigo.' };
+    const { worker, embedding } = makeWorker({
+      executes: [
+        [],
+        state({ status: 'APPROVED', stage: 'INDEXING' }),
+        [],
+        [first, second],
+        [{ title: 'Currier 2023' }],
+        [],
+        state({ status: 'INDEXING', stage: 'INDEXING' }),
+        [],
+        [],
+        [{ count: 2 }],
+        [],
+      ],
+    });
+
+    await worker.process(job('index'));
+
+    const header = 'Documento: Currier 2023 (meta-análise, 2023)\nDomínio: força, hipertrofia';
+    expect(embedding.embedBatch).toHaveBeenCalledWith([
+      `${header}\n\n${first.chunk_text}`,
+      `${header}\n\n${second.chunk_text}`,
+    ]);
   });
 
   it('falha fechado quando a publicação não confirma todos os chunks preparados', async () => {
@@ -279,6 +315,7 @@ describe('KnowledgeProcessingWorker.process → index', () => {
         state({ status: 'APPROVED', stage: 'INDEXING' }),
         [],
         STAGED,
+        [{ title: 'Artigo de teste' }],
         [],
         state({ status: 'INDEXING', stage: 'INDEXING' }),
         [],
@@ -293,16 +330,22 @@ describe('KnowledgeProcessingWorker.process → index', () => {
 
   it('lote de embedding incompleto nunca chega a gravar nada', async () => {
     const { worker, execute } = makeWorker({
-      executes: [[], state({ status: 'APPROVED', stage: 'INDEXING' }), [], STAGED],
+      executes: [
+        [],
+        state({ status: 'APPROVED', stage: 'INDEXING' }),
+        [],
+        STAGED,
+        [{ title: 'Artigo de teste' }],
+      ],
       embedBatch: async () => [],
     });
 
     await expect(worker.process(job('index'))).rejects.toThrow(
       'Provider de embedding devolveu lote incompleto.',
     );
-    // 4 chamadas da tentativa de indexação + 2 do `recordFailure` do catch em
+    // 5 chamadas da tentativa de indexação (inclui o título) + 2 do `recordFailure` do catch em
     // `process()` (lock + currentKnowledgeState); a transação de gravação nunca abre.
-    expect(execute).toHaveBeenCalledTimes(6);
+    expect(execute).toHaveBeenCalledTimes(7);
   });
 
   it('sem chunk canônico staged e documento não publicado: erro explícito', async () => {

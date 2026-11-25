@@ -58,7 +58,7 @@ export function MuscleMapExplorer() {
       </div>
 
       <div className={styles.controls}>
-        <p className={styles.controlsLabel}>Exemplo de protocolo · Treino de hoje</p>
+        <p className={styles.controlsLabel}>Exemplo de plano · Treino de hoje</p>
         <div className={styles.chips} role="group" aria-label="Grupos musculares do treino">
           {MUSCLE_EXAMPLE.map((muscle) => (
             <button

@@ -20,6 +20,8 @@
  * A camada 1 nunca é suficiente sozinha, e a camada 2 nunca é confiável sozinha.
  */
 
+import { IncomingMessage, ServerResponse } from 'node:http';
+
 import { SECRET_KEYS } from '../config/resolve-file-secrets';
 
 /** Token único usado em toda redação, para ser greppável em análise de log. */
@@ -161,6 +163,14 @@ export function redactPii(input: string): string {
     .replace(PHONE_PATTERN, (match) => maskPhone(match));
 }
 
+/** Nomes normalizados dos campos sensíveis (montado uma vez, não a cada objeto logado). */
+const SENSITIVE_KEYS: ReadonlySet<string> = new Set(
+  PII_FIELDS.map((key) => key.replace(/[_-]/g, '').toLowerCase()),
+);
+
+/** Teto de itens/chaves por nível: um log nunca precisa de milhares, e isso limita o custo. */
+const MAX_LOGGED_ENTRIES = 200;
+
 /**
  * Versão profunda para objetos arbitrários: aplica `redactPii` em strings e substitui
  * por `REDACTED` qualquer chave cujo nome esteja em `PII_FIELDS`.
@@ -172,18 +182,41 @@ export function redactObject(value: unknown, depth = 0): unknown {
   if (depth > 6) return REDACTED;
   if (typeof value === 'string') return redactPii(value);
   if (value === null || typeof value !== 'object') return value;
+  // Binário (foto, PDF, áudio) nunca é log útil, e `Object.entries()` de um Buffer de 2 MB
+  // cria um objeto de 2 milhões de chaves e para o event loop por segundos — foi o que
+  // derrubou a API no envio das fotos da anamnese (2026-11-05). O conteúdo também é dado
+  // de saúde: some inteiro, só o tamanho fica.
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+    return `[binário ${value.byteLength} bytes]`;
+  }
+  // O pino-http entrega a requisição/resposta CRUAS (socket, parser, body…). O serializer
+  // só usa estes campos; percorrer o resto é custo puro e arrasta o corpo da requisição.
+  if (value instanceof IncomingMessage) {
+    const { id, method, url } = value as IncomingMessage & { id?: unknown };
+    return { id, method, url };
+  }
+  if (value instanceof ServerResponse) return { statusCode: value.statusCode };
   if (value instanceof Error) {
     return redactObject(
       { ...value, type: value.name, message: value.message, stack: value.stack },
       depth + 1,
     );
   }
-  if (Array.isArray(value)) return value.map((item) => redactObject(item, depth + 1));
+  if (Array.isArray(value)) {
+    const kept = value.slice(0, MAX_LOGGED_ENTRIES).map((item) => redactObject(item, depth + 1));
+    return value.length > MAX_LOGGED_ENTRIES
+      ? [...kept, `[+${value.length - MAX_LOGGED_ENTRIES} itens omitidos]`]
+      : kept;
+  }
 
-  const sensitive = new Set(PII_FIELDS.map((key) => key.replace(/[_-]/g, '').toLowerCase()));
   const out: Record<string, unknown> = {};
+  let count = 0;
   for (const [key, item] of Object.entries(value)) {
-    out[key] = sensitive.has(key.replace(/[_-]/g, '').toLowerCase())
+    if (++count > MAX_LOGGED_ENTRIES) {
+      out['[omitidos]'] = true;
+      break;
+    }
+    out[key] = SENSITIVE_KEYS.has(key.replace(/[_-]/g, '').toLowerCase())
       ? REDACTED
       : redactObject(item, depth + 1);
   }

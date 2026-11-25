@@ -104,7 +104,7 @@ export function AiGuardrailsPanel({ canWrite = false }: { canWrite?: boolean }) 
 
   return (
     <section className="mt-8 border-t border-border pt-8" aria-labelledby="l1-title">
-      <h2 id="l1-title" className="flex items-center gap-2 text-h2 font-bold">
+      <h2 id="l1-title" className="flex items-center gap-2 text-h3 font-semibold">
         <Flag aria-hidden="true" className="size-5" />
         Guardrails L1 aditivos
       </h2>
@@ -126,7 +126,7 @@ export function AiGuardrailsPanel({ canWrite = false }: { canWrite?: boolean }) 
         </p>
       ) : null}
 
-      <ul className="mt-5 grid gap-3 lg:grid-cols-2">
+      <ul className="mt-5 grid gap-3 @3xl:grid-cols-2">
         {active.map((rule) => (
           <li key={rule.ruleKey} className="rounded-xl border border-border bg-card p-5">
             <div className="flex items-center justify-between gap-3">
@@ -172,7 +172,7 @@ export function AiGuardrailsPanel({ canWrite = false }: { canWrite?: boolean }) 
       {canWrite ? (
         <div className="mt-6 rounded-xl border border-border bg-card p-5">
           <h3 className="font-semibold">{ruleKey ? 'Editar sinalização' : 'Nova sinalização'}</h3>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 @xl:grid-cols-2">
             <label className="text-label font-semibold">
               Nome
               <input

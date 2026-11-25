@@ -24,7 +24,13 @@ import {
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
-import { anamnesisSessions, consents } from '../../core/database/schema';
+import {
+  anamnesisSessionPhotos,
+  cycleReassessmentPhotos,
+  anamnesisSessions,
+  bodyPhotos,
+  consents,
+} from '../../core/database/schema';
 
 /** Origem da requisição — a prova de onde o aceite partiu. Nunca vem do cliente. */
 export interface ConsentOrigin {
@@ -53,16 +59,24 @@ export class ConsentService {
     // Lookup token→sessão escopado pelo token (UUID ainda desconhecido); a escrita roda
     // ESCOPADA à sessão (Sato — achado 1): a RLS só aceita o consentimento preso a
     // esta sessão, nunca a de outro token.
-    const sessionId = await this.db.runAsToken(
-      (tx) => this.resolveActiveSessionId(tx, token),
-      token,
-    );
+    // Sistema, não token: a sessão complementar já pertence a um titular e não é visível ao
+    // contexto anônimo. O token de 256 bits continua sendo a credencial do lookup.
+    const sessionId = await this.db.runAsSystem((tx) => this.resolveActiveSessionId(tx, token));
 
     await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {
         await this.upsert(tx, { anamnesisSessionId: sessionId, userId: null }, input, origin);
       }
     });
+    // Retirar o aceite das fotos apaga as já enviadas nesta sessão (o contexto anônimo não
+    // apaga: a RLS reserva o DELETE ao sistema, e a sessão já foi resolvida pelo token).
+    if (inputs.some((input) => input.type === 'BODY_PHOTOS' && !input.accepted)) {
+      await this.db.runAsSystem((tx) =>
+        tx
+          .delete(anamnesisSessionPhotos)
+          .where(eq(anamnesisSessionPhotos.anamnesisSessionId, sessionId)),
+      );
+    }
   }
 
   /**
@@ -110,6 +124,11 @@ export class ConsentService {
    * trava real: sem ela, dado de saúde entraria no banco sem base legal.
    */
   async hasValidHealthConsent(sessionId: string): Promise<boolean> {
+    return this.hasValidSessionConsent(sessionId, 'HEALTH_DATA');
+  }
+
+  /** Consentimento aceito, não revogado e na versão vigente desta sessão, para a finalidade. */
+  async hasValidSessionConsent(sessionId: string, type: ConsentTypeWithText): Promise<boolean> {
     const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
       tx
         .select({ id: consents.id })
@@ -117,8 +136,8 @@ export class ConsentService {
         .where(
           and(
             eq(consents.anamnesisSessionId, sessionId),
-            eq(consents.consentType, 'HEALTH_DATA'),
-            eq(consents.version, CONSENT_TEXTS.HEALTH_DATA.version),
+            eq(consents.consentType, type),
+            eq(consents.version, CONSENT_TEXTS[type].version),
             eq(consents.accepted, true),
             isNull(consents.revokedAt),
           ),
@@ -135,6 +154,25 @@ export class ConsentService {
    * É o que a Etapa 1 usa para decidir se o `CONTINUAR` passa (US-6.4). Compara a
    * versão porque um aceite de texto antigo não prova consentimento ao texto novo.
    */
+  /** Tipos aceitos pelo titular na versão vigente (vale na anamnese complementar). */
+  async acceptedTypesForUser(userId: string): Promise<ConsentTypeWithText[]> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ type: consents.consentType, version: consents.version })
+        .from(consents)
+        .where(
+          and(eq(consents.userId, userId), eq(consents.accepted, true), isNull(consents.revokedAt)),
+        ),
+    );
+    return rows
+      .filter((row) => {
+        const text = CONSENT_TEXTS[row.type as ConsentTypeWithText] as
+          { version: string } | undefined;
+        return text?.version === row.version;
+      })
+      .map((row) => row.type as ConsentTypeWithText);
+  }
+
   async acceptedTypesForSession(sessionId: string): Promise<ConsentTypeWithText[]> {
     const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
       tx
@@ -156,6 +194,25 @@ export class ConsentService {
         return text?.version === row.version;
       })
       .map((row) => row.type as ConsentTypeWithText);
+  }
+
+  /** Há aceite vigente (não revogado) deste tipo para o titular, em qualquer versão do texto. */
+  async hasActive(userId: string, type: ConsentTypeWithText): Promise<boolean> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ id: consents.id })
+        .from(consents)
+        .where(
+          and(
+            eq(consents.userId, userId),
+            eq(consents.consentType, type),
+            eq(consents.accepted, true),
+            isNull(consents.revokedAt),
+          ),
+        )
+        .limit(1),
+    );
+    return rows.length > 0;
   }
 
   /**
@@ -180,6 +237,19 @@ export class ConsentService {
       await tx.execute(
         sql`SELECT public.revoke_non_health_consent(${userId}::uuid, ${type}::consent_type)`,
       );
+    });
+    // Revogar as fotos apaga as já enviadas: o conteúdo cifrado sai e a galeria as marca apagadas.
+    if (type === 'BODY_PHOTOS') await this.erasePhotos(userId);
+  }
+
+  private async erasePhotos(userId: string): Promise<void> {
+    await this.db.runAsSystem(async (tx) => {
+      await tx
+        .update(bodyPhotos)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(bodyPhotos.userId, userId), isNull(bodyPhotos.deletedAt)));
+      await tx.delete(anamnesisSessionPhotos).where(eq(anamnesisSessionPhotos.userId, userId));
+      await tx.delete(cycleReassessmentPhotos).where(eq(cycleReassessmentPhotos.userId, userId));
     });
   }
 

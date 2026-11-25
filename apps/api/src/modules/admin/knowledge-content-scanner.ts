@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 
-import { detectInjection } from '../protocol/validation/prompt-injection';
+import { detectInjection } from '../../core/validation/prompt-injection';
 
 const MARKUP_OR_SCRIPT = /<\/?(?:script|iframe|object|embed)\b|javascript:/i;
 

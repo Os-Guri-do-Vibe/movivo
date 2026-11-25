@@ -5,30 +5,22 @@ import { useEffect } from 'react';
 /** Renova a trava bem antes de ela expirar no servidor (120 s), mesmo com a aba estrangulada. */
 export const REVIEW_HOLD_HEARTBEAT_MS = 30_000;
 
-/** O que tem envio automático e pode ser segurado pela tela de revisão. */
-export type ReviewHoldKind = 'PROTOCOL' | 'SUBSTITUTION';
-
-const RESOURCE: Record<ReviewHoldKind, string> = {
-  PROTOCOL: 'protocols',
-  SUBSTITUTION: 'substitutions',
-};
-
-const holdUrl = (kind: ReviewHoldKind, id: string) =>
-  `/api/dashboard/${RESOURCE[kind]}/${encodeURIComponent(id)}/review-hold`;
+const holdUrl = (id: string) =>
+  `/api/dashboard/control/exceptions/${encodeURIComponent(id)}/review-hold`;
 
 /**
- * Enquanto a tela de revisão/edição de um protocolo ou de uma troca de exercício está aberta,
- * avisa o servidor para NÃO disparar a liberação automática ao WhatsApp, mesmo que o prazo
- * (24h protocolo, 30 min troca) venza. Ao sair da tela (navegar de volta à fila, fechar a
- * aba), solta a trava e o servidor envia na hora o que venceu nesse meio-tempo.
+ * Enquanto a tela de revisão/edição de um protocolo está aberta, avisa o servidor para NÃO
+ * liberar o protocolo ao WhatsApp, mesmo que a janela de revisão opcional (2 h) termine. Ao sair
+ * da tela (voltar à fila, fechar a aba), solta a trava e o servidor libera na hora o que venceu
+ * nesse meio-tempo.
  *
- * Melhor esforço: se o aviso falhar, a trava expira sozinha em 2 min e o envio segue — nunca
- * trava o profissional nem o aluno.
+ * Melhor esforço: se o aviso falhar, a trava expira sozinha em 2 min e a liberação segue —
+ * nunca trava o profissional nem o aluno.
  */
-export function useReviewHold(kind: ReviewHoldKind, id: string, enabled: boolean): void {
+export function useReviewHold(id: string, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
-    const url = holdUrl(kind, id);
+    const url = holdUrl(id);
     let released = false;
 
     const send = (active: boolean) =>
@@ -58,5 +50,5 @@ export function useReviewHold(kind: ReviewHoldKind, id: string, enabled: boolean
       window.removeEventListener('pagehide', release);
       release();
     };
-  }, [kind, id, enabled]);
+  }, [id, enabled]);
 }

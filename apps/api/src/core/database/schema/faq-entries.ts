@@ -17,9 +17,8 @@ export const faqEntries = pgTable(
     version: integer('version').notNull(),
     status: faqEntryStatusEnum('status').notNull().default('PUBLISHED'),
     changeNote: text('change_note').notNull(),
-    createdBy: uuid('created_by')
-      .notNull()
-      .references(() => staff.id, { onDelete: 'restrict' }),
+    /** Nulo nas respostas padrão da aplicação (carga do sistema no deploy). */
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

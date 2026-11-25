@@ -6,6 +6,7 @@ import { subscriptionPlanIdSchema } from '@movivo/shared';
 
 import {
   AnamnesisApiError,
+  describeAnamnesisError,
   getSession,
   startAnamnesis,
   type SessionEntry,
@@ -26,17 +27,23 @@ async function resolveEntry(planParam: string | null): Promise<SessionEntry> {
     const resumed = await getSession();
     if (resumed.session.status !== 'EXPIRED') return resumed;
   } catch (error) {
-    if (!(error instanceof AnamnesisApiError) || error.status >= 500) throw error;
+    // Sem rede (status 0) ou 5xx: o cadastro pode existir, então não se abre outro por cima.
+    if (!(error instanceof AnamnesisApiError) || error.status === 0 || error.status >= 500) {
+      throw error;
+    }
   }
   return startAnamnesis('MONTHLY');
 }
+
+const START_FAILED_MESSAGE =
+  'Tente novamente em instantes, ou fale com a gente pelo WhatsApp da MOVIVO.';
 
 /**
  * Entrada do onboarding (US-6.10): a URL é sempre `/anamnese` e o token da sessão não
  * passa por este código — fica no cookie httpOnly do BFF (`app/api/anamnesis`).
  */
 export function AnamneseEntry() {
-  const [state, setState] = React.useState<SessionEntry | 'error' | null>(null);
+  const [state, setState] = React.useState<SessionEntry | { error: string } | null>(null);
   // Uma sessão por montagem: o Strict Mode roda o efeito duas vezes, e dois `start`
   // deixariam o cookie numa sessão e a aba na outra.
   const pending = React.useRef<Promise<SessionEntry> | null>(null);
@@ -53,15 +60,15 @@ export function AnamneseEntry() {
         window.history.replaceState(null, '', window.location.pathname);
         setState(entry);
       })
-      .catch(() => {
-        if (!cancelled) setState('error');
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ error: describeAnamnesisError(error, START_FAILED_MESSAGE) });
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (state && state !== 'error') {
+  if (state && 'session' in state) {
     return (
       <OnboardingShell>
         <OnboardingWizard sessionRef={state.ref} initial={state.session} />
@@ -72,12 +79,10 @@ export function AnamneseEntry() {
   return (
     <OnboardingShell>
       <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-        {state === 'error' ? (
+        {state ? (
           <>
             <h1 className="text-h2 font-semibold">Não conseguimos começar agora</h1>
-            <p className="text-body text-muted-foreground">
-              Tente novamente em instantes, ou fale com a gente pelo WhatsApp da MOVIVO.
-            </p>
+            <p className="text-body text-muted-foreground">{state.error}</p>
           </>
         ) : (
           <p className="text-body text-muted-foreground" role="status">

@@ -1,0 +1,607 @@
+{
+  "version": 3,
+  "status": "RASCUNHO v2 (02/11/2026): perguntas escritas pela engenharia olhando os 48 documentos enviados, então a régua é OTIMISTA (recall tende a sair maior do que com perguntas reais). `expectAny` confere termos nos trechos devolvidos, não a qualidade da resposta. Os profissionais (CREF, CRN, CRM) devem trocar por perguntas reais dos alunos e ajustar os termos. As perguntas `proativo-*` são as consultas fixas da revisão semanal (review-evidence.ts). As `perto-*` ficam perto do tema e testam o piso de verdade. As perguntas de hábitos (`hint: MOTIVATION`) rodam com o contexto de assunto que a produção aplica às mensagens classificadas como motivação.",
+  "questions": [
+    {
+      "id": "volume-peito",
+      "question": "quantas séries de peito por semana pra crescer?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "séries semanais",
+        "volume semanal",
+        "séries de trabalho"
+      ]
+    },
+    {
+      "id": "falha-toda-serie",
+      "question": "preciso ir até a falha em toda série?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "falha muscular",
+        "falha"
+      ]
+    },
+    {
+      "id": "o-que-e-rir",
+      "question": "o que é RIR e como medir?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "repetições em reserva",
+        "RIR"
+      ]
+    },
+    {
+      "id": "descanso-series",
+      "question": "quanto tempo descansar entre as séries?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "descanso",
+        "intervalo de descanso"
+      ]
+    },
+    {
+      "id": "frequencia-musculo",
+      "question": "quantas vezes por semana treinar cada músculo?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "frequência"
+      ]
+    },
+    {
+      "id": "carga-leve-hipertrofia",
+      "question": "dá pra crescer treinando com carga leve e muita repetição?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "cargas baixas",
+        "cargas leves",
+        "hipertrofia"
+      ]
+    },
+    {
+      "id": "progressao-carga",
+      "question": "como aumentar a carga sem estagnar?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "progress"
+      ]
+    },
+    {
+      "id": "treinar-pesado",
+      "question": "treinar pesado é obrigatório pra ganhar músculo?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "cargas",
+        "hipertrofia"
+      ]
+    },
+    {
+      "id": "corrida-intensidade",
+      "question": "devo correr sempre leve ou fazer treino de tiro?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "80%",
+        "baixa intensidade",
+        "distribuição"
+      ]
+    },
+    {
+      "id": "regra-dos-10",
+      "question": "aumentar 10% por semana o volume de corrida evita lesão?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "10%"
+      ]
+    },
+    {
+      "id": "pse-corrida",
+      "question": "como medir a carga do meu treino de corrida?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "PSE",
+        "percepção subjetiva de esforço"
+      ]
+    },
+    {
+      "id": "taper",
+      "question": "como reduzir o treino na semana antes da prova?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "taper",
+        "redução do volume",
+        "redução de volume"
+      ]
+    },
+    {
+      "id": "forca-corredor",
+      "question": "musculação ajuda a correr melhor?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "economia de corrida"
+      ]
+    },
+    {
+      "id": "dor-corrida",
+      "question": "senti uma dor persistente no joelho correndo, continuo treinando?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "dor persistente",
+        "avaliação"
+      ]
+    },
+    {
+      "id": "interferencia",
+      "question": "musculação atrapalha a corrida e a corrida atrapalha a musculação?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "interferência",
+        "concorrente"
+      ]
+    },
+    {
+      "id": "ordem-corrida-forca",
+      "question": "faço a corrida antes ou depois da musculação?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "ordem",
+        "mesma sessão"
+      ]
+    },
+    {
+      "id": "acwr",
+      "question": "a razão entre carga aguda e crônica serve pra evitar lesão?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "aguda",
+        "ACWR"
+      ]
+    },
+    {
+      "id": "explosao",
+      "question": "treinar corrida e força junto atrapalha minha explosão?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "potência",
+        "força explosiva"
+      ]
+    },
+    {
+      "id": "hyrox-corrida",
+      "question": "no hyrox a corrida pesa mais que as estações?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "HYROX"
+      ]
+    },
+    {
+      "id": "hyrox-ciencia",
+      "question": "tem estudo científico sobre treino de hyrox?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "preliminar",
+        "preprint",
+        "evidência"
+      ]
+    },
+    {
+      "id": "hyrox-simulado",
+      "question": "vale fazer simulado completo de hyrox toda semana?",
+      "topic": "TRAINING",
+      "expectAny": [
+        "simulaç"
+      ]
+    },
+    {
+      "id": "proteina-quanto",
+      "question": "quanta proteína por dia pra ganhar massa muscular?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "g/kg",
+        "1,4",
+        "proteína"
+      ]
+    },
+    {
+      "id": "creatina-rim",
+      "question": "creatina faz mal pro rim?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "creatina"
+      ]
+    },
+    {
+      "id": "creatina-horario",
+      "question": "qual o melhor horário pra tomar creatina?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "creatina",
+        "horário"
+      ]
+    },
+    {
+      "id": "cafeina-pre",
+      "question": "cafeína antes do treino funciona mesmo?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "cafeína"
+      ]
+    },
+    {
+      "id": "carboidrato-pre",
+      "question": "preciso comer carboidrato antes de treinar?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "carboidrato"
+      ]
+    },
+    {
+      "id": "treino-jejum",
+      "question": "treinar em jejum emagrece mais?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "jejum"
+      ]
+    },
+    {
+      "id": "deficit-musculo",
+      "question": "quanto de déficit calórico posso fazer sem perder músculo?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "déficit"
+      ]
+    },
+    {
+      "id": "hidratacao",
+      "question": "quanta água devo beber quando treino?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "hidrata",
+        "líquidos"
+      ]
+    },
+    {
+      "id": "abdominal-gordura",
+      "question": "abdominal queima a gordura da barriga?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "gordura localizada",
+        "abdominais",
+        "abdominal"
+      ]
+    },
+    {
+      "id": "whey-pos-treino",
+      "question": "tenho que tomar whey logo depois de treinar?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "janela anabólica",
+        "timing",
+        "depois do treino"
+      ]
+    },
+    {
+      "id": "termogenico",
+      "question": "vale a pena comprar termogênico?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "suplemento",
+        "alegações"
+      ]
+    },
+    {
+      "id": "recomposicao",
+      "question": "dá pra perder gordura e ganhar músculo ao mesmo tempo?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "recomposição"
+      ]
+    },
+    {
+      "id": "energia-baixa",
+      "question": "treino bastante e como pouco, isso tem problema?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "disponibilidade de energia",
+        "RED-S",
+        "REDs"
+      ]
+    },
+    {
+      "id": "peso-subiu",
+      "question": "subi 1 kg em dois dias, engordei?",
+      "topic": "NUTRITION",
+      "expectAny": [
+        "água",
+        "glicogênio"
+      ]
+    },
+    {
+      "id": "sono-treino",
+      "question": "dormir pouco atrapalha o treino?",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "sono"
+      ]
+    },
+    {
+      "id": "noite-ruim",
+      "question": "dormi mal ontem, treino mesmo assim?",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "noite ruim",
+        "sono"
+      ]
+    },
+    {
+      "id": "treinando-demais",
+      "question": "como sei se estou treinando demais?",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "overtraining",
+        "sobrecarga"
+      ]
+    },
+    {
+      "id": "cansaco-persistente",
+      "question": "tô sempre cansado e meu desempenho caiu, o que pode ser?",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "fadiga persistente",
+        "queda de desempenho"
+      ]
+    },
+    {
+      "id": "cochilo",
+      "question": "cochilar à tarde atrapalha o sono da noite?",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "cochilo"
+      ]
+    },
+    {
+      "id": "tempo-habito",
+      "question": "quanto tempo leva pra criar o hábito de treinar?",
+      "topic": "HABITS",
+      "expectAny": [
+        "hábito",
+        "dias"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "manter-motivacao",
+      "question": "como manter a motivação a longo prazo?",
+      "topic": "HABITS",
+      "expectAny": [
+        "motivação autônoma",
+        "motivação"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "parei-treinar",
+      "question": "parei de treinar faz duas semanas, como retomo?",
+      "topic": "HABITS",
+      "expectAny": [
+        "retomar",
+        "retomada",
+        "interrup"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "sem-tempo",
+      "question": "não tenho tempo pra treinar, o que faço?",
+      "topic": "HABITS",
+      "expectAny": [
+        "oportunidade",
+        "barreiras"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "vontade-em-acao",
+      "question": "como transformar a vontade de treinar em ação?",
+      "topic": "HABITS",
+      "expectAny": [
+        "se-então",
+        "intenções de implementação",
+        "planos"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "culpa-faltar",
+      "question": "me sinto culpado quando falto no treino",
+      "topic": "HABITS",
+      "expectAny": [
+        "culpa"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "metas",
+      "question": "como definir metas que eu consiga cumprir?",
+      "topic": "HABITS",
+      "expectAny": [
+        "meta de comportamento",
+        "metas"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "anotar-comida",
+      "question": "adianta anotar tudo que eu como?",
+      "topic": "HABITS",
+      "expectAny": [
+        "automonitoramento",
+        "registro"
+      ],
+      "hint": "MOTIVATION"
+    },
+    {
+      "id": "proativo-adesao",
+      "question": "adesão ao treino: manter a consistência e retomar a rotina com o menor passo possível",
+      "topic": "HABITS",
+      "expectAny": [
+        "retomar",
+        "consistência",
+        "interrup"
+      ]
+    },
+    {
+      "id": "proativo-sessoes",
+      "question": "sessões perdidas: planejar obstáculos e alternativas para manter a rotina de treino",
+      "topic": "HABITS",
+      "expectAny": [
+        "obstáculos",
+        "alternativa",
+        "interrup"
+      ]
+    },
+    {
+      "id": "proativo-registro",
+      "question": "registro da alimentação: automonitoramento simples, feedback e consistência",
+      "topic": "HABITS",
+      "expectAny": [
+        "automonitoramento",
+        "registro"
+      ]
+    },
+    {
+      "id": "proativo-barreiras",
+      "question": "barreiras para treinar: capacidade, oportunidade e motivação, e como adaptar a rotina",
+      "topic": "HABITS",
+      "expectAny": [
+        "capacidade",
+        "oportunidade",
+        "COM-B"
+      ]
+    },
+    {
+      "id": "proativo-esforco",
+      "question": "esforço percebido alto: fadiga, recuperação e carga de treino",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "esforço percebido",
+        "fadiga"
+      ]
+    },
+    {
+      "id": "proativo-carga",
+      "question": "aumento brusco da carga de treino: progressão, recuperação e risco de lesão",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "carga",
+        "progress"
+      ]
+    },
+    {
+      "id": "proativo-sono",
+      "question": "sono e recuperação ruins: fadiga, energia baixa e ajuste do treino",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "sono",
+        "recuperação"
+      ]
+    },
+    {
+      "id": "proativo-dor",
+      "question": "dor durante os treinos: sinais de alerta e quando buscar avaliação profissional",
+      "topic": "RECOVERY",
+      "expectAny": [
+        "dor",
+        "avaliação"
+      ]
+    },
+    {
+      "id": "fora-capital",
+      "question": "qual é a capital da França?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-celular",
+      "question": "me indica um bom celular pra comprar?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-imposto",
+      "question": "como declarar imposto de renda este ano?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-tempo",
+      "question": "vai chover amanhã na minha cidade?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-futebol",
+      "question": "quem ganhou o jogo de futebol ontem?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-receita",
+      "question": "me passa uma receita de bolo de cenoura com cobertura",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-serie",
+      "question": "qual série boa pra assistir no fim de semana?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "fora-investimento",
+      "question": "vale mais a pena investir em ação ou em fundo imobiliário?",
+      "topic": "GENERAL",
+      "expectNone": true
+    },
+    {
+      "id": "perto-tenis",
+      "question": "qual o melhor tênis de corrida pra comprar?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "equipamento: o corpus não trata de produtos"
+    },
+    {
+      "id": "perto-preco",
+      "question": "quanto custa o plano da Movivo?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "assunto comercial"
+    },
+    {
+      "id": "perto-banana",
+      "question": "quantas calorias tem uma banana?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "composição de alimento é da TACO, não dos artigos"
+    },
+    {
+      "id": "perto-meditacao",
+      "question": "qual o melhor aplicativo de meditação?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "produto fora do corpus"
+    },
+    {
+      "id": "perto-ciclo",
+      "question": "o ciclo menstrual muda meu desempenho no treino?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "tema sem artigo ainda: o certo é não trazer nada"
+    },
+    {
+      "id": "perto-exame",
+      "question": "treinar antes do exame de sangue muda o resultado?",
+      "topic": "GENERAL",
+      "expectNone": true,
+      "note": "tema sem artigo ainda: exames ficam com o médico"
+    }
+  ]
+}

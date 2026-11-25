@@ -34,6 +34,8 @@ const NOT_A_CLIENT_BODY: Readonly<Record<string, string>> = {
   'modules/protocol/protocol-generator.service.ts': 'saída do LLM, não entrada do cliente',
   'modules/whatsapp/inbound/evolution-inbound.edge.ts':
     'webhook de provedor autenticado por token; o envelope de terceiro evolui sem aviso',
+  'modules/training/strava/strava.service.ts':
+    'webhook do Strava: envelope de terceiro com campos extras; só dispara a busca na API dele',
 };
 
 describe('validação de corpo de request', () => {

@@ -33,6 +33,8 @@ export interface WhatsappTransport {
    * expor titular nenhum na URL em si.
    */
   sendDocument?(to: string, documentUrl: string, caption: string, fileName?: string): Promise<void>;
+  /** PDF enviado como arquivo (base64): nada de URL para o provedor baixar nem link ao aluno. */
+  sendDocumentFile?(to: string, base64: string, caption: string, fileName: string): Promise<void>;
   /** Indicador "digitando…" (US-3.5, mascara latência). Opcional: fakes/legados sem ele. */
   sendTyping?(to: string): Promise<void>;
   hasCredentials(): boolean;

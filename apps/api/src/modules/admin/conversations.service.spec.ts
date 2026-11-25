@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import type { AttendanceService } from '../../core/database/attendance.service';
 import type { ConversationMediaStorage } from '../../core/database/conversation-media-storage.service';
 import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -103,7 +103,7 @@ function build(
     redis as never,
     redisKeys as unknown as RedisKeyBuilder,
     evolution as unknown as EvolutionTransport,
-    attendance as unknown as CoachAttendanceService,
+    attendance as unknown as AttendanceService,
     consent as unknown as HealthConsentService,
     queues as unknown as QueueManager,
     events as unknown as ConversationEventsService,
@@ -135,7 +135,7 @@ describe('ConversationsService.list', () => {
             name: null,
             whatsappName: 'Duda',
             phoneNumber: '+5511999999999',
-            coachPausedAt: null,
+            attendancePausedAt: null,
             unreadCount: 3,
             lastMessageAt: '2026-10-09T12:00:00.000Z',
           },

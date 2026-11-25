@@ -6,18 +6,16 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  * favoritos. Toda a validação anterior do lado API era com `tx` mockado — nenhuma prova de
  * que, com a role de runtime `movivo_app` via PgBouncer, a linha é gravada, a auditoria
  * encadeada aceita o insert, o snapshot em memória do `ExerciseCatalogProvider` reflete a
- * mudança e o system prompt da geração carrega a marcação. Este arquivo prova isso por I/O
+ * mudança e o planejamento (seleção de candidatos de força) enxerga o favorito. Este arquivo prova isso por I/O
  * real, ponta a ponta:
  *
  *   1. HTTP real (`AppModule` inteiro, login Argon2id/RS256 de verdade) sobre
  *      `POST /control-center/ai/exercise-catalog/favorite|unfavorite` + `GET` do catálogo:
  *      gravação, idempotência, auditoria encadeada, RBAC (`AI_CONFIG_WRITE`), 400/404.
- *   2. Motor: a MESMA instância de `ExerciseCatalogProvider` injetada no gerador enxerga o
- *      favorito logo após o endpoint (via `invalidate()`, sem esperar o timer de 5 min), e o
- *      system prompt real de `ProtocolGeneratorService.generate()` — capturado por um
- *      `LlmRouter` falso que só registra o `system` e aborta — tem a marcação, a ordem e o
- *      bloco de preferência corretos (inclusive o caso do fundador: favorito só de academia
- *      com aluno em casa não aparece).
+ *   2. Motor: a MESMA instância de `ExerciseCatalogProvider` injetada no planejamento enxerga o
+ *      favorito logo após o endpoint (via `invalidate()`, sem esperar o timer de 5 min), e a
+ *      seleção de candidatos do Motor (`selectStrengthCandidates`) o põe à frente dos demais do
+ *      mesmo grupo — sem nunca oferecer favorito que o local ou uma limitação do aluno vetam.
  *   3. Falha silenciosa: no caminho feliz NENHUM warn `exercise_catalog_favorites_read_failed`
  *      é emitido; com permissão realmente revogada da role de runtime, o warn aparece e o
  *      snapshot de exercícios continua atualizando (degradação segura).
@@ -31,8 +29,6 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  */
 import 'reflect-metadata';
 
-import { randomUUID } from 'node:crypto';
-
 import { type INestApplication, Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -45,14 +41,11 @@ import { AppModule } from '../src/app.module';
 import { AppConfigService } from '../src/core/config';
 import { loadEnv } from '../src/core/config/load-env';
 import { TenantDatabase } from '../src/core/database';
-import { SEMANTIC_MEMORY } from '../src/modules/ai-coach/context/semantic-memory.port';
-import type { LLMRequest } from '../src/modules/ai-coach/llm/llm.types';
-import { LlmRouter } from '../src/modules/ai-coach/llm/llm-router.service';
 import { ExerciseCatalogAdminService } from '../src/modules/admin/exercise-catalog-admin.service';
 import { PasswordService } from '../src/modules/auth/password.service';
-import { ExerciseCatalogProvider } from '../src/modules/protocol/exercise-catalog-provider.service';
-import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-generator.service';
-import type { UserConstraints } from '../src/modules/protocol/user-constraints';
+import { ExerciseCatalogProvider } from '../src/modules/catalog/exercises/exercise-catalog-provider.service';
+import { selectStrengthCandidates } from '../src/modules/planning/inputs';
+import { parseStateView } from '../src/modules/planning/state-view';
 
 const { env } = loadEnv();
 const RUN = Date.now().toString().slice(-8);
@@ -70,8 +63,6 @@ const MISSING_KEY = `teste_fav_inexistente_${RUN}`;
 /** Publicado pelo código novo com `levels` não contíguo (2026-09-29). */
 const LEVELS_KEY = `teste_niveis_${RUN}`;
 
-const FAVORITE_MARKER = 'preferido pelo profissional CREF: sim';
-const FAVORITE_BLOCK_HEADER = 'PREFERÊNCIA DE PRESCRIÇÃO DO PROFISSIONAL CREF:';
 const READ_FAILED_EVENT = 'exercise_catalog_favorites_read_failed';
 
 // Migrador (dono das tabelas, BYPASSRLS): só setup/teardown e leitura de verificação.
@@ -97,16 +88,6 @@ let proId = '';
 let adminToken = '';
 let proToken = '';
 let savedFavorites: Array<{ exercise_key: string; favorited_by: string; favorited_at: Date }> = [];
-
-/** `system` de cada chamada ao LLM falso — o gerador nunca chega a um provedor real. */
-const capturedSystems: string[] = [];
-const PROMPT_CAPTURED = 'prompt capturado — geração interrompida de propósito pelo teste';
-const fakeLlm = {
-  complete: vi.fn(async (req: LLMRequest) => {
-    capturedSystems.push(req.system ?? '');
-    throw new Error(PROMPT_CAPTURED);
-  }),
-};
 
 // Espião instalado ANTES do boot: cobre também o `refresh()` do `onModuleInit`.
 const warnSpy = vi.spyOn(Logger.prototype, 'warn');
@@ -171,70 +152,17 @@ async function setFavorites(keys: readonly string[]) {
   for (const key of keys) expect((await favorite(key)).status).toBe(201);
 }
 
-const BASE_CONSTRAINTS: UserConstraints = {
-  goal: 'GAIN_MUSCLE',
-  level: 'AVANCADO',
-  trainingStatus: 'REGULAR',
-  daysPerWeek: 3,
-  preferredDays: ['MON', 'WED', 'FRI'],
-  location: 'FULL_GYM',
-  equipment: [],
-  emphasis: [],
-  avoid: [],
-  injuryTags: [],
-  injuriesRaw: [],
-  requiresProfessionalReview: false,
-  parqTags: [],
-  parqTriggered: [],
-};
-
-/** System prompt REAL da geração para estas restrições (o LLM falso aborta logo depois). */
-async function systemPromptFor(overrides: Partial<UserConstraints>): Promise<string> {
-  capturedSystems.length = 0;
-  await expect(
-    app.get(ProtocolGeneratorService).generate({
-      userId: randomUUID(),
-      user: { name: 'Aluno Favoritos' },
-      constraints: { ...BASE_CONSTRAINTS, ...overrides },
-    }),
-  ).rejects.toThrow(PROMPT_CAPTURED);
-  expect(capturedSystems).toHaveLength(1);
-  return capturedSystems[0] ?? '';
-}
-
-/** Linhas da BASE DE REFERÊNCIA, na ordem em que o modelo as lê. */
-function referenceBase(system: string) {
-  const start = system.indexOf('BASE DE REFERÊNCIA (use SOMENTE');
-  const end = system.indexOf('SCHEMA DO JSON DE SAÍDA:', start);
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  return system
-    .slice(start, end)
-    .split('\n')
-    .filter((line) => line.startsWith('- '))
-    .map((line) => ({
-      id: line.slice(2).split(' | ')[0] ?? '',
-      favorite: line.endsWith(` | ${FAVORITE_MARKER}`),
-      equipped: !line.includes(' | equip: nenhum | '),
-    }));
-}
-
-/** A mesma base, separada nos blocos por grupo muscular (`## grupo: ...`). */
-function referenceBaseGroups(system: string) {
-  const start = system.indexOf('BASE DE REFERÊNCIA (use SOMENTE');
-  const end = system.indexOf('SCHEMA DO JSON DE SAÍDA:', start);
-  const groups: { id: string; favorite: boolean; equipped: boolean }[][] = [];
-  for (const line of system.slice(start, end).split('\n')) {
-    if (line.startsWith('## grupo: ')) groups.push([]);
-    else if (line.startsWith('- ')) {
-      groups[groups.length - 1]?.push({
-        id: line.slice(2).split(' | ')[0] ?? '',
-        favorite: line.endsWith(` | ${FAVORITE_MARKER}`),
-        equipped: !line.includes(' | equip: nenhum | '),
-      });
-    }
-  }
-  return groups;
+/** Candidatos de força do Motor para um aluno que treina no `venue` e tem as dores `tags`. */
+function candidatesFor(venue: 'FULL_GYM' | 'CONDO_GYM' | 'HOME', tags: string[] = []) {
+  const view = parseStateView({
+    training: { venues: [venue], modalities: [], externalSports: [] },
+    safety: {
+      activeSignals: [],
+      healthRecords: tags.length ? [{ kind: 'PAIN', summary: 'dor', movementTags: tags }] : [],
+    },
+  });
+  return selectStrengthCandidates(view, 'ADVANCED', app.get(ExerciseCatalogProvider).getAll())
+    .candidates;
 }
 
 beforeAll(async () => {
@@ -243,6 +171,15 @@ beforeAll(async () => {
     SELECT exercise_key, favorited_by, favorited_at FROM exercise_catalog_favorites`;
   await migrator`DELETE FROM exercise_catalog_favorites`;
 
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  app = moduleRef.createNestApplication({ logger: false });
+  app.use(cookieParser());
+  prefix = app.get(AppConfigService).globalPrefix;
+  app.setGlobalPrefix(prefix);
+  await app.init();
+
+  // Depois do boot: o catálogo de partida só é semeado com a tabela vazia, e este fixture a
+  // deixaria não vazia num banco novo (CI).
   // Exercício retirado real (v1 PUBLISHED → v2 RETIRED), mesmo formato do admin.
   for (const [version, status] of [
     [1, 'PUBLISHED'],
@@ -256,19 +193,7 @@ beforeAll(async () => {
               '["HOME"]'::jsonb, 'INICIANTE', '[]'::jsonb, '[]'::jsonb, ${version}, ${status},
               'fixture de integração dos favoritos')`;
   }
-
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(LlmRouter)
-    .useValue(fakeLlm)
-    // RAG sem rede: a evidência não é o objeto deste teste (e o embedding local não tem saldo).
-    .overrideProvider(SEMANTIC_MEMORY)
-    .useValue({ retrieve: async () => [] })
-    .compile();
-  app = moduleRef.createNestApplication({ logger: false });
-  app.use(cookieParser());
-  prefix = app.get(AppConfigService).globalPrefix;
-  app.setGlobalPrefix(prefix);
-  await app.init();
+  await app.get(ExerciseCatalogProvider).invalidate();
 
   const hash = await app.get(PasswordService).hash(PASSWORD);
   [adminId, proId] = await app.get(TenantDatabase).runAsSystem(async (tx) => {
@@ -490,15 +415,12 @@ describe('HTTP — níveis (levels) com role de runtime real', () => {
   });
 });
 
-describe('Motor — snapshot do ExerciseCatalogProvider e system prompt da geração', () => {
-  it('admin e gerador compartilham a MESMA instância do provider (invalidate chega ao motor)', () => {
+describe('Motor — snapshot do ExerciseCatalogProvider e seleção de candidatos', () => {
+  it('admin e planejamento compartilham a MESMA instância do provider (invalidate chega ao motor)', () => {
     const provider = app.get(ExerciseCatalogProvider);
     const viaAdmin = (app.get(ExerciseCatalogAdminService) as unknown as { catalog: unknown })
       .catalog;
-    const viaGenerator = (app.get(ProtocolGeneratorService) as unknown as { catalog: unknown })
-      .catalog;
     expect(viaAdmin).toBe(provider);
-    expect(viaGenerator).toBe(provider);
   });
 
   it('logo após o endpoint (sem esperar o timer), o snapshot marca só as chaves favoritadas', async () => {
@@ -529,81 +451,30 @@ describe('Motor — snapshot do ExerciseCatalogProvider e system prompt da gera�
     ).toEqual([EVERYWHERE, GYM_ONLY].sort());
   });
 
-  it('FULL_GYM: marcador só nas favoritas; favoritos antes de TODO não favorito, equipamento em 2º', async () => {
-    const system = await systemPromptFor({ location: 'FULL_GYM' });
-    const base = referenceBase(system);
-
-    expect(base.filter((l) => l.favorite).map((l) => l.id)).toEqual([GYM_ONLY, EVERYWHERE]);
-    // Revisão 2026-09-29: favorito é o critério PRIMÁRIO — favorito com equipamento >
-    // favorito sem equipamento > não favorito com equipamento > resto. O favorito sem
-    // equipamento vem antes de toda a faixa de não favoritos com equipamento.
-    // A base é apresentada por grupo muscular (2026-10-21); a prioridade vale DENTRO de cada
-    // grupo: favoritos antes de todo não favorito, equipamento em 2º critério.
-    for (const group of referenceBaseGroups(system)) {
-      const firstNonFavorite = group.findIndex((l) => !l.favorite);
-      if (firstNonFavorite >= 0) {
-        expect(group.slice(firstNonFavorite).some((l) => l.favorite)).toBe(false);
-      }
-      for (const part of [group.filter((l) => l.favorite), group.filter((l) => !l.favorite)]) {
-        const firstBodyweight = part.findIndex((l) => !l.equipped);
-        if (firstBodyweight >= 0) {
-          expect(part.slice(firstBodyweight).every((l) => !l.equipped)).toBe(true);
-        }
-      }
+  it('FULL_GYM: o favorito lidera o seu grupo muscular e aparece uma única vez', async () => {
+    const candidates = candidatesFor('FULL_GYM');
+    const provider = app.get(ExerciseCatalogProvider);
+    for (const key of [GYM_ONLY, EVERYWHERE]) {
+      const group = provider.getById(key)?.muscleGroups[0];
+      const inGroup = candidates.filter((c) => c.muscleGroups[0] === group);
+      expect(inGroup.filter((c) => c.id === key)).toHaveLength(1);
+      expect(inGroup[0]?.id).toBe(key);
     }
-    expect(base.find((l) => l.id === GYM_ONLY)).toMatchObject({ favorite: true, equipped: true });
-    expect(base.find((l) => l.id === EVERYWHERE)).toMatchObject({
-      favorite: true,
-      equipped: false,
-    });
-    expect(base.filter((l) => l.id === GYM_ONLY)).toHaveLength(1);
-
-    const blockAt = system.indexOf(FAVORITE_BLOCK_HEADER);
-    expect(blockAt).toBeGreaterThan(-1);
-    expect(blockAt).toBeLessThan(system.indexOf('BASE DE REFERÊNCIA (use SOMENTE'));
   });
 
-  it('CONDO_GYM: favorito sem equipamento lidera à frente da faixa com equipamento', async () => {
-    const system = await systemPromptFor({ location: 'CONDO_GYM' });
-    const base = referenceBase(system);
-
-    expect(base.map((l) => l.id)).not.toContain(GYM_ONLY); // só serve FULL_GYM
-    expect(base[0]).toMatchObject({ id: EVERYWHERE, favorite: true, equipped: false });
-    expect(base[1]?.equipped).toBe(true);
-    expect(system).toContain(FAVORITE_BLOCK_HEADER);
+  it('HOME: favorito só de academia não é oferecido; o que serve em casa continua à frente', async () => {
+    const ids = candidatesFor('HOME').map((c) => c.id);
+    expect(ids).not.toContain(GYM_ONLY);
   });
 
-  it('HOME: favorito só de academia não aparece; o que serve em casa lidera e mantém o bloco', async () => {
-    const system = await systemPromptFor({ location: 'HOME' });
-    const base = referenceBase(system);
-
-    expect(base.map((l) => l.id)).not.toContain(GYM_ONLY);
-    expect(system).not.toContain(GYM_ONLY);
-    expect(base[0]).toMatchObject({ id: EVERYWHERE, favorite: true });
-    expect(base.filter((l) => l.favorite)).toHaveLength(1);
-    expect(system).toContain(FAVORITE_BLOCK_HEADER);
-  });
-
-  it('caso do fundador: só cadeira_flexora_maquina favoritada + aluno HOME → sem marcador e sem bloco', async () => {
-    await setFavorites([GYM_ONLY]);
-    const system = await systemPromptFor({ location: 'HOME' });
-
-    expect(referenceBase(system).map((l) => l.id)).not.toContain(GYM_ONLY);
-    expect(system).not.toContain(FAVORITE_MARKER);
-    expect(system).not.toContain(FAVORITE_BLOCK_HEADER);
-  });
-
-  it('favorito contraindicado para o aluno (KNEE) some junto com o bloco', async () => {
+  it('favorito contraindicado para o aluno (KNEE) não é oferecido', async () => {
     await setFavorites([GYM_ONLY, EVERYWHERE]);
-    const system = await systemPromptFor({ location: 'FULL_GYM', injuryTags: ['KNEE'] });
-
-    const ids = referenceBase(system).map((l) => l.id);
+    const ids = candidatesFor('FULL_GYM', ['KNEE']).map((c) => c.id);
     expect(ids).not.toContain(GYM_ONLY);
     expect(ids).not.toContain(EVERYWHERE);
-    expect(system).not.toContain(FAVORITE_BLOCK_HEADER);
   });
 
-  it('sem nenhum favorito no banco: nenhuma linha marcada e bloco ausente', async () => {
+  it('sem nenhum favorito no banco: nenhuma linha marcada', async () => {
     await setFavorites([]);
     expect(
       app
@@ -611,10 +482,6 @@ describe('Motor — snapshot do ExerciseCatalogProvider e system prompt da gera�
         .getAll()
         .some((e) => e.isFavorite),
     ).toBe(false);
-
-    const system = await systemPromptFor({ location: 'FULL_GYM' });
-    expect(system).not.toContain(FAVORITE_MARKER);
-    expect(system).not.toContain(FAVORITE_BLOCK_HEADER);
   });
 });
 

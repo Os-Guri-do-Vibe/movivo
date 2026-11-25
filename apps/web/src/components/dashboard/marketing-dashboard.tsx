@@ -54,7 +54,7 @@ export function MarketingDashboard() {
   const funnel = [
     { label: 'Formulário iniciado', metric: data.funnel.formStarted },
     { label: 'Formulário concluído', metric: data.funnel.formSubmitted },
-    { label: 'Protocolo ativo', metric: data.funnel.protocolActive },
+    { label: 'Plano ativo', metric: data.funnel.planActive },
     { label: 'Assinatura ativa', metric: data.funnel.subscriptionActive },
   ];
   return (

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAdSpendImmutabilitySql,
-  buildAgentConfigImmutabilitySql,
   buildAuditIntegritySql,
   buildExpensesImmutabilitySql,
   buildFaqEntriesImmutabilitySql,
@@ -38,7 +37,6 @@ describe('sqlIdentifier', () => {
 describe('builders de DDL (GRANT/REVOKE) recusam nome de role malicioso', () => {
   const builders = {
     buildAuditIntegritySql,
-    buildAgentConfigImmutabilitySql,
     buildFaqEntriesImmutabilitySql,
     buildProfessionalAccessSql,
     buildStatusTransitionsImmutabilitySql,

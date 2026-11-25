@@ -1,15 +1,7 @@
 import type { ControlCenterTimelineEvent } from '@movivo/shared';
 
-import {
-  anamnesisStatus,
-  durationFitLabel,
-  handoffLevelLabel,
-  handoffReasonLabel,
-  moodLabel,
-  planLabel,
-  sleepLabel,
-  subscriptionStatus,
-} from './student-labels';
+import { anamnesisStatus, modalityLabel, planLabel, subscriptionStatus } from './student-labels';
+import { KIND_LABEL } from '@/lib/exception-copy';
 
 /**
  * Texto de cada marco da linha do tempo. O servidor manda `code` + `params` crus
@@ -34,65 +26,35 @@ function num(params: Params, key: string): number | null {
   return typeof value === 'number' ? value : null;
 }
 
-function join(parts: ReadonlyArray<string | null>): string | null {
-  const filled = parts.filter((part): part is string => part !== null);
-  return filled.length > 0 ? filled.join(' · ') : null;
-}
-
 const lower = (value: string | null) => value?.toLowerCase() ?? null;
-
-function checkinDetail(params: Params): string | null {
-  const sleep = sleepLabel(text(params, 'sleepQuality'));
-  const mood = moodLabel(text(params, 'mood'));
-  const nutrition = text(params, 'nutritionScore');
-  const adherence = text(params, 'adherenceScore');
-  const duration = durationFitLabel(text(params, 'durationFit'));
-  return join([
-    sleep && `Sono: ${lower(sleep)}`,
-    mood && `Humor: ${lower(mood)}`,
-    nutrition && `Alimentação: ${nutrition}`,
-    adherence && `Aderência: ${adherence}`,
-    duration && `Duração do treino: ${lower(duration)}`,
-  ]);
-}
 
 export function describeTimelineEvent(event: ControlCenterTimelineEvent): TimelineText {
   const { params } = event;
-  const version = num(params, 'version');
-  const week = num(params, 'week');
-  const weekText = week === null ? '' : ` da semana ${week}`;
 
   switch (event.code) {
     case 'ANAMNESIS_STARTED': {
       const origin = text(params, 'origin');
-      return {
-        title: 'Formulário de anamnese iniciado',
-        detail: origin && `Origem: ${origin}`,
-      };
+      return { title: 'Anamnese iniciada', detail: origin && `Origem: ${origin}` };
     }
     case 'ANAMNESIS_SUBMITTED':
       return {
-        title: 'Formulário de anamnese enviado',
+        title: 'Anamnese enviada',
         detail: anamnesisStatus(text(params, 'status'))?.label ?? null,
       };
-    case 'PROTOCOL_SIGNED':
+    case 'PLAN_PUBLISHED': {
+      const version = num(params, 'version');
       return {
-        title: `Protocolo${version === null ? '' : ` v${version}`} assinado pelo responsável técnico`,
+        title: `Plano de treino${version === null ? '' : ` v${version}`} publicado`,
         detail: null,
       };
-    case 'PROTOCOL_VERSION_GENERATED': {
-      const model = text(params, 'model');
-      return {
-        title: `Versão${version === null ? '' : ` ${version}`} do protocolo gerada`,
-        detail: join([text(params, 'reason'), model && `modelo ${model}`]),
-      };
     }
-    case 'PROTOCOL_VERSION_SIGNED':
-      return { title: `Versão${version === null ? '' : ` ${version}`} assinada`, detail: null };
-    case 'CHECKIN_SENT':
-      return { title: `Check-in${weekText} enviado`, detail: null };
+    case 'SESSION_COMPLETED':
+      return {
+        title: 'Sessão de treino registrada',
+        detail: modalityLabel(text(params, 'modality')),
+      };
     case 'CHECKIN_ANSWERED':
-      return { title: `Check-in${weekText} respondido`, detail: checkinDetail(params) };
+      return { title: 'Check-in respondido', detail: null };
     case 'SUBSCRIPTION_CREATED': {
       const plan = lower(planLabel(text(params, 'plan')));
       return {
@@ -105,19 +67,21 @@ export function describeTimelineEvent(event: ControlCenterTimelineEvent): Timeli
     case 'PAID_PERIOD_STARTED':
       return { title: 'Início do período pago vigente', detail: null };
     case 'SUBSCRIPTION_CANCELED':
-      return { title: 'Assinatura cancelada', detail: text(params, 'reason') };
-    case 'HANDOFF_OPENED': {
-      const level = handoffLevelLabel(text(params, 'level'));
+      return { title: 'Assinatura cancelada', detail: null };
+    case 'EXCEPTION_OPENED': {
+      const kind = text(params, 'kind');
       return {
-        title: level ? `Atendimento humano aberto (${level})` : 'Atendimento humano aberto',
-        detail: handoffReasonLabel(text(params, 'reason')),
+        title: 'Caso aberto na fila de exceções',
+        detail: (kind && KIND_LABEL[kind as keyof typeof KIND_LABEL]) ?? text(params, 'summary'),
       };
     }
-    case 'HANDOFF_RESOLVED':
+    case 'EXCEPTION_RESOLVED': {
+      const kind = text(params, 'kind');
       return {
-        title: 'Atendimento humano resolvido',
-        detail: handoffReasonLabel(text(params, 'reason')),
+        title: 'Caso da fila resolvido',
+        detail: (kind && KIND_LABEL[kind as keyof typeof KIND_LABEL]) ?? null,
       };
+    }
     case 'CONVERSATION_DAY': {
       const messages = num(params, 'messages') ?? 0;
       return {

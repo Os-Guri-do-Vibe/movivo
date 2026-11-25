@@ -94,7 +94,7 @@ describe('SubscriptionPeriodScheduler', () => {
     expect(name).toBe('plan-ended');
     expect(job).toMatchObject({
       userId: 'u1',
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       dedupeId: 'plan-ended_2026-10-23T12:00:00.000Z',
     });
     expect(job.text).toContain('*Ana*, seu plano *mensal* MOVIVO chegou ao fim. 💚');

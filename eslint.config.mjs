@@ -33,7 +33,6 @@ export default tseslint.config(
       // Arquivo de tipos gerado pelo Next.js a cada build — não é código do projeto.
       '**/next-env.d.ts',
       'docs/**',
-      'sprint/**',
     ],
   },
 

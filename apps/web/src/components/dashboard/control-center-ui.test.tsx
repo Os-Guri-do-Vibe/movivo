@@ -28,6 +28,7 @@ function Probe({ load }: { load: (signal?: AbortSignal) => Promise<string> }) {
       <p data-testid="forbidden">{String(state.forbidden)}</p>
       <p data-testid="error">{state.error}</p>
       <p data-testid="data">{state.data ?? 'sem dado'}</p>
+      <p data-testid="updated">{state.updatedAt ? state.updatedAt.toISOString() : 'nunca'}</p>
       <button onClick={() => void state.refresh()}>recarregar</button>
     </div>
   );
@@ -89,6 +90,35 @@ describe('SectorHeader', () => {
    * mesmo ícone do item correspondente na sidebar, sempre em verde-pulso — nunca mais
    * um subtítulo de descrição embaixo (removido do componente, não só escondido).
    */
+  it('sem `meta` do servidor, mostra a hora da última carga no mesmo formato', () => {
+    // 00:19 UTC = 21:19 em São Paulo (UTC-3)
+    render(<SectorHeader title="Agentes" updatedAt={new Date('2026-11-02T00:19:00Z')} />);
+    expect(screen.getByText(/Atualizado em/)).toBeVisible();
+    expect(screen.getByText('01/11/2026, 21:19')).toHaveAttribute(
+      'dateTime',
+      '2026-11-02T00:19:00.000Z',
+    );
+  });
+
+  it('a hora do servidor (`meta`) vale mais que a da carga no navegador', () => {
+    render(
+      <SectorHeader
+        title="Visão geral"
+        meta={controlCenterMeta}
+        updatedAt={new Date('2026-11-02T00:19:00Z')}
+      />,
+    );
+    expect(screen.getByText('11/08/2026, 12:00')).toBeVisible();
+    expect(screen.queryByText('01/11/2026, 21:19')).not.toBeInTheDocument();
+  });
+
+  it('sem hora nenhuma (ou com data inválida), não desenha a linha', () => {
+    const { rerender } = render(<SectorHeader title="Painel" />);
+    expect(screen.queryByText(/Atualizado em/)).not.toBeInTheDocument();
+    rerender(<SectorHeader title="Painel" updatedAt={new Date('invalida')} />);
+    expect(screen.queryByText(/Atualizado em/)).not.toBeInTheDocument();
+  });
+
   it('com `icon`, renderiza o ícone em verde-pulso ao lado do título', () => {
     render(<SectorHeader title="Financeiro" icon={Landmark} />);
     const heading = screen.getByRole('heading', { name: 'Financeiro' });
@@ -201,6 +231,20 @@ describe('useControlCenterResource', () => {
     await waitFor(() => expect(screen.getByTestId('data')).toHaveTextContent('setor'));
     expect(screen.getByTestId('error')).toBeEmptyDOMElement();
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
+  it('registra a hora da última carga que deu certo (e não a de uma que falhou)', async () => {
+    const load = vi
+      .fn<(signal?: AbortSignal) => Promise<string>>()
+      .mockRejectedValueOnce(new ControlCenterApiError(500, 'Falhou'))
+      .mockResolvedValueOnce('setor');
+    render(<Probe load={load} />);
+    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('Falhou'));
+    expect(screen.getByTestId('updated')).toHaveTextContent('nunca');
+
+    await userEvent.click(screen.getByRole('button', { name: 'recarregar' }));
+    await waitFor(() => expect(screen.getByTestId('data')).toHaveTextContent('setor'));
+    expect(screen.getByTestId('updated')).not.toHaveTextContent('nunca');
   });
 
   it('marca forbidden apenas no 403', async () => {

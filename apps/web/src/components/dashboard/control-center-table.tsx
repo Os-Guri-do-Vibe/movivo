@@ -168,6 +168,7 @@ export function FilterBar({
   actions,
   chips,
   children,
+  layout = 'inline',
 }: {
   /** Nome acessível do `<form>`. */
   label: string;
@@ -179,17 +180,39 @@ export function FilterBar({
   actions: ReactNode;
   chips: readonly FilterChip[];
   children: ReactNode;
+  /**
+   * `inline` (padrão): campos de largura própria numa linha que quebra pela largura da JANELA.
+   * `grid`: colunas iguais que respondem à largura da PRÓPRIA faixa (container query), com as
+   * ações numa linha só delas. Use quando os campos têm o mesmo peso e a barra lateral muda o
+   * espaço útil: o `inline` deixa um campo órfão na segunda linha (visto num MacBook 14").
+   * No `grid`, cada campo diz quantas colunas ocupa pelo próprio `className`
+   * (ex.: `@md:col-span-2 @3xl:col-span-4 @5xl:col-span-1` para o campo principal).
+   *
+   *   < 28rem   1 coluna · 28 a 48rem  2 colunas · 48 a 64rem  4 colunas · ≥ 64rem  5 colunas
+   */
+  layout?: 'inline' | 'grid';
 }) {
+  const grid = layout === 'grid';
   return (
     <form
       aria-label={label}
       onSubmit={onSubmit}
-      className="mt-6 rounded-xl border border-border bg-card"
+      className={cn('mt-6 rounded-xl border border-border bg-card', grid && '@container')}
     >
-      <div className="flex flex-col gap-3 p-3 lg:flex-row lg:flex-wrap lg:items-end lg:gap-1.5">
-        {children}
-        <div className="flex shrink-0 items-center gap-2 lg:ml-auto">{actions}</div>
-      </div>
+      {grid ? (
+        <div className="grid grid-cols-1 gap-3 p-3 @md:grid-cols-2 @3xl:grid-cols-4 @5xl:grid-cols-5 @5xl:gap-x-4">
+          {children}
+          {/* Celular: os dois botões dividem a linha; a partir de 28rem, ficam à direita. */}
+          <div className="col-span-full flex items-center gap-2 @md:justify-end [&>*]:flex-1 @md:[&>*]:flex-none">
+            {actions}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 p-3 lg:flex-row lg:flex-wrap lg:items-end lg:gap-1.5">
+          {children}
+          <div className="flex shrink-0 items-center gap-2 lg:ml-auto">{actions}</div>
+        </div>
+      )}
       {chips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
           {chips.map((chip) => (
@@ -531,18 +554,24 @@ export function SortableTh({
   active,
   direction,
   onSort,
+  className,
 }: {
   label: string;
   active: boolean;
   direction: SortDirection;
   onSort: () => void;
+  /** Para fixar a coluna na rolagem horizontal (`sticky left-0 bg-card`). */
+  className?: string;
 }) {
   const Icon = !active ? ArrowUpDown : direction === 'asc' ? ArrowUp : ArrowDown;
   return (
     <th
       scope="col"
       aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className="px-4 py-3 text-center text-xs font-medium whitespace-nowrap text-muted-foreground"
+      className={cn(
+        'px-4 py-3 text-center text-xs font-medium whitespace-nowrap text-muted-foreground',
+        className,
+      )}
     >
       <button
         type="button"

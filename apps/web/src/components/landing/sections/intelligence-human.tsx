@@ -10,15 +10,21 @@ import styles from './intelligence-human.module.css';
 import { LeonardoDetails } from './leonardo-details';
 
 const INTELLIGENCE = [
-  { title: 'Personalização', text: 'Cada protocolo parte do seu contexto.' },
-  { title: 'Contexto', text: 'Rotina, feedbacks e histórico conectados.' },
+  { title: 'Personalização', text: 'Cada plano parte do seu contexto.' },
+  { title: 'Contexto', text: 'Rotina, registros e histórico conectados.' },
   { title: 'Adaptação', text: 'Ajustes quando a sua rotina muda.' },
   { title: 'Disponibilidade', text: 'Respostas no WhatsApp, quando você precisar.' },
 ] as const;
 
 const HUMAN = [
-  { title: 'Metodologia', text: 'Critérios definidos por profissional de Educação Física.' },
-  { title: 'Revisão', text: 'Protocolos revisados antes de chegar até você.' },
+  {
+    title: 'Metodologia',
+    text: 'Critérios escritos por profissionais registrados nos seus conselhos.',
+  },
+  {
+    title: 'Regras versionadas',
+    text: 'A IA só age dentro das políticas publicadas pelos profissionais.',
+  },
   { title: 'Supervisão', text: 'Exceções e casos sensíveis seguem para avaliação humana.' },
   { title: 'Responsabilidade técnica', text: 'Um responsável técnico com registro no CREF.' },
 ] as const;

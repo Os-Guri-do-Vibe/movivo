@@ -20,7 +20,7 @@ import {
 } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { LANGUAGE_RULES } from '../protocol/validation/validation-rules';
+import { languageViolations } from '../planning/tasks/common';
 import { MockGateway } from './payment/mock-gateway';
 import { PLAN_CATALOG, type SubscriptionPlan } from './subscription-model';
 import {
@@ -147,9 +147,7 @@ describe('4.7.4 — copy dentro dos guardrails (Sofia §13, sem termos proibidos
   it.each(texts.map((t, i) => [i, t] as const))(
     'copy #%i não dispara regra de linguagem',
     (_i, text) => {
-      for (const rule of LANGUAGE_RULES) {
-        expect(rule.pattern.test(text), `${rule.id} em: ${text.slice(0, 40)}`).toBe(false);
-      }
+      expect(languageViolations(text, 'copy'), text.slice(0, 40)).toEqual([]);
     },
   );
 });

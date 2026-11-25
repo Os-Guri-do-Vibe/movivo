@@ -1,15 +1,16 @@
 import { notFound } from 'next/navigation';
+import { uuidSchema } from '@movivo/shared';
 
-import { AlertDetail } from '@/components/dashboard/alert-detail';
+import { ExceptionDetail } from '@/components/dashboard/exception-detail';
 
 import { requireDashboardCapability } from '../../_lib/session';
 
-export default async function AlertDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireDashboardCapability(
-    ['control_center.students.read', 'control_center.students.health.read'],
-    '/dashboard/alertas',
-  );
+export default async function AlertPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  if (!id) notFound();
-  return <AlertDetail id={id} />;
+  if (!uuidSchema.safeParse(id).success) notFound();
+  await requireDashboardCapability(
+    ['control_center.exceptions.read', 'control_center.students.read'],
+    `/dashboard/alertas/${id}`,
+  );
+  return <ExceptionDetail id={id} />;
 }

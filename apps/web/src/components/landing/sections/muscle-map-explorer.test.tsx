@@ -44,6 +44,6 @@ describe('MuscleMapExplorer', () => {
 
   it('identifica o conteúdo como exemplo, não como dado de um aluno real', () => {
     render(<MuscleMapExplorer />);
-    expect(screen.getByText(/Exemplo de protocolo/)).toBeVisible();
+    expect(screen.getByText(/Exemplo de plano/)).toBeVisible();
   });
 });

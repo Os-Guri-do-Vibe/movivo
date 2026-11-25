@@ -180,14 +180,42 @@ describe('PhoneOtp', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/código incorreto/i);
   });
 
-  it('código expirado (410) mostra mensagem específica', async () => {
+  it('código expirado: a API responde 400 com o motivo, que é mostrado como veio', async () => {
     const user = userEvent.setup();
-    verifyPhoneCode.mockRejectedValue(new AnamnesisApiError(410, []));
+    verifyPhoneCode.mockRejectedValue(
+      new AnamnesisApiError(400, ['Esse código expirou. Pede um novo, leva um segundo.']),
+    );
     render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     await user.type(screen.getByLabelText(/código de verificação/i), '111111');
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/expirou/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/código expirou/i);
+  });
+
+  it('teto de tentativas (403) e limite de requisições (429) explicam a espera', async () => {
+    const user = userEvent.setup();
+    verifyPhoneCode.mockRejectedValueOnce(
+      new AnamnesisApiError(403, [
+        'Muitas tentativas seguidas. Por segurança, espere alguns minutos antes de tentar de novo.',
+      ]),
+    );
+    verifyPhoneCode.mockRejectedValueOnce(new AnamnesisApiError(429, []));
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
+
+    const input = screen.getByLabelText(/código de verificação/i);
+    await user.type(input, '111111');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/espere alguns minutos/i);
+    await user.type(input, '222222');
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/Muitas tentativas em pouco tempo/i),
+    );
+  });
+
+  it('sem conexão, o envio do código pede para conferir a internet', async () => {
+    sendPhoneCode.mockRejectedValueOnce(new AnamnesisApiError(0, []));
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/conexão com a internet/i);
   });
 });

@@ -60,6 +60,8 @@ def main():
         initialization = json.loads(custody.read_text())
         app_token = (secrets_dir / "vault_token").read_text().strip()
         context = ssl.create_default_context(cafile=str(secrets_dir / "internal_tls/ca.crt"))
+        # Python 3.13+ liga VERIFY_X509_STRICT (exige AKI); a CA interna não o tem. Cadeia e nome seguem verificados.
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
 
         def live(path, token, data=None, binary=False):
             request = urllib.request.Request("https://127.0.0.1:8200/v1/" + path,

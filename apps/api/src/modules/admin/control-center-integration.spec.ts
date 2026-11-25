@@ -6,12 +6,9 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
 import type { DatabaseHealthService } from '../../core/database';
-import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
-import { RedisKeyBuilder, type RedisHealthService } from '../../core/redis';
-import type { Redis } from 'ioredis';
+import type { RedisHealthService } from '../../core/redis';
 import type { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
 import type { EvolutionTransport } from '../whatsapp/evolution-transport';
@@ -26,10 +23,6 @@ function build(evolution: Partial<EvolutionTransport>) {
     {} as unknown as DatabaseHealthService,
     {} as unknown as RedisHealthService,
     {} as unknown as AuditService,
-    {} as unknown as HealthCipherService,
-    {} as unknown as Redis,
-    new RedisKeyBuilder('movivo'),
-    {} as unknown as AgentConfigRepository,
     withDefaults as EvolutionTransport,
   );
   return service;

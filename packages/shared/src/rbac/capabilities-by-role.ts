@@ -29,6 +29,10 @@ export const CAPABILITIES_BY_ROLE: Readonly<Record<Role, readonly Capability[]>>
     ControlCenterCapability.AI_GUARDRAIL_APPROVE,
     // Assume a conversa com o aluno quando o atendimento automático está pausado.
     ControlCenterCapability.CONVERSATIONS_WRITE,
+    // Responde pelos casos do domínio do seu conselho (CREF, CRN ou CRM).
+    ControlCenterCapability.EXCEPTIONS_READ,
+    ControlCenterCapability.EXCEPTIONS_RESOLVE,
+    ControlCenterCapability.AGENTS_READ,
   ],
   [ControlCenterRole.MARKETING]: [
     ControlCenterCapability.MARKETING_READ,
@@ -52,6 +56,8 @@ export const CAPABILITIES_BY_ROLE: Readonly<Record<Role, readonly Capability[]>>
     ControlCenterCapability.SYSTEM_OPERATE,
     ControlCenterCapability.AI_CONFIG_READ,
     ControlCenterCapability.AI_CONFIG_WRITE,
+    ControlCenterCapability.AGENTS_READ,
+    ControlCenterCapability.MODEL_TIERS_WRITE,
   ],
   [ControlCenterRole.DPO]: [
     ControlCenterCapability.COMPLIANCE_READ,

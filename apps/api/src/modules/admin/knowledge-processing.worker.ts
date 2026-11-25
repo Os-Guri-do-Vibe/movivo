@@ -6,8 +6,13 @@ import { sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { chunkText } from '../../core/knowledge/corpus-indexer';
+import { chunkText, EMBEDDING_RECIPE, PARSER_VERSION } from '../../core/knowledge/corpus-indexer';
 import { EMBEDDING_PORT, type EmbeddingPort } from '../../core/knowledge/embedding.port';
+import {
+  contextHeader,
+  contextualizeChunk,
+  parseDocumentMeta,
+} from '../../core/knowledge/rag-text';
 import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { knowledgeProcessingErrorCode, scanArticleText } from './knowledge-content-scanner';
@@ -22,8 +27,7 @@ export interface KnowledgeProcessingJob {
   documentId: string;
 }
 
-const PARSER_VERSION = 'article-text-v1';
-const EMBEDDING_MODEL = 'embedding-port-v1';
+const EMBEDDING_MODEL = EMBEDDING_RECIPE;
 
 @Injectable()
 export class KnowledgeProcessingWorker implements OnModuleInit {
@@ -223,8 +227,20 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
       throw new Error('Nenhum chunk canônico disponível para indexação.');
     }
 
+    // Contexto do documento no vetor (contextual retrieval): título do cadastro + o que o
+    // profissional escreveu no topo do arquivo (tipo, ano, domínio), lido do primeiro trecho.
+    const title = await this.db.runAsSystem(async (tx) => {
+      const rows = (await tx.execute(
+        sql`SELECT title FROM knowledge_documents WHERE id = ${input.documentId}::uuid`,
+      )) as unknown as Array<{ title: string }>;
+      return rows[0]?.title ?? '';
+    });
+    const header = contextHeader(title, parseDocumentMeta(staged[0]?.chunk_text ?? ''));
+
     // Chamada externa/custosa deliberadamente fora da transação de aprovação/publicação.
-    const vectors = await this.embedding.embedBatch(staged.map((chunk) => chunk.chunk_text));
+    const vectors = await this.embedding.embedBatch(
+      staged.map((chunk) => contextualizeChunk(header, chunk.chunk_text)),
+    );
     if (vectors.length !== staged.length || vectors.some((vector) => vector.length === 0)) {
       throw new Error('Provider de embedding devolveu lote incompleto.');
     }

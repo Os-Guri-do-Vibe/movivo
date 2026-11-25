@@ -33,7 +33,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { EmptyState, ResourceState, useControlCenterResource } from './control-center-ui';
-import { formatPhone } from './protocol-anamnesis-answers';
+import { formatPhone } from '@/lib/phone-mask';
 import { WhatsappText } from './whatsapp-text';
 
 const TIMEZONE = 'America/Sao_Paulo';
@@ -135,13 +135,13 @@ const MESSAGE_TYPE_LABEL: Partial<Record<ControlCenterConversationMessage['messa
     SYSTEM: 'Sistema',
   };
 
-/** Quem escreveu, para o profissional distinguir o Coach, o aviso automático e uma pessoa. */
+/** Quem escreveu, para o profissional distinguir a IA, o aviso automático e uma pessoa. */
 function senderLabel(message: ControlCenterConversationMessage, studentLabel: string): string {
   switch (message.origin) {
     case 'STUDENT':
       return studentLabel;
-    case 'COACH':
-      return 'AI Coach';
+    case 'AGENT':
+      return 'IA';
     case 'SYSTEM':
       return 'MOVIVO · aviso automático';
     case 'PROFESSIONAL':
@@ -237,7 +237,7 @@ function ConversationList({
                   type="button"
                   onClick={() => onSelect(item.studentId)}
                   aria-current={selected ? 'true' : undefined}
-                  // Borda = estado do atendimento automático do AI Coach: vermelha pausado,
+                  // Borda = estado do atendimento automático: vermelha pausado,
                   // verde ativo. O texto para leitor de tela está logo abaixo (a cor sozinha
                   // não carrega a informação).
                   className={cn(
@@ -890,16 +890,14 @@ function ChatPanel({
           >
             <SendHorizontal aria-hidden="true" />
           </Button>
-          {/* Botão único que alterna: mostra a AÇÃO possível — "Pausar" com o AI Coach ativo,
+          {/* Botão único que alterna: mostra a AÇÃO possível — "Pausar" com a IA ativo,
               "Ativar" com ele pausado. */}
           <Button
             type="button"
             onClick={() => void togglePaused()}
             disabled={toggling}
             aria-label={
-              paused
-                ? 'Ativar o atendimento automático do AI Coach'
-                : 'Pausar o atendimento automático do AI Coach'
+              paused ? 'Ativar o atendimento automático' : 'Pausar o atendimento automático'
             }
             className={cn(
               'text-white',
@@ -912,8 +910,8 @@ function ChatPanel({
         </div>
         <p className="mt-2 text-label text-muted-foreground">
           {paused
-            ? 'Atendimento automático pausado: o AI Coach não responde a este aluno. Suas mensagens saem pelo WhatsApp da MOVIVO.'
-            : 'Atendimento automático ativo: o AI Coach responde ao aluno. Pause para escrever manualmente.'}
+            ? 'Atendimento automático pausado: a IA não responde a este aluno. Suas mensagens saem pelo WhatsApp da MOVIVO.'
+            : 'Atendimento automático ativo: a IA responde ao aluno. Pause para escrever manualmente.'}
         </p>
         {actionError ? (
           <p role="alert" className="mt-2 rounded-lg border border-coral bg-card p-2 text-body">
@@ -928,7 +926,7 @@ function ChatPanel({
 /**
  * Aba "Conversas": lista de alunos à esquerda e histórico do WhatsApp à direita, no molde
  * do WhatsApp Web. Em telas estreitas mostra uma coluna por vez (lista → conversa).
- * A moldura de cada aluno mostra o estado do atendimento automático do AI Coach (vermelha
+ * A moldura de cada aluno mostra o estado do atendimento automático (vermelha
  * pausado, verde ativo). Com ele pausado o profissional escreve ao aluno por aqui; com ele
  * ativo o campo de mensagem fica travado, para a IA e um humano nunca responderem juntos.
  */

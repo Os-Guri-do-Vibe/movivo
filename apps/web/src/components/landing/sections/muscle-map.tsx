@@ -23,7 +23,7 @@ export function MuscleMapSection() {
             lines={['Cada treino', 'tem contexto.']}
           />
           <p className={cn(landing.body, landing.secondaryText, styles.body)} data-reveal="">
-            A MOVIVO organiza estímulos, frequência e progressão para que o protocolo tenha
+            A MOVIVO organiza estímulos, frequência e progressão para que o plano tenha
             continuidade, não apenas exercícios soltos.
           </p>
         </header>

@@ -32,7 +32,7 @@ describe('contratos do Control Center', () => {
           funnel: {
             formStarted: metric,
             formSubmitted: metric,
-            protocolActive: metric,
+            planActive: metric,
             subscriptionActive: metric,
           },
           acquisition: { ...metric, value: null, status: 'UNAVAILABLE' },
@@ -71,7 +71,7 @@ describe('contratos do Control Center', () => {
             status: 'ACTIVE',
             subscriptionStatus: null,
             subscriptionPlan: null,
-            protocolStatus: null,
+            planStatus: null,
             enrolledAt: null,
             churnRisk: { score: 0, signals: [] },
             parqState: 'BLOCKED',

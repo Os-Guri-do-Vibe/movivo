@@ -34,10 +34,10 @@ describe('AccessLinkService — trust boundary', () => {
     const runAsUser = vi.fn();
     const service = new AccessLinkService({ runAsSystem, runAsUser } as never);
     for (const token of [USER, '', 'A'.repeat(300), 'secret?query']) {
-      await expect(service.verify(token, 'PROTOCOL')).resolves.toBeNull();
+      await expect(service.verify(token, 'PLAN')).resolves.toBeNull();
     }
-    await expect(service.issue('PROTOCOL', 'invalid', USER, 1000)).rejects.toThrow();
-    await expect(service.issue('PROTOCOL', USER, USER, 0)).rejects.toThrow();
+    await expect(service.issue('PLAN', 'invalid', USER, 1000)).rejects.toThrow();
+    await expect(service.issue('PLAN', USER, USER, 0)).rejects.toThrow();
     expect(runAsSystem).not.toHaveBeenCalled();
     expect(runAsUser).not.toHaveBeenCalled();
   });

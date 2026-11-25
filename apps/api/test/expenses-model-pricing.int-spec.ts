@@ -6,7 +6,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *  (a) **`expenses` é append-only** — a role de runtime (`movivo_app`) não consegue
  *      UPDATE nem DELETE (erro 42501, checado antes do trigger), e a role de migração
  *      (`movivo_migrator`, que mantém o grant) esbarra no trigger (55000). Mesmo padrão
- *      e mesma divisão de barreiras de `agent-config-immutability.int-spec.ts`.
+ *      e mesma divisão de barreiras de o spec de imutabilidade de `audit_logs`.
  *
  *  (b) **preço de modelo é por vigência** — o custo de um job usa o preço vigente na
  *      DATA DO JOB. Registrar um preço novo hoje **não** pode alterar o custo apurado de

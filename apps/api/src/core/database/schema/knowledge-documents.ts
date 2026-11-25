@@ -46,9 +46,8 @@ export const knowledgeDocuments = pgTable(
     mimeType: varchar('mime_type', { length: 100 }).notNull(),
     sizeBytes: integer('size_bytes').notNull(),
     sha256: varchar('sha256', { length: 64 }).notNull().unique(),
-    uploadedBy: uuid('uploaded_by')
-      .notNull()
-      .references(() => staff.id, { onDelete: 'restrict' }),
+    /** Nulo nos artigos padrão da aplicação (carga do sistema no deploy), como nas fichas dos agentes. */
+    uploadedBy: uuid('uploaded_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

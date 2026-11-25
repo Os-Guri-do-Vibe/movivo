@@ -1,0 +1,3 @@
+ALTER TYPE "public"."consent_type" ADD VALUE 'MENSTRUAL_CYCLE';--> statement-breakpoint
+ALTER TABLE "student_health_records" DROP CONSTRAINT "ck_student_health_records_kind";--> statement-breakpoint
+ALTER TABLE "student_health_records" ADD CONSTRAINT "ck_student_health_records_kind" CHECK ("student_health_records"."kind" in ('PARQ', 'CONDITION', 'INJURY', 'PAIN', 'MEDICATION', 'SURGERY', 'PREGNANCY', 'EATING_DISORDER_HISTORY', 'PROFESSIONAL_GUIDANCE', 'FOOD_ALLERGY', 'NOTES', 'MENSTRUAL_CYCLE'));

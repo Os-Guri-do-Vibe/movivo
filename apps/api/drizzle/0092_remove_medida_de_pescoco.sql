@@ -1,0 +1,2 @@
+ALTER TABLE "body_measurements" DROP CONSTRAINT "ck_body_measurements_kind";--> statement-breakpoint
+ALTER TABLE "body_measurements" ADD CONSTRAINT "ck_body_measurements_kind" CHECK ("body_measurements"."kind" in ('WEIGHT', 'WAIST', 'HIP', 'CHEST', 'ARM', 'THIGH', 'CALF', 'BODY_FAT_PERCENT'));

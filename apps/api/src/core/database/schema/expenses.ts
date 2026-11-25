@@ -10,13 +10,13 @@
  * 2. **Correção por estorno, nunca por edição.** Não há endpoint de UPDATE de valor, e a
  *    proibição não é convenção de código: `security-policies.ts` instala trigger de
  *    rejeição + `REVOKE UPDATE, DELETE, TRUNCATE` da role de runtime, o mesmo padrão de
- *    `audit_logs` e `agent_config`. Lançou errado → grava a linha de estorno
+ *    `audit_logs`. Lançou errado → grava a linha de estorno
  *    (`amount_cents` negativo, `reverses_expense_id` apontando para a original) e depois
  *    a linha certa. O extrato é conferível porque nada some.
  *
  * ## Sem RLS por titular
  * Não é dado de aluno: é dado da empresa. O controle é por capability na API
- * (`FINANCE_READ` / `FINANCE_WRITE`) + append-only no banco — igual a `agent_config`.
+ * (`FINANCE_READ` / `FINANCE_WRITE`) + append-only no banco — igual a `audit_logs`.
  *
  * ## Recorrência é materializada, não calculada
  * Despesa recorrente gera **uma linha por período**, criada pelo job de materialização

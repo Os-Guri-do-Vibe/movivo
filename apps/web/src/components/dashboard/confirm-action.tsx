@@ -19,6 +19,7 @@ export function ConfirmAction({
   triggerClassName,
   children,
   confirmDisabled = false,
+  renderTrigger,
 }: {
   /** Texto do gatilho. Vira `aria-label`/rótulo `sr-only` quando `triggerIcon` é passado. */
   triggerLabel: string;
@@ -47,6 +48,11 @@ export function ConfirmAction({
   children?: ReactNode;
   /** Mantém o botão de confirmação desabilitado (ex.: enquanto a decisão não foi marcada). */
   confirmDisabled?: boolean;
+  /**
+   * Gatilho próprio (ex.: botão de ícone com dica da Fila). Recebe a função que abre o diálogo;
+   * quando passado, substitui o botão padrão.
+   */
+  renderTrigger?: (open: () => void) => ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -69,18 +75,22 @@ export function ConfirmAction({
 
   return (
     <>
-      <Button
-        type="button"
-        size={triggerSize}
-        variant={triggerVariant ?? (destructive ? 'destructive' : 'default')}
-        className={triggerClassName}
-        disabled={disabled}
-        onClick={() => dialogRef.current?.showModal()}
-        aria-label={TriggerIcon ? triggerLabel : undefined}
-        title={TriggerIcon ? triggerLabel : undefined}
-      >
-        {TriggerIcon ? <TriggerIcon aria-hidden="true" /> : triggerLabel}
-      </Button>
+      {renderTrigger ? (
+        renderTrigger(() => dialogRef.current?.showModal())
+      ) : (
+        <Button
+          type="button"
+          size={triggerSize}
+          variant={triggerVariant ?? (destructive ? 'destructive' : 'default')}
+          className={triggerClassName}
+          disabled={disabled}
+          onClick={() => dialogRef.current?.showModal()}
+          aria-label={TriggerIcon ? triggerLabel : undefined}
+          title={TriggerIcon ? triggerLabel : undefined}
+        >
+          {TriggerIcon ? <TriggerIcon aria-hidden="true" /> : triggerLabel}
+        </Button>
+      )}
       <dialog
         ref={dialogRef}
         aria-labelledby={titleId}

@@ -48,9 +48,8 @@ function metricsFor(resource: Resource, response: SummaryResponse) {
     return [
       { label: 'Latencia do banco', metric: data.databaseLatency },
       { label: 'Latencia do Redis', metric: data.redisLatency },
-      { label: 'Trabalhos de IA (30 dias)', metric: data.aiJobs },
-      { label: 'Trabalhos com erro', metric: data.aiFailures },
-      { label: 'Trabalhos que viraram tarefa manual', metric: data.aiDlq },
+      { label: 'Chamadas de IA (30 dias)', metric: data.aiJobs },
+      { label: 'Chamadas com falha', metric: data.aiFailures },
     ];
   }
   const data = (response as ControlCenterFinanceResponse).data;
@@ -264,9 +263,8 @@ function SystemSections({ data }: { data: ControlCenterSystemResponse['data'] })
         metrics={[
           { label: 'Latência do banco', metric: data.databaseLatency },
           { label: 'Latência do Redis', metric: data.redisLatency },
-          { label: 'Trabalhos de IA (30 dias)', metric: data.aiJobs },
-          { label: 'Trabalhos com erro', metric: data.aiFailures },
-          { label: 'Trabalhos que viraram tarefa manual', metric: data.aiDlq },
+          { label: 'Chamadas de IA (30 dias)', metric: data.aiJobs },
+          { label: 'Chamadas com falha', metric: data.aiFailures },
         ]}
       />
 
@@ -286,7 +284,7 @@ function SystemSections({ data }: { data: ControlCenterSystemResponse['data'] })
 
       <PercentileBlock
         title="Tempo do modelo de IA"
-        description="Só a chamada de IA, sem fila nem WhatsApp. Sai da latência já registrada em cada trabalho — não depende de OpenTelemetry."
+        description="Só a chamada de IA, sem fila nem WhatsApp. Sai da latência já registrada em cada chamada de modelo — não depende de OpenTelemetry."
         percentiles={data.aiLatency}
       />
       <AiLatencyTable rows={data.aiLatencyByModel} />
@@ -298,21 +296,6 @@ function SystemSections({ data }: { data: ControlCenterSystemResponse['data'] })
           unit="ms"
         />
       </div>
-
-      <h2 className="mt-10 text-h2 font-bold">Uso da base de conhecimento</h2>
-      <p className="mt-1 max-w-3xl text-label text-muted-foreground">
-        Quanto o AI Coach recorre ao material curado para responder. Taxa baixa indica corpus
-        pequeno ou fora do assunto que os alunos perguntam.
-      </p>
-      <MetricGrid
-        label="Uso da base de conhecimento"
-        className="sm:grid-cols-3"
-        metrics={[
-          { label: 'Consultas em 30 dias', metric: data.ragQueries },
-          { label: 'Consultas que acharam material', metric: data.ragUsefulRetrievalRate },
-          { label: 'Trechos indexados', metric: data.ragCorpusChunks },
-        ]}
-      />
 
       <PendingCapabilities items={data.pendingCapabilities} />
     </>

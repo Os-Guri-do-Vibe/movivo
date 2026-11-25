@@ -4,35 +4,43 @@ import { describe, expect, it } from 'vitest';
 import { ProgressBar } from './progress-bar';
 
 describe('ProgressBar', () => {
-  it('não repete o rótulo numérico na primeira etapa', () => {
-    render(<ProgressBar currentStep={1} />);
-    expect(screen.queryByText('Etapa 1 de 3')).not.toBeInTheDocument();
+  it('mostra a etapa atual de 9 e o nome dela', () => {
+    render(<ProgressBar currentStep={3} completedSteps={[1, 2]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Você, passo atual 1 de 3',
+      'Etapa 3 de 9: Treino',
     );
+    expect(screen.getByText('Etapa 3 de 9 · Treino')).toBeInTheDocument();
   });
 
-  it('mostra a etapa e o rótulo corretos', () => {
-    render(<ProgressBar currentStep={2} step2Section={2} />);
-    expect(screen.getByText('Parte 3 de 5')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
+  it('marca concluídas as etapas salvas e a atual como atual', () => {
+    render(<ProgressBar currentStep={4} completedSteps={[1, 2, 3]} />);
+    expect(screen.getByLabelText('Etapa 2: Objetivo, concluída')).toBeInTheDocument();
+    expect(screen.getByLabelText('Etapa 4: Semana, atual')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByLabelText('Etapa 6: Dores')).toBeInTheDocument();
+  });
+
+  it('etapa salva mas revisitada aparece como atual, não como concluída', () => {
+    render(<ProgressBar currentStep={2} completedSteps={[1, 2, 3]} />);
+    expect(screen.getByLabelText('Etapa 2: Objetivo, atual')).toBeInTheDocument();
+  });
+
+  it('na anamnese complementar o cadastro não conta: são 8 etapas', () => {
+    render(<ProgressBar currentStep={2} completedSteps={[]} firstStep={2} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Parte 3 de 5, etapa 2 de 3',
+      'Etapa 1 de 8: Objetivo',
     );
-    expect(screen.getByLabelText('Etapa 1: Você. Concluída')).toBeInTheDocument();
-    expect(screen.getByLabelText('Etapa 2: Sua rotina. Atual')).toHaveAttribute(
-      'aria-current',
-      'step',
-    );
-    expect(screen.getByLabelText('Etapa 3: Saúde. Próxima')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Etapa 1:/)).not.toBeInTheDocument();
   });
 
-  it('liga os três checkpoints ao chegar à etapa 3 sem marcá-la como concluída', () => {
-    render(<ProgressBar currentStep={3} />);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
-    expect(screen.getByLabelText('Etapa 2: Sua rotina. Concluída')).toBeInTheDocument();
-    expect(screen.getByLabelText('Etapa 3: Saúde. Atual')).toHaveTextContent('3SaúdeAtual');
+  it('a última etapa é a de segurança (PAR-Q)', () => {
+    render(<ProgressBar currentStep={9} completedSteps={[1, 2, 3, 4, 5, 6, 7, 8]} />);
+    expect(screen.getByText('Etapa 9 de 9 · Segurança')).toBeInTheDocument();
+  });
+
+  it('mostra o contexto da etapa quando há', () => {
+    render(<ProgressBar currentStep={9} completedSteps={[]} context="Pergunta 2 de 9" />);
+    expect(screen.getByText('Pergunta 2 de 9')).toBeInTheDocument();
   });
 });

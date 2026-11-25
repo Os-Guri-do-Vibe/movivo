@@ -1,13 +1,13 @@
 <!-- MOVIVO_LEGAL_METADATA_START
 publication_status: BETA_VISIBLE
-document_version: privacy-2026-09-v1
-drafted_on: 2026-09-29
+document_version: privacy-2026-10-v2
+drafted_on: 2026-10-28
 effective_on: PENDING
 MOVIVO_LEGAL_METADATA_END -->
 
 # Política de Privacidade da MOVIVO
 
-**Versão:** privacy-2026-09-v1
+**Versão:** privacy-2026-10-v2
 
 **Vigência:** [DATA DE VIGÊNCIA A CONFIRMAR]
 
@@ -15,13 +15,13 @@ MOVIVO_LEGAL_METADATA_END -->
 
 A controladora dos dados pessoais descritos nesta Política é **[RAZÃO SOCIAL COMPLETA]**, CNPJ **[CNPJ]**, com sede em **[ENDEREÇO COMPLETO, CEP, CIDADE E UF]** (“MOVIVO”). O Encarregado de Dados é **[NOME OU IDENTIFICAÇÃO PÚBLICA DO ENCARREGADO]**, disponível em **[E-MAIL DO ENCARREGADO]**. O atendimento geral está em **[E-MAIL DE ATENDIMENTO]** e **[CANAL OFICIAL DE WHATSAPP]**.
 
-Esta Política explica o uso de dados no site, na anamnese, no PAR-Q, no checkout, no WhatsApp, nos protocolos, nos check-ins e nos canais de suporte. O profissional de Educação Física responsável pelo Serviço é **[NOME DO RT]**, CREF nº **[NÚMERO E REGIONAL]**; a MOVIVO possui registro CREF-PJ nº **[NÚMERO E REGIONAL]**. Para entender a contratação, consulte também os [Termos de Uso](/termos).
+Esta Política explica o uso de dados no site, na anamnese, no PAR-Q, no checkout, no WhatsApp, nos planos, nos registros de treino e de alimentação, nos check-ins e nos canais de suporte. O profissional de Educação Física responsável técnico pelo Serviço é **[NOME DO RT]**, CREF nº **[NÚMERO E REGIONAL]**; a MOVIVO possui registro CREF-PJ nº **[NÚMERO E REGIONAL]**. Profissionais parceiros de nutrição (CRN) e de saúde (CRM) atuam nos casos de suas áreas: **[NOMES E REGISTROS DOS PARCEIROS]**. Para entender a contratação, consulte também os [Termos de Uso](/termos).
 
 ## 2. Quais dados coletamos e de onde vêm
 
-Coletamos dados que você informa: nome, idade ou confirmação de maioridade, telefone, e-mail, preferências e objetivos de treino, informações sobre sua rotina e disponibilidade, respostas da anamnese e do PAR-Q, relatos de dores, lesões, cirurgias, condições de saúde, medicamentos e orientações profissionais que você decidir fornecer, mensagens e áudios enviados ao canal da MOVIVO, registros de treinos e check-ins, pedidos de suporte e solicitações sobre sua assinatura. Dados referentes à saúde ou capazes de revelar seu estado de saúde são **dados pessoais sensíveis**.
+Coletamos dados que você informa: nome, idade ou confirmação de maioridade, telefone, e-mail, preferências e objetivos de treino, informações sobre sua rotina e disponibilidade, respostas da anamnese e do PAR-Q, relatos de dores, lesões, cirurgias, condições de saúde, medicamentos e orientações profissionais que você decidir fornecer, restrições e preferências alimentares, mensagens, áudios e imagens enviados ao canal da MOVIVO (como prints de relógio ou aplicativo e fotos de refeições), registros de treinos, refeições e medidas, fotos corporais (opcionais, com consentimento próprio) e check-ins, pedidos de suporte e solicitações sobre sua assinatura. Dados referentes à saúde ou capazes de revelar seu estado de saúde são **dados pessoais sensíveis**.
 
-Coletamos dados gerados pelo uso do Serviço: protocolo entregue e versões, respostas do Coach, eventos de acesso e interação, status da assinatura, histórico de consentimentos e de suas revogações, registros de segurança, IP, identificadores de sessão, navegador e dispositivo. O site utiliza identificadores técnicos e, se ativada, ferramenta de análise de uso, conforme a seção 8. Os dados de pagamento incluem identificação do pagador, CPF, endereço e informação da transação necessários ao checkout e à emissão fiscal. Dados completos de cartão são transmitidos ao prestador de pagamento no fluxo de compra e não são armazenados pela MOVIVO; a MOVIVO recebe confirmação, referência e status da operação.
+Coletamos dados gerados pelo uso do Serviço: planos entregues e versões, decisões automáticas e seus motivos, respostas da conversa, eventos de acesso e interação, status da assinatura, histórico de consentimentos e de suas revogações, registros de segurança, IP, identificadores de sessão, navegador e dispositivo. O site utiliza identificadores técnicos e, se ativada, ferramenta de análise de uso, conforme a seção 8. Os dados de pagamento incluem identificação do pagador, CPF, endereço e informação da transação necessários ao checkout e à emissão fiscal. Dados completos de cartão são transmitidos ao prestador de pagamento no fluxo de compra e não são armazenados pela MOVIVO; a MOVIVO recebe confirmação, referência e status da operação.
 
 Também podemos receber dados de fornecedores necessários à execução do Serviço: eventos de entrega de mensagens do WhatsApp, confirmações e recusas de pagamento, pedidos de estorno e alertas de segurança. Não compramos bases de dados de saúde para compor seu perfil.
 
@@ -31,8 +31,8 @@ O Serviço é oferecido apenas a maiores de 18 anos. Se identificarmos dados de 
 
 | Finalidade | Dados envolvidos | Base legal principal |
 | --- | --- | --- |
-| Cadastrar, confirmar maioridade, disponibilizar site, WhatsApp, protocolo, check-ins, suporte e administrar a assinatura | Identificação, contato, preferências não sensíveis, registros de uso e contrato | Execução de contrato ou procedimentos preliminares, art. 7º, V, da LGPD |
-| Elaborar, adaptar e acompanhar o treino individualizado; avaliar as respostas de saúde do PAR-Q; encaminhar casos ao profissional responsável; analisar relatos de saúde enviados pelo WhatsApp ou em áudio | Dados de saúde e inferências sobre saúde | **Consentimento específico e destacado**, art. 11, I, da LGPD, registrado separadamente |
+| Cadastrar, confirmar maioridade, disponibilizar site, WhatsApp, plano, check-ins, suporte e administrar a assinatura | Identificação, contato, preferências não sensíveis, registros de uso e contrato | Execução de contrato ou procedimentos preliminares, art. 7º, V, da LGPD |
+| Elaborar, adaptar e acompanhar o plano de treino e de alimentação; avaliar as respostas de saúde do PAR-Q; encaminhar casos ao profissional responsável; analisar relatos de saúde enviados pelo WhatsApp ou em áudio | Dados de saúde e inferências sobre saúde | **Consentimento específico e destacado**, art. 11, I, da LGPD, registrado separadamente |
 | Cobrar, processar pagamento, emitir documentos fiscais, prevenir fraude e cumprir obrigações contábeis e tributárias | Identificação, CPF, endereço, dados da transação | Execução do contrato, obrigação legal ou regulatória e, quando cabível, prevenção à fraude nos termos da LGPD |
 | Responder solicitações de direitos, preservar prova de aceite, investigar incidentes, prevenir abuso e defender direitos | Dados estritamente necessários, logs e registros de consentimento | Obrigação legal, legítimo interesse quando cabível e exercício regular de direitos, conforme a natureza do dado |
 | Enviar novidades, conteúdo e ofertas por WhatsApp ou e-mail | Nome, contato e preferência de comunicação | Consentimento opcional, independente e revogável, art. 7º, I, da LGPD |
@@ -42,22 +42,22 @@ Não condicionamos o Serviço ao recebimento de publicidade. O aceite dos Termos
 
 ## 4. Inteligência artificial e decisões sobre o treino
 
-A MOVIVO usa sistemas automatizados como ferramenta para aplicar a metodologia e apoiar a atuação do Profissional de Educação Física registrado no CREF. O profissional define e supervisiona os limites de uso. Informações fornecidas na anamnese, nos check-ins e em conversas podem ser processadas por sistemas de IA estritamente para responder ao usuário, produzir um rascunho de protocolo, adaptar orientações dentro do escopo autorizado e identificar a necessidade de análise humana. Somente dados necessários à tarefa devem ser enviados ao fornecedor habilitado.
+A MOVIVO usa sistemas automatizados como ferramenta para aplicar a metodologia escrita pelos profissionais registrados (CREF, CRN e CRM). Esses profissionais publicam regras versionadas que definem o que a IA pode ajustar sozinha (por exemplo, trocar um exercício, reorganizar a semana ou ajustar porções dentro de limites) e o que sempre exige uma pessoa. Informações fornecidas na anamnese, nos check-ins, nos registros e em conversas, inclusive imagens, podem ser processadas por sistemas de IA estritamente para responder ao usuário, elaborar e ajustar o plano dentro do escopo autorizado e identificar a necessidade de análise humana. Somente dados necessários à tarefa devem ser enviados ao fornecedor habilitado.
 
-Respostas de risco no PAR-Q bloqueiam a geração automática do protocolo até a revisão exigida pelo fluxo de segurança. Você pode pedir esclarecimentos e revisão humana de orientações e de decisões tomadas unicamente por meios automatizados que afetem seus interesses, nos termos do art. 20 da LGPD. O uso de IA não elimina a responsabilidade da MOVIVO ou do profissional responsável.
+Respostas de risco no PAR-Q, dor relatada e outros sinais de segurança bloqueiam a decisão automática até a revisão exigida pelo fluxo de segurança. Cada decisão automática fica registrada com a regra aplicada e o motivo. Você pode pedir esclarecimentos e revisão humana de orientações e de decisões tomadas unicamente por meios automatizados que afetem seus interesses, nos termos do art. 20 da LGPD. O uso de IA não elimina a responsabilidade da MOVIVO ou dos profissionais responsáveis.
 
 O nome do fornecedor de IA efetivamente habilitado, a localização do processamento, os suboperadores e as salvaguardas de transferência serão informados em **[ANEXO OU PÁGINA PÚBLICA DE FORNECEDORES ATIVOS]** antes de dados de saúde serem enviados. Nenhum fornecedor deve receber dados de saúde enquanto não cumprir as exigências contratuais, de segurança e de transferência internacional descritas na seção 7.
 
 ## 5. Com quem compartilhamos
 
-O acesso interno segue a necessidade da função: profissional de Educação Física responsável e pessoas autorizadas de suporte, segurança e operação. Prestadores externos podem tratar dados conforme contrato, instruções da MOVIVO e limites legais:
+O acesso interno segue a necessidade da função: profissionais responsáveis de cada área e pessoas autorizadas de suporte, segurança e operação. Prestadores externos podem tratar dados conforme contrato, instruções da MOVIVO e limites legais:
 
 | Categoria | Finalidade | Exemplos a confirmar na operação |
 | --- | --- | --- |
 | Infraestrutura e segurança | Hospedagem, banco de dados, armazenamento, logs e monitoramento | **[HOSPEDAGEM E REGIÃO ATIVAS]**, **[MONITORAMENTO ATIVO]** |
 | Mensageria | Receber e enviar mensagens pelo WhatsApp | Meta/WhatsApp e EvolutionAPI **[CONFIRMAR FORNECEDORES ATIVOS NA OPERAÇÃO]** |
 | Pagamentos | Cobrança, antifraude, estorno e conciliação | **[PRESTADOR ATIVO; confirmar Asaas em produção]** |
-| IA e transcrição de áudio | Apoiar conversas, protocolo e, quando houver áudio, transcrição | **[FORNECEDORES E ENDPOINTS EFETIVAMENTE APROVADOS]** |
+| IA e transcrição de áudio | Apoiar conversas, plano e, quando houver áudio ou imagem, transcrição e leitura | **[FORNECEDORES E ENDPOINTS EFETIVAMENTE APROVADOS]** |
 | Análise de uso | Entender navegação e funcionamento do produto, sem eventos de saúde | **[CONFIRMAR SE POSTHOG ESTÁ ATIVO E REGIÃO]** |
 
 Podemos compartilhar dados com autoridades quando houver obrigação legal, ordem válida ou necessidade de exercer direitos, observando os limites da solicitação. Não vendemos dados pessoais. Prestadores podem ter seus próprios deveres legais; quando decidirem autonomamente sobre dados recebidos, serão responsáveis por seus próprios usos, conforme suas políticas.
@@ -68,9 +68,10 @@ Guardamos dados apenas pelo período necessário a cada finalidade, com acesso r
 
 | Categoria | Critério de retenção |
 | --- | --- |
-| Dados ativos de cadastro, anamnese, saúde, protocolo e conversa | Enquanto necessários à prestação do Serviço e houver base legal válida. Após o encerramento ou revogação, cessam os novos usos ligados ao consentimento e eliminam-se ou anonimizam-se dados sem outra justificativa legal. |
-| Registros pertinentes a reclamações sobre o Serviço, versões de protocolo, decisões do profissional e prova de consentimento | Conservação limitada ao necessário para defesa em reclamações e exercício regular de direitos; a pretensão por fato do serviço tem prazo de 5 anos no art. 27 do CDC, contado do conhecimento do dano e da autoria. O prazo não é uma autorização para guardar indiscriminadamente toda conversa ou todo dado de saúde. |
+| Dados ativos de cadastro, anamnese, saúde, plano, registros e conversa | Enquanto necessários à prestação do Serviço e houver base legal válida. Após o encerramento ou revogação, cessam os novos usos ligados ao consentimento e eliminam-se ou anonimizam-se dados sem outra justificativa legal. |
+| Registros pertinentes a reclamações sobre o Serviço, versões de plano, decisões dos profissionais e das regras automáticas e prova de consentimento | Conservação limitada ao necessário para defesa em reclamações e exercício regular de direitos; a pretensão por fato do serviço tem prazo de 5 anos no art. 27 do CDC, contado do conhecimento do dano e da autoria. O prazo não é uma autorização para guardar indiscriminadamente toda conversa ou todo dado de saúde. |
 | Dados de cobrança e documentos fiscais | Pelo prazo exigido pela legislação tributária, contábil e de defesa de direitos aplicável ao documento. |
+| Registros do serviço anterior (protocolos de treino assinados, PAR-Q, check-ins e histórico de execução) | Mantidos em arquivo de acesso restrito e somente leitura, apenas pelo prazo de defesa de direitos (até 5 anos), sem uso para novos tratamentos. |
 | Sessões e logs técnicos | Pelo prazo operacional mínimo necessário, observado o Marco Civil da Internet quando houver obrigação de guarda de registros de acesso a aplicações e eventual ordem de preservação. |
 | Dados de marketing | Até revogação ou encerramento da finalidade, ressalvada prova mínima da preferência para evitar reenvio indevido. |
 
@@ -92,7 +93,7 @@ Cookies e tecnologias não essenciais devem seguir uma escolha clara antes de se
 
 Pelo canal **[E-MAIL DO ENCARREGADO]**, você pode solicitar confirmação de uso de dados, acesso, correção, anonimização, bloqueio ou eliminação de dados desnecessários ou usados em desconformidade, portabilidade quando regulamentada e aplicável, informação sobre compartilhamento e consequências da recusa de consentimento, eliminação de dados usados com consentimento, revogação e oposição a uso irregular, conforme o art. 18 da LGPD. Pode também pedir revisão de decisão automatizada nos termos do art. 20. Para proteger seus dados, poderemos confirmar sua identidade por método proporcional e seguro antes de responder.
 
-O consentimento para dados de saúde pode ser revogado pelo canal acima ou no WhatsApp oficial enviando exatamente **“REVOGAR CONSENTIMENTO DE SAÚDE”**. A revogação interrompe novos usos baseados nesse consentimento e a geração de novos treinos individualizados, sem afetar a licitude dos atos anteriores nem a conservação legalmente justificada. O consentimento de marketing pode ser revogado independentemente, pelo canal acima ou pelo mecanismo de descadastro da própria mensagem. Solicitações de eliminação serão analisadas à luz das hipóteses de conservação legal; explicaremos quando não pudermos eliminar algum dado.
+O consentimento para dados de saúde pode ser revogado pelo canal acima ou no WhatsApp oficial enviando exatamente **“REVOGAR CONSENTIMENTO DE SAÚDE”**. A revogação interrompe novos usos baseados nesse consentimento e novos ajustes do plano individualizado, sem afetar a licitude dos atos anteriores nem a conservação legalmente justificada. O consentimento de marketing pode ser revogado independentemente, pelo canal acima ou pelo mecanismo de descadastro da própria mensagem. Solicitações de eliminação serão analisadas à luz das hipóteses de conservação legal; explicaremos quando não pudermos eliminar algum dado.
 
 Você pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD) e aos órgãos de defesa do consumidor. A MOVIVO responderá aos pedidos no prazo legal aplicável e informará eventual necessidade de providências adicionais. O exercício de direitos de dados não está condicionado à manutenção de assinatura paga.
 
